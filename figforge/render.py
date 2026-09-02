@@ -111,6 +111,11 @@ def _draw_panel(ax, p, arrays):
             zorder=t.get("zorder", 10),
         )
         art.set_gid("t_" + t["id"])
+        # A label dragged past the axes edge should still draw in full, box
+        # and all, rather than being sliced off at the spine.
+        art.set_clip_on(False)
+        if art.get_bbox_patch() is not None:
+            art.get_bbox_patch().set_clip_on(False)
 
     title = p.get("title", {})
     if title.get("text"):

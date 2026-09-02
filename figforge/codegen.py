@@ -141,8 +141,11 @@ def _panel(p, i):
         if t.get("bbox"):
             kw.append("bbox=" + _dict_literal(t["bbox"]))
         kw.append(f"zorder={t.get('zorder', 10)}")
-        L.append(f"ax.text({', '.join(args)},")
+        kw.append("clip_on=False")
+        L.append(f"_t = ax.text({', '.join(args)},")
         L.append(f"        {', '.join(kw)})")
+        if t.get("bbox"):
+            L.append("_t.get_bbox_patch().set_clip_on(False)")
 
     title = p.get("title", {})
     if title.get("text"):
