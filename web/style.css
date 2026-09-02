@@ -151,6 +151,81 @@ main {
   border-top: 1px solid var(--line-soft);
   background: var(--surface);
 }
+.hint b { font-weight: 600; color: var(--ink); }
+
+/* --------------------------------------------------- peer group bar */
+.peerbar {
+  flex: none;
+  padding: 8px 14px;
+  background: var(--surface);
+  border-top: 1px solid var(--line);
+}
+
+.peerrow {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 2px 0;
+}
+
+.peerlabel {
+  flex: none;
+  width: 54px;
+  padding-top: 4px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-soft);
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  flex: 1;
+  min-width: 0;
+}
+
+.chips .muted { font-size: 12px; color: var(--ink-soft); padding: 3px 0; }
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  padding: 3px 9px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--ink);
+  cursor: pointer;
+  max-width: 100%;
+}
+.chip:hover { background: #f0f1f3; border-color: #c6cad0; }
+.chip.on {
+  background: rgba(31, 111, 235, 0.1);
+  border-color: rgba(31, 111, 235, 0.45);
+  color: var(--sel);
+  font-weight: 550;
+}
+.chip .n {
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  background: var(--line-soft);
+  color: var(--ink-soft);
+  border-radius: 999px;
+  padding: 0 5px;
+}
+.chip.on .n { background: rgba(31, 111, 235, 0.18); color: var(--sel); }
+.chip.small {
+  font-size: 11.5px;
+  padding: 2px 4px 2px 8px;
+  max-width: 190px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.chip .x { color: var(--ink-soft); font-size: 13px; padding: 0 3px; }
+.chip.small:hover .x { color: var(--danger); }
 
 /* ------------------------------------------------- draggable svg groups */
 .canvas svg g[id^="t_"] { cursor: grab; }
@@ -232,6 +307,16 @@ input:focus, textarea:focus, select:focus {
 
 .row { display: flex; gap: 8px; }
 .row .field { flex: 1; min-width: 0; }
+
+.sizewrap { display: flex; gap: 4px; }
+.sizewrap input { text-align: center; }
+.sizewrap button {
+  flex: none;
+  width: 30px;
+  padding: 0;
+  font-size: 12px;
+  line-height: 1;
+}
 
 .colorwrap { display: flex; gap: 6px; }
 .colorwrap input[type=color] {

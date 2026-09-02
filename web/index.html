@@ -32,9 +32,22 @@
     <div class="canvas-wrap" id="canvas-wrap">
       <div class="canvas" id="canvas"></div>
     </div>
+    <div class="peerbar" id="peerbar" hidden>
+      <div class="peerrow">
+        <span class="peerlabel">Similar</span>
+        <div class="chips" id="peer-groups"></div>
+      </div>
+      <div class="peerrow" id="peer-selected-row" hidden>
+        <span class="peerlabel">Selected</span>
+        <div class="chips" id="peer-selected"></div>
+        <button class="link" id="btn-clearsel">clear</button>
+      </div>
+    </div>
+
     <div class="hint">
-      Click a label to select. Drag to move. Arrow keys nudge (Shift = ×10).
-      Esc deselects.
+      Click a label to select. <b>Shift-click</b> to add more, or pick a group
+      above to grab every matching label at once. Drag to move (the whole
+      selection moves together). Arrow keys nudge, Shift = ×10. Esc deselects.
     </div>
   </section>
 
@@ -46,16 +59,20 @@
       <div id="insp-body" hidden>
         <div class="elid"><span id="insp-kind">text</span><code id="insp-id"></code></div>
 
-        <label class="field">
+        <label class="field" id="text-field">
           <span>Text</span>
           <textarea id="f-text" rows="3" spellcheck="false"></textarea>
         </label>
-        <p class="note">matplotlib mathtext: <code>$\beta_1$</code>, <code>$Q_L$</code>. Newlines allowed.</p>
+        <p class="note" id="text-note">matplotlib mathtext: <code>$\beta_1$</code>, <code>$Q_L$</code>. Newlines allowed.</p>
 
         <div class="row">
           <label class="field">
             <span>Size (pt)</span>
-            <input type="number" id="f-size" min="4" max="48" step="0.5">
+            <span class="sizewrap">
+              <button id="f-size-down" title="Smaller">A&minus;</button>
+              <input type="number" id="f-size" min="4" max="72" step="0.5">
+              <button id="f-size-up" title="Bigger">A+</button>
+            </span>
           </label>
           <label class="field">
             <span>Color</span>
@@ -66,7 +83,7 @@
           </label>
         </div>
 
-        <div id="pos-group">
+        <div id="xy-group">
           <div class="row">
             <label class="field">
               <span>x <em id="f-xunit"></em></span>
@@ -77,6 +94,9 @@
               <input type="number" id="f-y" step="any">
             </label>
           </div>
+        </div>
+
+        <div id="align-group">
           <div class="row">
             <label class="field">
               <span>Align h</span>

@@ -1,19 +1,22 @@
 /* FigForge editor — click, retype, resize, recolor and drag figure labels.
  *
- * The SPEC is the source of truth. Every interaction here does the same thing:
- * mutate the SPEC, POST it, and swap in the SVG matplotlib renders back. Drags
- * are applied locally first (an SVG transform on the gid group) so they feel
- * instant, then confirmed by the real render.
+ * The SPEC is the source of truth. Every interaction does the same thing:
+ * mutate the SPEC, POST it, and swap in the SVG matplotlib renders back.
+ *
+ * A matplotlib re-render takes ~0.8 s, far too slow to sit in the interaction
+ * loop, so it isn't in it: edits are faked in the SVG immediately and the real
+ * render replaces the fake when it lands. See reconcilePreviews().
  *
  * No AI, no external calls. Everything goes to 127.0.0.1.
  */
 
 const FIGURE = 'qcircle';
 
-let spec = null;
+let spec = null;          // live, authoritative
+let renderedSpec = null;  // what the SVG currently on screen was rendered from
 let geometry = null;
 let svgEl = null;
-let selectedId = null;
+let selection = [];       // element ids; selection[0] is the primary
 let history = [];
 let zoom = 100;
 
@@ -32,7 +35,7 @@ const clone = (o) => JSON.parse(JSON.stringify(o));
 
 function pushHistory() {
   history.push(clone(spec));
-  if (history.length > 50) history.shift();
+  if (history.length > 60) history.shift();
   $('btn-undo').disabled = false;
 }
 
@@ -77,24 +80,42 @@ function panelById(pid) {
 }
 
 /** Map an SVG element id (minus the "t_" prefix) to its place in the SPEC. */
-function resolve(id) {
-  if (!id) return null;
+function resolve(id, source = spec) {
+  if (!id || !source) return null;
   if (id === 'suptitle') {
-    return { kind: 'suptitle', obj: spec.suptitle, draggable: false, panel: null };
+    return { id, kind: 'suptitle', obj: source.suptitle, draggable: false, panel: null };
   }
   const m = id.match(/^(.+)__(title|xlabel|ylabel)$/);
   if (m) {
-    const p = panelById(m[1]);
+    const p = source.panels.find((q) => q.id === m[1]);
     if (!p || !p[m[2]]) return null;
-    return { kind: m[2], obj: p[m[2]], draggable: false, panel: p.id };
+    return { id, kind: m[2], obj: p[m[2]], draggable: false, panel: p.id };
   }
-  for (const p of spec.panels) {
+  for (const p of source.panels) {
     for (const t of p.texts || []) {
-      if (t.id === id) return { kind: 'text', obj: t, draggable: true, panel: p.id };
+      if (t.id === id) return { id, kind: 'text', obj: t, draggable: true, panel: p.id };
     }
   }
   return null;
 }
+
+/** Every editable text in the figure, in drawing order. */
+function allElements(source = spec) {
+  const out = [];
+  if (source.suptitle?.text) out.push(resolve('suptitle', source));
+  for (const p of source.panels) {
+    for (const k of ['title', 'xlabel', 'ylabel']) {
+      if (p[k]?.text) out.push(resolve(`${p.id}__${k}`, source));
+    }
+    for (const t of p.texts || []) out.push(resolve(t.id, source));
+  }
+  return out.filter(Boolean);
+}
+
+const KIND_LABEL = {
+  suptitle: 'figure title', title: 'panel title',
+  xlabel: 'x-axis label', ylabel: 'y-axis label', text: 'label',
+};
 
 /* ------------------------------------------- coordinate transformations */
 
@@ -157,13 +178,21 @@ function applySvg(svgText) {
   for (const g of svgEl.querySelectorAll('g[id^="t_"]')) {
     const r = resolve(g.id.slice(2));
     if (!r) continue;
-    // Non-draggable text (titles, axis labels) gets a different cursor.
     if (!r.draggable) g.classList.add('ff-static');
     addHitTarget(g);
   }
-  // Re-apply anything the SPEC has moved on to since this SVG was rendered.
   reconcilePreviews();
-  if (selectedId) drawOutline(selectedId);
+  drawOutlines();
+}
+
+function applyZoom() {
+  if (!svgEl || !geometry) return;
+  svgEl.style.width = (geometry.width * zoom / 100) + 'px';
+  svgEl.style.height = (geometry.height * zoom / 100) + 'px';
+}
+
+function groupFor(id) {
+  return svgEl ? svgEl.querySelector(`g[id="t_${CSS.escape(id)}"]`) : null;
 }
 
 /* matplotlib draws glyphs as paths, so a label without a background box is
@@ -186,92 +215,108 @@ function addHitTarget(g) {
   g.insertBefore(rect, g.firstChild);
 }
 
-function applyZoom() {
-  if (!svgEl || !geometry) return;
-  svgEl.style.width = (geometry.width * zoom / 100) + 'px';
-  svgEl.style.height = (geometry.height * zoom / 100) + 'px';
-}
-
-function groupFor(id) {
-  return svgEl ? svgEl.querySelector(`g[id="t_${CSS.escape(id)}"]`) : null;
-}
-
-function clearOutline() {
+function clearOutlines() {
   svgEl?.querySelectorAll('.ff-outline').forEach((n) => n.remove());
 }
 
+/** Selection boxes, inserted as siblings of each target to share its space. */
+function drawOutlines() {
+  clearOutlines();
+  if (!svgEl) return;
+  selection.forEach((id, i) => {
+    const g = groupFor(id);
+    if (!g) return;
+    let bb;
+    try { bb = g.getBBox(); } catch { return; }
+    const pad = 3;
+    const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    rect.setAttribute('class', 'ff-outline');
+    rect.setAttribute('x', bb.x - pad);
+    rect.setAttribute('y', bb.y - pad);
+    rect.setAttribute('width', bb.width + 2 * pad);
+    rect.setAttribute('height', bb.height + 2 * pad);
+    rect.setAttribute('fill', 'none');
+    rect.setAttribute('stroke', '#1f6feb');
+    rect.setAttribute('stroke-width', i === 0 ? '1.2' : '1');
+    rect.setAttribute('stroke-dasharray', i === 0 ? '' : '4 3');
+    rect.setAttribute('pointer-events', 'none');
+    const tf = g.getAttribute('transform');
+    if (tf) rect.setAttribute('transform', tf);
+    g.parentNode.insertBefore(rect, g.nextSibling);
+  });
+}
+
 /* ------------------------------------------------- optimistic previews
- *
- * A matplotlib re-render takes ~1.5 s, so waiting for it would make every
- * edit feel broken. Instead the SPEC is updated immediately and the change
- * is faked in the SVG until the real render lands.
  *
  * These previews are exact, not approximations. matplotlib emits each line of
  * text as <g style="fill: COLOR" transform="translate(ax ay) scale(s -s)">
  * with s = fontsize/100, and glyph advances, line spacing and the box's
  * padding are all linear in the font size. So scaling the whole group about
- * the text's anchor point is precisely what matplotlib itself would draw.
+ * the text's anchor is precisely what matplotlib itself would draw.
  *
- * Everything is derived by diffing the live SPEC against `renderedSpec` (what
- * the SVG on screen actually shows), so it is stateless and self-correcting:
- * if a render lands while further edits are queued, the leftover difference
- * is simply re-applied on top.
+ * Everything is derived by diffing the live SPEC against `renderedSpec`, so
+ * it is stateless and self-correcting: if a render lands while further edits
+ * are queued, the leftover difference is simply re-applied on top.
  */
 
-let renderedSpec = null;
-
-function renderedTexts() {
-  const out = {};
-  if (!renderedSpec) return out;
-  for (const p of renderedSpec.panels) {
-    for (const t of p.texts || []) out[t.id] = t;
+/** The anchor a text grows from. Free labels have an exact one in the
+ *  geometry map; for titles and axis labels matplotlib decides the position
+ *  at draw time, so read it back out of the SVG the renderer produced. */
+function anchorFor(id, g) {
+  const known = geometry.texts?.[id]?.anchor;
+  if (known) return known;
+  for (const c of g.children) {
+    if (c.id && c.id.startsWith('patch')) continue;
+    const tf = c.getAttribute?.('transform');
+    const m = tf && tf.match(/translate\(\s*([-\d.eE]+)[\s,]+([-\d.eE]+)\s*\)/);
+    if (m) return [parseFloat(m[1]), parseFloat(m[2])];
   }
-  return out;
+  return null;
 }
 
 function reconcilePreviews() {
   if (!renderedSpec || !svgEl) return;
-  const was = renderedTexts();
 
-  for (const p of spec.panels) {
-    for (const t of p.texts || []) {
-      const old = was[t.id];
-      const g = groupFor(t.id);
-      if (!old || !g) continue;
+  for (const el of allElements(spec)) {
+    const old = resolve(el.id, renderedSpec);
+    const g = groupFor(el.id);
+    if (!old || !g) continue;
 
-      const anchor = geometry.texts[t.id]?.anchor;
-      if (!anchor) continue;
+    const anchor = anchorFor(el.id, g);
+    if (!anchor) continue;
 
-      // Position: how far the anchor has moved since this SVG was rendered.
-      let dx = 0, dy = 0;
-      if (old.xy[0] !== t.xy[0] || old.xy[1] !== t.xy[1]) {
-        const a = dataToSvg(p.id, old.xy[0], old.xy[1]);
-        const b = dataToSvg(p.id, t.xy[0], t.xy[1]);
-        dx = b[0] - a[0];
-        dy = b[1] - a[1];
-      }
-      // Size: scale about the anchor, which is where matplotlib grows from.
-      const k = (t.size ?? 12) / (old.size ?? 12);
+    // Position: how far the anchor has moved since this SVG was rendered.
+    let dx = 0, dy = 0;
+    if (el.draggable && old.obj.xy &&
+        (old.obj.xy[0] !== el.obj.xy[0] || old.obj.xy[1] !== el.obj.xy[1])) {
+      const a = dataToSvg(el.panel, old.obj.xy[0], old.obj.xy[1]);
+      const b = dataToSvg(el.panel, el.obj.xy[0], el.obj.xy[1]);
+      dx = b[0] - a[0];
+      dy = b[1] - a[1];
+    }
+    // Size: scale about the anchor, which is where matplotlib grows from.
+    const k = (el.obj.size ?? 12) / (old.obj.size ?? 12);
 
-      setPreviewTransform(g, anchor, dx, dy, k);
+    setPreviewTransform(g, anchor, dx, dy, k);
 
-      if ((t.color ?? '#000000') !== (old.color ?? '#000000')) {
-        setGlyphFill(g, t.color ?? '#000000');
-      }
+    if ((el.obj.color ?? '#000000') !== (old.obj.color ?? '#000000')) {
+      setGlyphFill(g, el.obj.color ?? '#000000');
     }
   }
-  if (!selectedId) return;
+
+  if (!selection.length) return;
   if (drag) {
     // Mid-drag, recomputing getBBox every frame forces a synchronous layout.
-    // The outline shape hasn't changed, so just carry the same transform.
-    const g = groupFor(selectedId);
-    const o = svgEl.querySelector('.ff-outline');
-    if (g && o) {
+    // The outline shapes haven't changed, so just carry the same transforms.
+    for (const id of selection) {
+      const g = groupFor(id);
+      const o = g?.nextElementSibling;
+      if (!o || !o.classList.contains('ff-outline')) continue;
       const tf = g.getAttribute('transform');
       if (tf) o.setAttribute('transform', tf); else o.removeAttribute('transform');
     }
   } else {
-    drawOutline(selectedId);
+    drawOutlines();
   }
 }
 
@@ -299,71 +344,78 @@ function setGlyphFill(g, color) {
   }
 }
 
-/** Selection box, inserted as a sibling of the target so it shares its space. */
-function drawOutline(id) {
-  clearOutline();
-  const g = groupFor(id);
-  if (!g) return;
-  let bb;
-  try { bb = g.getBBox(); } catch { return; }
-  const pad = 3;
-  const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-  rect.setAttribute('class', 'ff-outline');
-  rect.setAttribute('x', bb.x - pad);
-  rect.setAttribute('y', bb.y - pad);
-  rect.setAttribute('width', bb.width + 2 * pad);
-  rect.setAttribute('height', bb.height + 2 * pad);
-  rect.setAttribute('fill', 'none');
-  rect.setAttribute('stroke', '#1f6feb');
-  rect.setAttribute('stroke-width', '1');
-  rect.setAttribute('stroke-dasharray', '4 3');
-  rect.setAttribute('pointer-events', 'none');
-  const tf = g.getAttribute('transform');
-  if (tf) rect.setAttribute('transform', tf);
-  g.parentNode.insertBefore(rect, g.nextSibling);
+/* ------------------------------------------------------------ selection */
+
+function setSelection(ids) {
+  selection = [...new Set(ids)].filter((id) => resolve(id));
+  refreshInspector();
+  refreshPeerBar();
+  markList();
+  drawOutlines();
 }
 
-/* ------------------------------------------------------------ inspector */
+function toggleSelection(id) {
+  const i = selection.indexOf(id);
+  if (i === -1) setSelection([...selection, id]);
+  else setSelection(selection.filter((s) => s !== id));
+}
 
-function select(id) {
-  selectedId = id;
-  const r = resolve(id);
-  if (!r) { deselect(); return; }
+const selected = () => selection.map((id) => resolve(id)).filter(Boolean);
 
-  $('insp-empty').hidden = true;
-  $('insp-body').hidden = false;
-  $('insp-kind').textContent = r.kind === 'text' ? 'label' : r.kind;
-  $('insp-id').textContent = id;
+/** One value if every selected element agrees, otherwise undefined. */
+function common(get) {
+  const vals = selected().map(get);
+  if (!vals.length) return undefined;
+  return vals.every((v) => v === vals[0]) ? vals[0] : undefined;
+}
 
-  $('f-text').value = r.obj.text ?? '';
-  $('f-size').value = r.obj.size ?? 12;
-  const color = normHex(r.obj.color ?? '#000000');
-  $('f-color').value = color;
-  $('f-color-hex').value = color;
+function refreshInspector() {
+  const sel = selected();
+  $('insp-empty').hidden = sel.length > 0;
+  $('insp-body').hidden = sel.length === 0;
+  if (!sel.length) return;
 
-  const posGroup = $('pos-group');
-  posGroup.hidden = !r.draggable;
-  if (r.draggable) {
-    const p = panelById(r.panel);
-    $('f-x').value = r.obj.xy[0];
-    $('f-y').value = r.obj.xy[1];
+  const multi = sel.length > 1;
+  const kinds = [...new Set(sel.map((s) => s.kind))];
+  $('insp-kind').textContent = kinds.length === 1
+    ? KIND_LABEL[kinds[0]] : 'mixed';
+  $('insp-id').textContent = multi ? `${sel.length} selected` : sel[0].id;
+
+  // Retyping many labels at once is meaningless; offer it only for one.
+  $('text-field').hidden = multi;
+  $('text-note').hidden = multi;
+  if (!multi) $('f-text').value = sel[0].obj.text ?? '';
+
+  const size = common((s) => s.obj.size ?? 12);
+  $('f-size').value = size ?? '';
+  $('f-size').placeholder = size === undefined ? 'mixed' : '';
+
+  const color = common((s) => normHex(s.obj.color ?? '#000000'));
+  $('f-color').value = color ?? '#000000';
+  $('f-color-hex').value = color ?? '';
+  $('f-color-hex').placeholder = color === undefined ? 'mixed' : '';
+
+  // Coordinates only make sense for a single free label.
+  const single = !multi && sel[0].draggable;
+  $('xy-group').hidden = !single;
+  if (single) {
+    const p = panelById(sel[0].panel);
+    $('f-x').value = sel[0].obj.xy[0];
+    $('f-y').value = sel[0].obj.xy[1];
     $('f-xunit').textContent = `(${stripMath(p.xlabel?.text) || 'data'})`;
     $('f-yunit').textContent = `(${stripMath(p.ylabel?.text) || 'data'})`;
-    $('f-ha').value = r.obj.ha ?? 'left';
-    $('f-va').value = r.obj.va ?? 'baseline';
-    $('f-box').checked = !!r.obj.bbox;
   }
 
-  drawOutline(id);
-  markList();
-}
-
-function deselect() {
-  selectedId = null;
-  $('insp-empty').hidden = false;
-  $('insp-body').hidden = true;
-  clearOutline();
-  markList();
+  // Alignment and the background box apply to any set of free labels.
+  const allText = sel.every((s) => s.kind === 'text');
+  $('align-group').hidden = !allText;
+  if (allText) {
+    $('f-ha').value = common((s) => s.obj.ha ?? 'left') ?? 'left';
+    $('f-va').value = common((s) => s.obj.va ?? 'baseline') ?? 'baseline';
+    const boxed = common((s) => !!s.obj.bbox);
+    $('f-box').indeterminate = boxed === undefined;
+    $('f-box').checked = boxed === true;
+  }
 }
 
 function normHex(c) {
@@ -371,8 +423,7 @@ function normHex(c) {
   if (/^#[0-9a-f]{6}$/i.test(c)) return c.toLowerCase();
   if (c === 'black') return '#000000';
   if (c === 'white') return '#ffffff';
-  // matplotlib grey strings like "0.15"
-  const g = parseFloat(c);
+  const g = parseFloat(c);   // matplotlib grey strings like "0.15"
   if (!Number.isNaN(g) && g >= 0 && g <= 1 && /^[\d.]+$/.test(c)) {
     const v = Math.round(g * 255).toString(16).padStart(2, '0');
     return `#${v}${v}${v}`;
@@ -382,15 +433,93 @@ function normHex(c) {
 
 const stripMath = (s) => (s || '').replace(/\$/g, '').replace(/\\[a-zA-Z]+/g, '').trim();
 
-/** Edit the selected element: preview it now, persist it shortly after. */
+/** Apply an edit to every selected element, preview it, then persist. */
 function edit(fn, { immediate = true } = {}) {
-  const r = resolve(selectedId);
-  if (!r) return;
+  const sel = selected();
+  if (!sel.length) return;
   pushHistory();
-  fn(r.obj, r);
+  for (const s of sel) fn(s.obj, s);
   reconcilePreviews();
   scheduleSave(immediate ? 0 : 350);
 }
+
+/* ------------------------------------------------------- peer groups
+ *
+ * "You clicked a y-axis label — here is every other y-axis label." Grabbing a
+ * whole family at once is what makes consistent sizing across a figure
+ * tractable (spec section 6.3, house styles).
+ */
+
+function peerGroups() {
+  const sel = selected();
+  if (!sel.length) return [];
+  const primary = sel[0];
+  const all = allElements(spec);
+  const groups = [];
+  const add = (label, members) => {
+    if (members.length > 1) groups.push({ label, ids: members.map((m) => m.id) });
+  };
+
+  if (primary.kind === 'text') {
+    add(`All labels in panel (${primary.panel})`,
+        all.filter((e) => e.kind === 'text' && e.panel === primary.panel));
+    add('All labels', all.filter((e) => e.kind === 'text'));
+  } else if (primary.kind !== 'suptitle') {
+    add(`All ${KIND_LABEL[primary.kind]}s`,
+        all.filter((e) => e.kind === primary.kind));
+  }
+
+  const size = primary.obj.size ?? 12;
+  add(`Everything at ${size}pt`, all.filter((e) => (e.obj.size ?? 12) === size));
+
+  const color = normHex(primary.obj.color ?? '#000000');
+  const sameColor = all.filter((e) => normHex(e.obj.color ?? '#000000') === color);
+  if (sameColor.length < all.length) add(`Everything in ${color}`, sameColor);
+
+  return groups;
+}
+
+const sameSet = (a, b) =>
+  a.length === b.length && [...a].sort().join() === [...b].sort().join();
+
+function refreshPeerBar() {
+  const bar = $('peerbar');
+  const sel = selected();
+  bar.hidden = sel.length === 0;
+  if (!sel.length) return;
+
+  const groups = $('peer-groups');
+  groups.innerHTML = '';
+  for (const g of peerGroups()) {
+    const b = document.createElement('button');
+    b.className = 'chip' + (sameSet(g.ids, selection) ? ' on' : '');
+    b.innerHTML = `${escapeHtml(g.label)}<span class="n">${g.ids.length}</span>`;
+    b.title = 'Click to select this group · Shift-click to add it';
+    b.onclick = (evt) => setSelection(
+      evt.shiftKey ? [...selection, ...g.ids] : g.ids);
+    groups.appendChild(b);
+  }
+  if (!groups.children.length) {
+    groups.innerHTML = '<span class="muted">no similar elements</span>';
+  }
+
+  const row = $('peer-selected-row');
+  row.hidden = sel.length < 2;
+  const chips = $('peer-selected');
+  chips.innerHTML = '';
+  if (sel.length >= 2) {
+    for (const s of sel) {
+      const b = document.createElement('button');
+      b.className = 'chip small';
+      b.innerHTML = `${escapeHtml(preview(s.obj.text))}<span class="x">×</span>`;
+      b.title = `${s.id} — click to remove from the selection`;
+      b.onclick = () => toggleSelection(s.id);
+      chips.appendChild(b);
+    }
+  }
+}
+
+$('btn-clearsel').onclick = () => setSelection([]);
 
 /* --------------------------------------------------------- element list */
 
@@ -401,8 +530,10 @@ function buildList() {
     const b = document.createElement('button');
     b.dataset.eid = id;
     b.innerHTML = `<span class="tag">${tag}</span>${escapeHtml(label)}`;
-    b.title = label;
-    b.onclick = () => select(id);
+    b.title = `${label}\n${id}  (Shift-click to add to the selection)`;
+    b.onclick = (evt) => {
+      if (evt.shiftKey) toggleSelection(id); else setSelection([id]);
+    };
     list.appendChild(b);
   };
   const group = (name) => {
@@ -430,13 +561,13 @@ function preview(s) {
 }
 
 function escapeHtml(s) {
-  return s.replace(/[&<>"]/g, (c) => (
+  return String(s).replace(/[&<>"]/g, (c) => (
     { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 }
 
 function markList() {
   for (const b of $('element-list').querySelectorAll('button')) {
-    b.classList.toggle('on', b.dataset.eid === selectedId);
+    b.classList.toggle('on', selection.includes(b.dataset.eid));
   }
 }
 
@@ -446,21 +577,27 @@ let drag = null;
 
 canvas.addEventListener('pointerdown', (evt) => {
   const g = evt.target.closest('g[id^="t_"]');
-  if (!g) { deselect(); return; }
+  if (!g) { if (!evt.shiftKey) setSelection([]); return; }
   const id = g.id.slice(2);
-  select(id);
 
-  const r = resolve(id);
-  if (!r || !r.draggable) return;
+  if (evt.shiftKey) { toggleSelection(id); return; }
+  // Clicking inside an existing multi-selection keeps it, so the whole group
+  // can be dragged together.
+  if (!selection.includes(id)) setSelection([id]);
+
+  const movers = selected().filter((s) => s.draggable);
+  if (!movers.length) return;
 
   evt.preventDefault();
   drag = {
-    id, group: g, panel: r.panel,
     start: clientToSvg(evt),
-    // Where the label is *meant* to be right now, which may differ from where
-    // the current SVG draws it if a render is still in flight.
-    baseSvg: dataToSvg(r.panel, r.obj.xy[0], r.obj.xy[1]),
     moved: false,
+    // Where each label is *meant* to be right now, which may differ from where
+    // the SVG draws it if a render is still in flight.
+    items: movers.map((s) => ({
+      id: s.id, panel: s.panel, obj: s.obj,
+      baseSvg: dataToSvg(s.panel, s.obj.xy[0], s.obj.xy[1]),
+    })),
   };
   g.classList.add('ff-dragging');
   svgEl.setPointerCapture(evt.pointerId);
@@ -478,38 +615,41 @@ canvas.addEventListener('pointermove', (evt) => {
   // Move the SPEC and let the preview machinery draw it. Going through the
   // SPEC rather than nudging the SVG directly means a drag composes with any
   // edit that hasn't been rendered yet.
-  const r = resolve(drag.id);
-  const p = geometry.panels[drag.panel];
-  const [nx, ny] = svgToData(drag.panel, drag.baseSvg[0] + dx, drag.baseSvg[1] + dy);
-  r.obj.xy = [roundTo(nx, p.xlim), roundTo(ny, p.ylim)];
-  showXY(r.obj);
+  for (const it of drag.items) {
+    const p = geometry.panels[it.panel];
+    const [nx, ny] = svgToData(it.panel, it.baseSvg[0] + dx, it.baseSvg[1] + dy);
+    it.obj.xy = [roundTo(nx, p.xlim), roundTo(ny, p.ylim)];
+  }
+  showXY();
   reconcilePreviews();
 });
 
 canvas.addEventListener('pointerup', (evt) => {
   if (!drag) return;
   const moved = drag.moved;
-  drag.group.classList.remove('ff-dragging');
+  svgEl.querySelectorAll('.ff-dragging').forEach((n) => n.classList.remove('ff-dragging'));
   try { svgEl.releasePointerCapture(evt.pointerId); } catch { /* already gone */ }
   drag = null;
-  if (moved) scheduleSave(0);
+  if (moved) { drawOutlines(); scheduleSave(0); }
 });
 
-function showXY(obj) {
-  if (resolve(selectedId)?.obj === obj) {
-    $('f-x').value = obj.xy[0];
-    $('f-y').value = obj.xy[1];
+canvas.addEventListener('pointercancel', () => {
+  svgEl?.querySelectorAll('.ff-dragging').forEach((n) => n.classList.remove('ff-dragging'));
+  drag = null;
+});
+
+function showXY() {
+  const sel = selected();
+  if (sel.length === 1 && sel[0].draggable) {
+    $('f-x').value = sel[0].obj.xy[0];
+    $('f-y').value = sel[0].obj.xy[1];
   }
 }
 
-canvas.addEventListener('pointercancel', () => {
-  if (drag) { drag.group.classList.remove('ff-dragging'); drag = null; }
-});
-
-/* ------------------------------------------------------ keyboard nudge */
+/* ------------------------------------------------------ keyboard */
 
 document.addEventListener('keydown', (evt) => {
-  if (evt.key === 'Escape') { deselect(); return; }
+  if (evt.key === 'Escape') { setSelection([]); return; }
 
   if ((evt.ctrlKey || evt.metaKey) && evt.key.toLowerCase() === 'z') {
     evt.preventDefault();
@@ -518,22 +658,24 @@ document.addEventListener('keydown', (evt) => {
   }
 
   const typing = ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName);
-  if (typing || !selectedId) return;
+  if (typing || !selection.length) return;
 
   const arrows = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
   const a = arrows[evt.key];
   if (!a) return;
-  const r = resolve(selectedId);
-  if (!r || !r.draggable) return;
+  const movers = selected().filter((s) => s.draggable);
+  if (!movers.length) return;
 
   evt.preventDefault();
   const step = evt.shiftKey ? 10 : 1;           // SVG units == points
-  const p = geometry.panels[r.panel];
-  const base = dataToSvg(r.panel, r.obj.xy[0], r.obj.xy[1]);
-  const [nx, ny] = svgToData(r.panel, base[0] + a[0] * step, base[1] + a[1] * step);
   pushHistory();
-  r.obj.xy = [roundTo(nx, p.xlim), roundTo(ny, p.ylim)];
-  showXY(r.obj);
+  for (const s of movers) {
+    const p = geometry.panels[s.panel];
+    const base = dataToSvg(s.panel, s.obj.xy[0], s.obj.xy[1]);
+    const [nx, ny] = svgToData(s.panel, base[0] + a[0] * step, base[1] + a[1] * step);
+    s.obj.xy = [roundTo(nx, p.xlim), roundTo(ny, p.ylim)];
+  }
+  showXY();
   reconcilePreviews();
   scheduleSave(250);
 });
@@ -543,10 +685,30 @@ document.addEventListener('keydown', (evt) => {
 $('f-text').addEventListener('input', (e) => {
   edit((o) => { o.text = e.target.value; }, { immediate: false });
 });
-$('f-size').addEventListener('input', (e) => {
-  const v = parseFloat(e.target.value);
-  if (Number.isFinite(v) && v > 0) edit((o) => { o.size = v; }, { immediate: false });
-});
+
+function setSize(v) {
+  if (!Number.isFinite(v) || v <= 0) return;
+  edit((o) => { o.size = Math.round(Math.min(72, Math.max(4, v)) * 2) / 2; },
+       { immediate: false });
+}
+$('f-size').addEventListener('input', (e) => setSize(parseFloat(e.target.value)));
+
+/** A+ / A- bump every selected label, which is the point of multi-select:
+ *  they may start at different sizes and should stay proportional. */
+function bumpSize(delta) {
+  const sel = selected();
+  if (!sel.length) return;
+  pushHistory();
+  for (const s of sel) {
+    s.obj.size = Math.min(72, Math.max(4, (s.obj.size ?? 12) + delta));
+  }
+  refreshInspector();
+  reconcilePreviews();
+  scheduleSave(250);
+}
+$('f-size-up').onclick = () => bumpSize(1);
+$('f-size-down').onclick = () => bumpSize(-1);
+
 $('f-color').addEventListener('input', (e) => {
   $('f-color-hex').value = e.target.value;
   edit((o) => { o.color = e.target.value; }, { immediate: false });
@@ -566,12 +728,10 @@ for (const [fid, idx] of [['f-x', 0], ['f-y', 1]]) {
 $('f-ha').addEventListener('change', (e) => edit((o) => { o.ha = e.target.value; }));
 $('f-va').addEventListener('change', (e) => edit((o) => { o.va = e.target.value; }));
 $('f-box').addEventListener('change', (e) => {
+  const on = e.target.checked;
   edit((o) => {
-    if (e.target.checked) {
-      o.bbox = { boxstyle: 'round,pad=0.25', fc: 'white', ec: '#999999', lw: 0.8 };
-    } else {
-      delete o.bbox;
-    }
+    if (on) o.bbox = { boxstyle: 'round,pad=0.25', fc: 'white', ec: '#999999', lw: 0.8 };
+    else delete o.bbox;
   });
 });
 
@@ -581,7 +741,7 @@ function undo() {
   if (!history.length) return;
   spec = history.pop();
   $('btn-undo').disabled = !history.length;
-  if (selectedId) select(selectedId);
+  setSelection(selection);
   reconcilePreviews();
   scheduleSave(0);
 }
@@ -631,7 +791,7 @@ $('btn-rebuild').onclick = async () => {
     spec = data.spec;
     renderedSpec = clone(data.spec);
     geometry = data.geometry;
-    deselect();
+    setSelection([]);
     applySvg(data.svg);
     buildList();
     setStatus(`rebuilt · rev ${spec.rev}`);

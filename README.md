@@ -29,6 +29,26 @@ Local only — the server binds `127.0.0.1` and talks to nothing else.
 Panel titles and axis labels are editable (text/size/color) but not draggable —
 matplotlib positions those itself.
 
+### Editing a family of labels at once
+
+Selecting one label at a time is the wrong unit of work when the actual problem
+is "every axis label in this figure should be the same size" (spec §6.3).
+
+Click any label and a **Similar** bar appears under the figure offering the
+families it belongs to — *All y-axis labels*, *All labels in panel (a)*,
+*Everything at 12pt*, *Everything in #2e8b57*. Click one and the whole family is
+selected; then size, color, alignment and the box toggle apply to all of them.
+
+- **Shift-click** a label in the figure, in the Elements list, or a family chip
+  to add or remove it from the selection.
+- The **Selected** row lists what you have; click any chip's × to drop it.
+- **A+ / A−** bump every selected label by 1 pt *relative to its own size*, so a
+  set that started at different sizes stays proportional. Typing an absolute
+  size sets them all the same. Fields show `mixed` when the selection disagrees.
+- Dragging or arrow-nudging moves the entire selection together.
+- Retyping is offered only for a single label, since it has no sensible meaning
+  for many at once.
+
 ## How it works
 
 The figure is three synchronized representations, with the **SPEC as the pivot**:
