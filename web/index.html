@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FigForge — qcircle</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">FigForge <span class="sub">local</span></div>
+  <div class="figname" id="figname">—</div>
+  <div class="spacer"></div>
+  <div class="status" id="status">ready</div>
+  <div class="tools">
+    <button id="btn-undo" title="Undo (Ctrl+Z)">Undo</button>
+    <button id="btn-py">figure.py</button>
+    <button id="btn-png">PNG</button>
+    <button id="btn-rebuild" class="danger" title="Discard all layout edits and regenerate from the raw CSV">Rebuild</button>
+  </div>
+</header>
+
+<main>
+  <section class="stage" id="stage">
+    <div class="zoombar">
+      <label>zoom</label>
+      <input type="range" id="zoom" min="40" max="220" value="100" step="5">
+      <span id="zoomval">100%</span>
+      <button id="btn-fit" class="link">fit</button>
+    </div>
+    <div class="canvas-wrap" id="canvas-wrap">
+      <div class="canvas" id="canvas"></div>
+    </div>
+    <div class="hint">
+      Click a label to select. Drag to move. Arrow keys nudge (Shift = ×10).
+      Esc deselects.
+    </div>
+  </section>
+
+  <aside class="sidebar">
+    <div class="panel" id="inspector">
+      <h2>Inspector</h2>
+      <div class="empty" id="insp-empty">Nothing selected.<br><span>Click a label in the figure, or pick one from the list below.</span></div>
+
+      <div id="insp-body" hidden>
+        <div class="elid"><span id="insp-kind">text</span><code id="insp-id"></code></div>
+
+        <label class="field">
+          <span>Text</span>
+          <textarea id="f-text" rows="3" spellcheck="false"></textarea>
+        </label>
+        <p class="note">matplotlib mathtext: <code>$\beta_1$</code>, <code>$Q_L$</code>. Newlines allowed.</p>
+
+        <div class="row">
+          <label class="field">
+            <span>Size (pt)</span>
+            <input type="number" id="f-size" min="4" max="48" step="0.5">
+          </label>
+          <label class="field">
+            <span>Color</span>
+            <span class="colorwrap">
+              <input type="color" id="f-color">
+              <input type="text" id="f-color-hex" spellcheck="false">
+            </span>
+          </label>
+        </div>
+
+        <div id="pos-group">
+          <div class="row">
+            <label class="field">
+              <span>x <em id="f-xunit"></em></span>
+              <input type="number" id="f-x" step="any">
+            </label>
+            <label class="field">
+              <span>y <em id="f-yunit"></em></span>
+              <input type="number" id="f-y" step="any">
+            </label>
+          </div>
+          <div class="row">
+            <label class="field">
+              <span>Align h</span>
+              <select id="f-ha">
+                <option>left</option><option>center</option><option>right</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>Align v</span>
+              <select id="f-va">
+                <option>baseline</option><option>bottom</option>
+                <option>center</option><option>top</option>
+              </select>
+            </label>
+          </div>
+          <label class="check">
+            <input type="checkbox" id="f-box"> boxed background
+          </label>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Elements</h2>
+      <div id="element-list" class="ellist"></div>
+    </div>
+  </aside>
+</main>
+
+<script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Render artifacts, rewritten on every edit. Regenerate with `python build.py`.
+# spec.json and the generated figure.py ARE versioned — they're the deliverable.
+figures/*/figure.png
+figures/*/figure.svg
+
+.DS_Store
+Thumbs.db
+*.tmp

@@ -1,0 +1,839 @@
+{
+  "figure_id": "qcircle",
+  "rev": 1,
+  "size_in": [
+    16.2,
+    5.35
+  ],
+  "dpi": 170,
+  "data_ref": "data/curves.npz",
+  "suptitle": {
+    "text": "$2\\,\\mathrm{K}$ Nb-plated Cu cavity",
+    "size": 18,
+    "y": 0.98,
+    "color": "#000000"
+  },
+  "layout": {
+    "tight": true,
+    "rect": [
+      0,
+      0,
+      1,
+      0.96
+    ]
+  },
+  "rcparams": {
+    "font.size": 12,
+    "xtick.labelsize": 11,
+    "ytick.labelsize": 11
+  },
+  "derived": {
+    "c11x": -0.14218655750048398,
+    "c11y": 0.013073889355671244,
+    "R11": 0.07542076422495278,
+    "c33x": -0.005496031773808749,
+    "c33y": -0.20609870199466968,
+    "R33": 0.04913298097693553,
+    "C11": 0.14278635689981997,
+    "C33": 0.20617197028002224,
+    "G11": 0.21820712112477275,
+    "G33": 0.2553049512569578,
+    "b11": 0.5282070770799803,
+    "b33": 0.2383106729309675,
+    "f11x": -0.21729050343787917,
+    "f11y": 0.01997961023829742,
+    "n11x": -0.06708261156308878,
+    "n11y": 0.00616816847304507,
+    "f33x": -0.006805794804275092,
+    "f33y": -0.25521422235721836,
+    "n33x": -0.0041862687433424075,
+    "n33y": -0.15698318163212102,
+    "f0": 11059810367.806,
+    "f1": 11059804146.37,
+    "f2": 11059816048.248,
+    "df1_kHz": -6.221435998916626,
+    "df2_kHz": 5.680441999435425,
+    "QL": 929249.1797796411,
+    "Q0": 1641535.1702638501
+  },
+  "panels": [
+    {
+      "id": "a",
+      "title": {
+        "text": "(a) drive port — $S_{11}$",
+        "loc": "left",
+        "size": 14,
+        "color": "#000000"
+      },
+      "xlabel": {
+        "text": "Re $S_{11}$",
+        "size": 13,
+        "color": "#000000"
+      },
+      "ylabel": {
+        "text": "Im $S_{11}$",
+        "size": 13,
+        "color": "#000000"
+      },
+      "xlim": [
+        -0.26,
+        0.05
+      ],
+      "ylim": [
+        -0.12,
+        0.13
+      ],
+      "xscale": "linear",
+      "yscale": "linear",
+      "aspect": "equal",
+      "zero_lines": true,
+      "legend": {
+        "loc": "lower right",
+        "frameon": false,
+        "size": 10
+      },
+      "series": [
+        {
+          "id": "a_meas",
+          "x": "S11_re",
+          "y": "S11_im",
+          "label": "measured",
+          "style": {
+            "ls": "none",
+            "marker": ".",
+            "color": "#4C78A8",
+            "ms": 3.0,
+            "alpha": 0.75
+          }
+        },
+        {
+          "id": "a_fit",
+          "x": "fit11_re",
+          "y": "fit11_im",
+          "label": "circle fit",
+          "style": {
+            "color": "#E07A3D",
+            "lw": 2.2
+          }
+        },
+        {
+          "id": "a_origin",
+          "x": [
+            0.0
+          ],
+          "y": [
+            0.0
+          ],
+          "style": {
+            "ls": "none",
+            "marker": "+",
+            "color": "black",
+            "ms": 16,
+            "mew": 2.0,
+            "zorder": 7
+          }
+        },
+        {
+          "id": "a_center",
+          "x": [
+            -0.14218655750048398
+          ],
+          "y": [
+            0.013073889355671244
+          ],
+          "style": {
+            "ls": "none",
+            "marker": "o",
+            "color": "black",
+            "ms": 6,
+            "zorder": 7
+          }
+        },
+        {
+          "id": "a_near",
+          "x": [
+            -0.06708261156308878
+          ],
+          "y": [
+            0.00616816847304507
+          ],
+          "style": {
+            "ls": "none",
+            "marker": "s",
+            "color": "#2E8B57",
+            "ms": 7,
+            "zorder": 8
+          }
+        },
+        {
+          "id": "a_cline",
+          "x": [
+            0.0,
+            -0.14218655750048398
+          ],
+          "y": [
+            0.0,
+            0.013073889355671244
+          ],
+          "style": {
+            "color": "black",
+            "ls": "--",
+            "lw": 1.2
+          }
+        }
+      ],
+      "arrows": [
+        {
+          "id": "a_R",
+          "p0": [
+            -0.14218655750048398,
+            0.013073889355671244
+          ],
+          "p1": [
+            -0.06708261156308878,
+            0.00616816847304507
+          ],
+          "arrowstyle": "<->",
+          "color": "#2E8B57",
+          "lw": 1.8,
+          "mutation_scale": 12,
+          "zorder": 6
+        },
+        {
+          "id": "a_Goff",
+          "p0": [
+            -0.0016481267084024825,
+            -0.017924387809714743
+          ],
+          "p1": [
+            -0.21893863014628165,
+            0.002055222428582675
+          ],
+          "arrowstyle": "->",
+          "color": "#1f4e8c",
+          "lw": 1.8,
+          "mutation_scale": 12,
+          "zorder": 6
+        }
+      ],
+      "texts": [
+        {
+          "id": "a_beta1",
+          "text": "$\\beta_1=0.53$",
+          "xy": [
+            -0.248,
+            0.108
+          ],
+          "coords": "data",
+          "size": 12,
+          "color": "#000000",
+          "ha": "left",
+          "va": "baseline",
+          "bbox": {
+            "boxstyle": "round,pad=0.25",
+            "fc": "white",
+            "ec": "#E07A3D",
+            "lw": 1.3
+          }
+        },
+        {
+          "id": "a_R",
+          "text": "$R=0.075$",
+          "xy": [
+            -0.205,
+            0.055
+          ],
+          "coords": "data",
+          "size": 11,
+          "color": "#2E8B57",
+          "ha": "left",
+          "va": "baseline"
+        },
+        {
+          "id": "a_C",
+          "text": "$|C|=0.14$",
+          "xy": [
+            -0.095,
+            0.055
+          ],
+          "coords": "data",
+          "size": 11,
+          "color": "#262626",
+          "ha": "left",
+          "va": "baseline"
+        },
+        {
+          "id": "a_origin_lbl",
+          "text": "origin",
+          "xy": [
+            0.005,
+            0.012
+          ],
+          "coords": "data",
+          "size": 10,
+          "color": "#333333",
+          "ha": "left",
+          "va": "baseline"
+        },
+        {
+          "id": "a_goff",
+          "text": "$|\\Gamma_\\mathrm{off}|=|C|+R=0.22$",
+          "xy": [
+            -0.12,
+            -0.038
+          ],
+          "coords": "data",
+          "size": 10,
+          "color": "#1f4e8c",
+          "ha": "left",
+          "va": "baseline",
+          "bbox": {
+            "boxstyle": "round,pad=0.2",
+            "fc": "white",
+            "ec": "#1f4e8c",
+            "lw": 1.0
+          }
+        },
+        {
+          "id": "a_dbeta",
+          "text": "$d=2R/|\\Gamma_\\mathrm{off}|=0.15/0.22$\n$\\beta=d/(2-d)=0.53$",
+          "xy": [
+            -0.248,
+            -0.108
+          ],
+          "coords": "data",
+          "size": 10,
+          "color": "#000000",
+          "ha": "left",
+          "va": "baseline",
+          "bbox": {
+            "boxstyle": "round,pad=0.25",
+            "fc": "white",
+            "ec": "#999999",
+            "lw": 0.8
+          }
+        }
+      ]
+    },
+    {
+      "id": "b",
+      "title": {
+        "text": "(b) pickup port — $S_{33}$",
+        "loc": "left",
+        "size": 14,
+        "color": "#000000"
+      },
+      "xlabel": {
+        "text": "Re $S_{33}$",
+        "size": 13,
+        "color": "#000000"
+      },
+      "ylabel": {
+        "text": "Im $S_{33}$",
+        "size": 13,
+        "color": "#000000"
+      },
+      "xlim": [
+        -0.16,
+        0.14
+      ],
+      "ylim": [
+        -0.31,
+        0.04
+      ],
+      "xscale": "linear",
+      "yscale": "linear",
+      "aspect": "equal",
+      "zero_lines": true,
+      "legend": {
+        "loc": "lower right",
+        "frameon": false,
+        "size": 10
+      },
+      "series": [
+        {
+          "id": "b_meas",
+          "x": "S33_re",
+          "y": "S33_im",
+          "label": "measured",
+          "style": {
+            "ls": "none",
+            "marker": ".",
+            "color": "#4C78A8",
+            "ms": 3.0,
+            "alpha": 0.75
+          }
+        },
+        {
+          "id": "b_fit",
+          "x": "fit33_re",
+          "y": "fit33_im",
+          "label": "circle fit",
+          "style": {
+            "color": "#E07A3D",
+            "lw": 2.2
+          }
+        },
+        {
+          "id": "b_origin",
+          "x": [
+            0.0
+          ],
+          "y": [
+            0.0
+          ],
+          "style": {
+            "ls": "none",
+            "marker": "+",
+            "color": "black",
+            "ms": 16,
+            "mew": 2.0,
+            "zorder": 7
+          }
+        },
+        {
+          "id": "b_center",
+          "x": [
+            -0.005496031773808749
+          ],
+          "y": [
+            -0.20609870199466968
+          ],
+          "style": {
+            "ls": "none",
+            "marker": "o",
+            "color": "black",
+            "ms": 6,
+            "zorder": 7
+          }
+        },
+        {
+          "id": "b_near",
+          "x": [
+            -0.0041862687433424075
+          ],
+          "y": [
+            -0.15698318163212102
+          ],
+          "style": {
+            "ls": "none",
+            "marker": "s",
+            "color": "#2E8B57",
+            "ms": 7,
+            "zorder": 8
+          }
+        },
+        {
+          "id": "b_cline",
+          "x": [
+            0.0,
+            -0.005496031773808749
+          ],
+          "y": [
+            0.0,
+            -0.20609870199466968
+          ],
+          "style": {
+            "color": "black",
+            "ls": "--",
+            "lw": 1.2
+          }
+        }
+      ],
+      "arrows": [
+        {
+          "id": "b_R",
+          "p0": [
+            -0.005496031773808749,
+            -0.20609870199466968
+          ],
+          "p1": [
+            -0.0041862687433424075,
+            -0.15698318163212102
+          ],
+          "arrowstyle": "<->",
+          "color": "#2E8B57",
+          "lw": 1.8,
+          "mutation_scale": 12,
+          "zorder": 6
+        },
+        {
+          "id": "b_Goff",
+          "p0": [
+            -0.012,
+            0.0
+          ],
+          "p1": [
+            -0.01880579480427509,
+            -0.25521422235721836
+          ],
+          "arrowstyle": "<->",
+          "color": "#1f4e8c",
+          "lw": 1.8,
+          "mutation_scale": 12,
+          "zorder": 6
+        }
+      ],
+      "texts": [
+        {
+          "id": "b_beta2",
+          "text": "$\\beta_2=0.24$",
+          "xy": [
+            -0.148,
+            0.018
+          ],
+          "coords": "data",
+          "size": 12,
+          "color": "#000000",
+          "ha": "left",
+          "va": "baseline",
+          "bbox": {
+            "boxstyle": "round,pad=0.25",
+            "fc": "white",
+            "ec": "#E07A3D",
+            "lw": 1.3
+          }
+        },
+        {
+          "id": "b_origin_lbl",
+          "text": "origin",
+          "xy": [
+            0.018,
+            0.01
+          ],
+          "coords": "data",
+          "size": 10,
+          "color": "#333333",
+          "ha": "left",
+          "va": "baseline"
+        },
+        {
+          "id": "b_C",
+          "text": "$|C|=0.21$",
+          "xy": [
+            0.018,
+            -0.1
+          ],
+          "coords": "data",
+          "size": 11,
+          "color": "#262626",
+          "ha": "left",
+          "va": "baseline"
+        },
+        {
+          "id": "b_R",
+          "text": "$R=0.049$",
+          "xy": [
+            0.018,
+            -0.175
+          ],
+          "coords": "data",
+          "size": 11,
+          "color": "#2E8B57",
+          "ha": "left",
+          "va": "baseline"
+        },
+        {
+          "id": "b_goff",
+          "text": "$|\\Gamma_\\mathrm{off}|$\n$=0.26$",
+          "xy": [
+            -0.148,
+            -0.145
+          ],
+          "coords": "data",
+          "size": 10,
+          "color": "#1f4e8c",
+          "ha": "left",
+          "va": "baseline",
+          "bbox": {
+            "boxstyle": "round,pad=0.2",
+            "fc": "white",
+            "ec": "#1f4e8c",
+            "lw": 1.0
+          }
+        },
+        {
+          "id": "b_dbeta",
+          "text": "$d=2R/|\\Gamma_\\mathrm{off}|=0.10/0.26$\n$\\beta=d/(2-d)=0.24$",
+          "xy": [
+            -0.148,
+            -0.292
+          ],
+          "coords": "data",
+          "size": 10,
+          "color": "#000000",
+          "ha": "left",
+          "va": "baseline",
+          "bbox": {
+            "boxstyle": "round,pad=0.25",
+            "fc": "white",
+            "ec": "#999999",
+            "lw": 0.8
+          }
+        }
+      ]
+    },
+    {
+      "id": "c",
+      "title": {
+        "text": "(c) transmission — $S_{31}$",
+        "loc": "left",
+        "size": 14,
+        "color": "#000000"
+      },
+      "xlabel": {
+        "text": "frequency offset (kHz)",
+        "size": 13,
+        "color": "#000000"
+      },
+      "ylabel": {
+        "text": "$|S_{31}|^2$ (norm. to peak)",
+        "size": 13,
+        "color": "#000000"
+      },
+      "xlim": [
+        -40,
+        40
+      ],
+      "ylim": [
+        -0.06,
+        1.16
+      ],
+      "xscale": "linear",
+      "yscale": "linear",
+      "aspect": "auto",
+      "zero_lines": false,
+      "legend": {
+        "loc": "lower right",
+        "frameon": false,
+        "size": 10
+      },
+      "series": [
+        {
+          "id": "c_meas",
+          "x": "df_kHz",
+          "y": "P_norm",
+          "label": "measured",
+          "style": {
+            "ls": "none",
+            "marker": ".",
+            "color": "#4C78A8",
+            "ms": 3.0
+          }
+        },
+        {
+          "id": "c_fit",
+          "x": "df_kHz",
+          "y": "lorentzian",
+          "label": "Lorentzian fit",
+          "style": {
+            "color": "#E07A3D",
+            "lw": 2.2
+          }
+        },
+        {
+          "id": "c_halfline",
+          "x": [
+            -6.221435998916626,
+            5.680441999435425
+          ],
+          "y": [
+            0.5,
+            0.5
+          ],
+          "style": {
+            "color": "#E07A3D",
+            "lw": 1.6
+          }
+        },
+        {
+          "id": "c_m1",
+          "x": [
+            -6.221435998916626
+          ],
+          "y": [
+            0.5
+          ],
+          "style": {
+            "ls": "none",
+            "marker": "D",
+            "color": "#E07A3D",
+            "ms": 5
+          }
+        },
+        {
+          "id": "c_m2",
+          "x": [
+            5.680441999435425
+          ],
+          "y": [
+            0.5
+          ],
+          "style": {
+            "ls": "none",
+            "marker": "D",
+            "color": "#E07A3D",
+            "ms": 5
+          }
+        },
+        {
+          "id": "c_peak",
+          "x": [
+            0.0
+          ],
+          "y": [
+            1.0
+          ],
+          "style": {
+            "ls": "none",
+            "marker": "o",
+            "color": "#E07A3D",
+            "ms": 7
+          }
+        }
+      ],
+      "vlines": [
+        {
+          "id": "c_v1",
+          "x": -6.221435998916626,
+          "color": "#E07A3D",
+          "ls": ":",
+          "lw": 1.1
+        },
+        {
+          "id": "c_v0",
+          "x": 0.0,
+          "color": "#E07A3D",
+          "ls": ":",
+          "lw": 1.1
+        },
+        {
+          "id": "c_v2",
+          "x": 5.680441999435425,
+          "color": "#E07A3D",
+          "ls": ":",
+          "lw": 1.1
+        }
+      ],
+      "hlines": [
+        {
+          "id": "c_h50",
+          "y": 0.5,
+          "color": "#cccccc",
+          "ls": ":",
+          "lw": 0.8
+        }
+      ],
+      "arrows": [
+        {
+          "id": "c_df",
+          "p0": [
+            -6.221435998916626,
+            0.5
+          ],
+          "p1": [
+            5.680441999435425,
+            0.5
+          ],
+          "arrowstyle": "<->",
+          "color": "#E07A3D",
+          "lw": 1.6,
+          "mutation_scale": 10,
+          "zorder": 6
+        }
+      ],
+      "texts": [
+        {
+          "id": "c_deltaf",
+          "text": "$\\Delta f$",
+          "xy": [
+            1.6,
+            0.56
+          ],
+          "coords": "data",
+          "size": 12,
+          "color": "#E07A3D",
+          "ha": "left",
+          "va": "baseline"
+        },
+        {
+          "id": "c_f1",
+          "text": "$f_1$",
+          "xy": [
+            -6.221435998916626,
+            1.08
+          ],
+          "coords": "data",
+          "size": 12,
+          "color": "#E07A3D",
+          "ha": "center",
+          "va": "baseline"
+        },
+        {
+          "id": "c_f0",
+          "text": "$f_0$",
+          "xy": [
+            0.0,
+            1.08
+          ],
+          "coords": "data",
+          "size": 12,
+          "color": "#E07A3D",
+          "ha": "center",
+          "va": "baseline"
+        },
+        {
+          "id": "c_f2",
+          "text": "$f_2$",
+          "xy": [
+            5.680441999435425,
+            1.08
+          ],
+          "coords": "data",
+          "size": 12,
+          "color": "#E07A3D",
+          "ha": "center",
+          "va": "baseline"
+        },
+        {
+          "id": "c_QL",
+          "text": "$Q_L=929\\,\\mathrm{k}$",
+          "xy": [
+            -38,
+            1.02
+          ],
+          "coords": "data",
+          "size": 12,
+          "color": "#000000",
+          "ha": "left",
+          "va": "baseline",
+          "bbox": {
+            "boxstyle": "round,pad=0.25",
+            "fc": "white",
+            "ec": "#E07A3D",
+            "lw": 1.3
+          }
+        },
+        {
+          "id": "c_Q0",
+          "text": "$Q_0=Q_L(1+\\beta_1+\\beta_2)$\n$=929\\mathrm{k}\\times1.77=1.64\\mathrm{M}$",
+          "xy": [
+            -38,
+            0.08
+          ],
+          "coords": "data",
+          "size": 10,
+          "color": "#000000",
+          "ha": "left",
+          "va": "baseline",
+          "bbox": {
+            "boxstyle": "round,pad=0.25",
+            "fc": "white",
+            "ec": "#999999",
+            "lw": 0.8
+          }
+        }
+      ]
+    }
+  ]
+}
