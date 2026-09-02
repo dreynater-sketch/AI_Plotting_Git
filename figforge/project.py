@@ -18,6 +18,8 @@ import numpy as np
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FIGURES = os.path.join(ROOT, "figures")
 
+_ARRAY_CACHE = {}
+
 
 class Figure:
     def __init__(self, name):
@@ -42,12 +44,21 @@ class Figure:
 
     # ---------------------------------------------------------------- data
     def load_arrays(self):
+        """Cached on the npz's mtime -- the editor re-renders constantly and
+        the arrays only change when the figure is rebuilt from raw data."""
+        stamp = os.path.getmtime(self.npz_path)
+        hit = _ARRAY_CACHE.get(self.npz_path)
+        if hit and hit[0] == stamp:
+            return hit[1]
         with np.load(self.npz_path) as z:
-            return {k: z[k] for k in z.files}
+            arrays = {k: z[k] for k in z.files}
+        _ARRAY_CACHE[self.npz_path] = (stamp, arrays)
+        return arrays
 
     def save_arrays(self, arrays):
         os.makedirs(os.path.dirname(self.npz_path), exist_ok=True)
         np.savez_compressed(self.npz_path, **arrays)
+        _ARRAY_CACHE.pop(self.npz_path, None)
 
     def exists(self):
         return os.path.isfile(self.spec_path)

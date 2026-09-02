@@ -55,7 +55,10 @@ async function doSave() {
     });
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || r.statusText);
-    spec = data.spec;
+    // Keep the local spec: edits made while this render was in flight must
+    // not be thrown away. Only take the server's rev.
+    spec.rev = data.spec.rev;
+    renderedSpec = data.spec;
     geometry = data.geometry;
     applySvg(data.svg);
     setStatus(`saved · rev ${spec.rev}`);
@@ -103,6 +106,14 @@ function invAxis(lim, scale, f) {
   return lim[0] + f * (lim[1] - lim[0]);
 }
 
+function axisFrac(lim, scale, v) {
+  if (scale === 'log') {
+    const l0 = Math.log10(lim[0]), l1 = Math.log10(lim[1]);
+    return (Math.log10(v) - l0) / (l1 - l0);
+  }
+  return (v - lim[0]) / (lim[1] - lim[0]);
+}
+
 /** SVG user units -> data coords for a panel (spec section 3.3). */
 function svgToData(panelId, x, y) {
   const g = geometry.panels[panelId];
@@ -110,6 +121,14 @@ function svgToData(panelId, x, y) {
   const fx = (x - bx) / bw;
   const fy = (by + bh - y) / bh;   // SVG y runs down, data y runs up
   return [invAxis(g.xlim, g.xscale, fx), invAxis(g.ylim, g.yscale, fy)];
+}
+
+/** data coords -> SVG user units, the inverse of svgToData. */
+function dataToSvg(panelId, x, y) {
+  const g = geometry.panels[panelId];
+  const [bx, by, bw, bh] = g.bbox;
+  return [bx + axisFrac(g.xlim, g.xscale, x) * bw,
+          by + bh - axisFrac(g.ylim, g.yscale, y) * bh];
 }
 
 /** Round to ~1/10000 of the axis range so spec.json stays readable. */
@@ -142,6 +161,8 @@ function applySvg(svgText) {
     if (!r.draggable) g.classList.add('ff-static');
     addHitTarget(g);
   }
+  // Re-apply anything the SPEC has moved on to since this SVG was rendered.
+  reconcilePreviews();
   if (selectedId) drawOutline(selectedId);
 }
 
@@ -177,6 +198,105 @@ function groupFor(id) {
 
 function clearOutline() {
   svgEl?.querySelectorAll('.ff-outline').forEach((n) => n.remove());
+}
+
+/* ------------------------------------------------- optimistic previews
+ *
+ * A matplotlib re-render takes ~1.5 s, so waiting for it would make every
+ * edit feel broken. Instead the SPEC is updated immediately and the change
+ * is faked in the SVG until the real render lands.
+ *
+ * These previews are exact, not approximations. matplotlib emits each line of
+ * text as <g style="fill: COLOR" transform="translate(ax ay) scale(s -s)">
+ * with s = fontsize/100, and glyph advances, line spacing and the box's
+ * padding are all linear in the font size. So scaling the whole group about
+ * the text's anchor point is precisely what matplotlib itself would draw.
+ *
+ * Everything is derived by diffing the live SPEC against `renderedSpec` (what
+ * the SVG on screen actually shows), so it is stateless and self-correcting:
+ * if a render lands while further edits are queued, the leftover difference
+ * is simply re-applied on top.
+ */
+
+let renderedSpec = null;
+
+function renderedTexts() {
+  const out = {};
+  if (!renderedSpec) return out;
+  for (const p of renderedSpec.panels) {
+    for (const t of p.texts || []) out[t.id] = t;
+  }
+  return out;
+}
+
+function reconcilePreviews() {
+  if (!renderedSpec || !svgEl) return;
+  const was = renderedTexts();
+
+  for (const p of spec.panels) {
+    for (const t of p.texts || []) {
+      const old = was[t.id];
+      const g = groupFor(t.id);
+      if (!old || !g) continue;
+
+      const anchor = geometry.texts[t.id]?.anchor;
+      if (!anchor) continue;
+
+      // Position: how far the anchor has moved since this SVG was rendered.
+      let dx = 0, dy = 0;
+      if (old.xy[0] !== t.xy[0] || old.xy[1] !== t.xy[1]) {
+        const a = dataToSvg(p.id, old.xy[0], old.xy[1]);
+        const b = dataToSvg(p.id, t.xy[0], t.xy[1]);
+        dx = b[0] - a[0];
+        dy = b[1] - a[1];
+      }
+      // Size: scale about the anchor, which is where matplotlib grows from.
+      const k = (t.size ?? 12) / (old.size ?? 12);
+
+      setPreviewTransform(g, anchor, dx, dy, k);
+
+      if ((t.color ?? '#000000') !== (old.color ?? '#000000')) {
+        setGlyphFill(g, t.color ?? '#000000');
+      }
+    }
+  }
+  if (!selectedId) return;
+  if (drag) {
+    // Mid-drag, recomputing getBBox every frame forces a synchronous layout.
+    // The outline shape hasn't changed, so just carry the same transform.
+    const g = groupFor(selectedId);
+    const o = svgEl.querySelector('.ff-outline');
+    if (g && o) {
+      const tf = g.getAttribute('transform');
+      if (tf) o.setAttribute('transform', tf); else o.removeAttribute('transform');
+    }
+  } else {
+    drawOutline(selectedId);
+  }
+}
+
+function setPreviewTransform(g, anchor, dx, dy, k) {
+  if (!dx && !dy && Math.abs(k - 1) < 1e-9) {
+    g.removeAttribute('transform');
+    return;
+  }
+  const parts = [];
+  if (dx || dy) parts.push(`translate(${dx} ${dy})`);
+  if (Math.abs(k - 1) > 1e-9) {
+    parts.push(`translate(${anchor[0]} ${anchor[1]})`,
+               `scale(${k})`,
+               `translate(${-anchor[0]} ${-anchor[1]})`);
+  }
+  g.setAttribute('transform', parts.join(' '));
+}
+
+/** Recolor the glyphs but never the background box, which is its own patch. */
+function setGlyphFill(g, color) {
+  for (const child of g.children) {
+    if (child.id && child.id.startsWith('patch')) continue;
+    if (child.classList.contains('ff-hit')) continue;
+    if (child.tagName.toLowerCase() === 'g') child.style.fill = color;
+  }
 }
 
 /** Selection box, inserted as a sibling of the target so it shares its space. */
@@ -262,12 +382,13 @@ function normHex(c) {
 
 const stripMath = (s) => (s || '').replace(/\$/g, '').replace(/\\[a-zA-Z]+/g, '').trim();
 
-/** Edit the selected element, then persist. */
+/** Edit the selected element: preview it now, persist it shortly after. */
 function edit(fn, { immediate = true } = {}) {
   const r = resolve(selectedId);
   if (!r) return;
   pushHistory();
   fn(r.obj, r);
+  reconcilePreviews();
   scheduleSave(immediate ? 0 : 350);
 }
 
@@ -333,11 +454,12 @@ canvas.addEventListener('pointerdown', (evt) => {
   if (!r || !r.draggable) return;
 
   evt.preventDefault();
-  const start = clientToSvg(evt);
   drag = {
     id, group: g, panel: r.panel,
-    start,
-    anchor: geometry.texts[id].anchor,
+    start: clientToSvg(evt),
+    // Where the label is *meant* to be right now, which may differ from where
+    // the current SVG draws it if a render is still in flight.
+    baseSvg: dataToSvg(r.panel, r.obj.xy[0], r.obj.xy[1]),
     moved: false,
   };
   g.classList.add('ff-dragging');
@@ -350,33 +472,35 @@ canvas.addEventListener('pointermove', (evt) => {
   const dx = now.x - drag.start.x;
   const dy = now.y - drag.start.y;
   if (!drag.moved && Math.hypot(dx, dy) < 1.5) return;
+  if (!drag.moved) pushHistory();
   drag.moved = true;
-  drag.dx = dx;
-  drag.dy = dy;
-  const tf = `translate(${dx} ${dy})`;
-  drag.group.setAttribute('transform', tf);
-  svgEl.querySelector('.ff-outline')?.setAttribute('transform', tf);
+
+  // Move the SPEC and let the preview machinery draw it. Going through the
+  // SPEC rather than nudging the SVG directly means a drag composes with any
+  // edit that hasn't been rendered yet.
+  const r = resolve(drag.id);
+  const p = geometry.panels[drag.panel];
+  const [nx, ny] = svgToData(drag.panel, drag.baseSvg[0] + dx, drag.baseSvg[1] + dy);
+  r.obj.xy = [roundTo(nx, p.xlim), roundTo(ny, p.ylim)];
+  showXY(r.obj);
+  reconcilePreviews();
 });
 
 canvas.addEventListener('pointerup', (evt) => {
   if (!drag) return;
-  const d = drag;
-  drag = null;
-  d.group.classList.remove('ff-dragging');
+  const moved = drag.moved;
+  drag.group.classList.remove('ff-dragging');
   try { svgEl.releasePointerCapture(evt.pointerId); } catch { /* already gone */ }
-  if (!d.moved) return;
-
-  const p = geometry.panels[d.panel];
-  const [nx, ny] = svgToData(d.panel, d.anchor[0] + d.dx, d.anchor[1] + d.dy);
-  const r = resolve(d.id);
-  pushHistory();
-  r.obj.xy = [roundTo(nx, p.xlim), roundTo(ny, p.ylim)];
-  if (selectedId === d.id) {
-    $('f-x').value = r.obj.xy[0];
-    $('f-y').value = r.obj.xy[1];
-  }
-  scheduleSave(0);
+  drag = null;
+  if (moved) scheduleSave(0);
 });
+
+function showXY(obj) {
+  if (resolve(selectedId)?.obj === obj) {
+    $('f-x').value = obj.xy[0];
+    $('f-y').value = obj.xy[1];
+  }
+}
 
 canvas.addEventListener('pointercancel', () => {
   if (drag) { drag.group.classList.remove('ff-dragging'); drag = null; }
@@ -404,20 +528,14 @@ document.addEventListener('keydown', (evt) => {
 
   evt.preventDefault();
   const step = evt.shiftKey ? 10 : 1;           // SVG units == points
-  const anchor = geometry.texts[selectedId].anchor;
   const p = geometry.panels[r.panel];
-  const [nx, ny] = svgToData(r.panel, anchor[0] + a[0] * step, anchor[1] + a[1] * step);
+  const base = dataToSvg(r.panel, r.obj.xy[0], r.obj.xy[1]);
+  const [nx, ny] = svgToData(r.panel, base[0] + a[0] * step, base[1] + a[1] * step);
   pushHistory();
   r.obj.xy = [roundTo(nx, p.xlim), roundTo(ny, p.ylim)];
-  $('f-x').value = r.obj.xy[0];
-  $('f-y').value = r.obj.xy[1];
-
-  // Show the nudge immediately; the render confirms it a moment later.
-  const g = groupFor(selectedId);
-  const tf = `translate(${a[0] * step} ${a[1] * step})`;
-  g?.setAttribute('transform', tf);
-  svgEl.querySelector('.ff-outline')?.setAttribute('transform', tf);
-  scheduleSave(180);
+  showXY(r.obj);
+  reconcilePreviews();
+  scheduleSave(250);
 });
 
 /* ------------------------------------------------------- field wiring */
@@ -464,6 +582,7 @@ function undo() {
   spec = history.pop();
   $('btn-undo').disabled = !history.length;
   if (selectedId) select(selectedId);
+  reconcilePreviews();
   scheduleSave(0);
 }
 $('btn-undo').onclick = undo;
@@ -510,6 +629,7 @@ $('btn-rebuild').onclick = async () => {
     history = [];
     $('btn-undo').disabled = true;
     spec = data.spec;
+    renderedSpec = clone(data.spec);
     geometry = data.geometry;
     deselect();
     applySvg(data.svg);
@@ -545,6 +665,7 @@ function fit() {
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || r.statusText);
     spec = data.spec;
+    renderedSpec = clone(data.spec);
     geometry = data.geometry;
     $('figname').textContent = `${FIGURE}/spec.json`;
     $('btn-undo').disabled = true;

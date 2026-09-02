@@ -48,6 +48,47 @@ writes it as `<g id="t_a_beta1">` — the browser can find that node and transla
 it locally for an instant drag. matplotlib draws a text's background box
 *inside* that same group, so the box travels with the glyphs.
 
+### Latency
+
+A matplotlib re-render is far too slow to sit in the interaction loop, so it
+isn't in it. Edits apply to the SPEC and are **faked in the SVG immediately**;
+the real render lands later and replaces it.
+
+These previews are exact, not approximations. matplotlib emits each line of
+text as `<g style="fill: COLOR" transform="translate(ax ay) scale(s -s)">` with
+`s = fontsize/100`, and glyph advances, line spacing and box padding are all
+linear in font size — so scaling that group about the text's anchor is
+precisely what matplotlib itself would draw. Position, size and color are all
+instant. Only **retyping** text has to wait, because laying out new glyphs
+(mathtext especially) is matplotlib's job.
+
+Previews are derived by diffing the live SPEC against the spec the on-screen
+SVG was rendered from, which makes the whole thing stateless and
+self-correcting: if a render lands while more edits are queued, the leftover
+difference is simply re-applied on top.
+
+The render itself went from **2.5 s to ~0.8 s**, and its payload from 1.94 MB
+to 0.17 MB:
+
+| | before | after |
+|---|---|---|
+| skip the redundant `canvas.draw()` | 2555 ms | 2033 ms |
+| rasterize dense series (preview only) | | 1757 ms |
+| cache the `tight_layout` result | | **825 ms** |
+| SVG payload | 1.94 MB, 14175 `<use>` | 0.17 MB, 597 `<use>` |
+
+- The SVG backend recomputes a style string **per marker**, so a few thousand
+  scatter points cost seconds. Rasterizing them applies to the editor view
+  only — exports stay fully vector, and layout/geometry are untouched.
+- `tight_layout` costs a full text-measurement pass but never looks at
+  free-floating `ax.text` artists, so label edits reuse a cached result. The
+  cache key covers everything `tight_layout` does read (titles, axis labels,
+  limits, tick sizes, figure size), so changing one of those still recomputes.
+- Dropping `canvas.draw()` and calling `apply_aspect()` explicitly is
+  geometry-identical; `savefig` was redrawing everything anyway.
+
+Each of these was verified geometry-identical to the slow path (0.000000 px).
+
 **The coordinate round-trip** (spec section 3.3) is the correctness linchpin.
 Drags happen in pixels; matplotlib places text in data coords. The renderer
 emits a geometry map — each panel's drawn box in SVG units plus its limits and

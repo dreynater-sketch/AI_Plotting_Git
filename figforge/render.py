@@ -17,6 +17,7 @@ the top, hence the (H - y) flips below.
 """
 
 import io
+import json
 
 import matplotlib
 matplotlib.use("Agg")
@@ -25,6 +26,15 @@ import numpy as np
 from matplotlib.patches import FancyArrowPatch
 
 SVG_DPI = 72
+
+# In preview mode, series with more than this many points are rasterized. The
+# SVG backend recomputes a style string per marker, so a few thousand scatter
+# points cost seconds and megabytes. See render() for why this is safe.
+RASTER_MIN_POINTS = 200
+RASTER_DPI = 192
+
+# tight_layout results, keyed by the spec fields tight_layout actually reads.
+_LAYOUT_CACHE = {}
 
 # Style keys we forward to Axes.plot. Anything else in a spec style dict is
 # ignored rather than blindly splatted into matplotlib.
@@ -44,7 +54,7 @@ def _style(style):
     return {k: v for k, v in (style or {}).items() if k in STYLE_KEYS}
 
 
-def build_figure(spec, arrays):
+def build_figure(spec, arrays, preview=False):
     """Realise a SPEC as a matplotlib Figure. Returns (fig, axes_by_id)."""
     plt.rcParams.update(matplotlib.rcParamsDefault)
     plt.rcParams.update(spec.get("rcparams", {}))
@@ -65,15 +75,53 @@ def build_figure(spec, arrays):
     axes_by_id = {}
     for ax, p in zip(axes, panels):
         axes_by_id[p["id"]] = ax
-        _draw_panel(ax, p, arrays)
+        _draw_panel(ax, p, arrays, preview)
 
-    layout = spec.get("layout", {})
-    if layout.get("tight", True):
-        fig.tight_layout(rect=layout.get("rect", [0, 0, 1, 1]))
+    _apply_layout(fig, spec)
     return fig, axes_by_id
 
 
-def _draw_panel(ax, p, arrays):
+def _apply_layout(fig, spec):
+    """tight_layout costs a full text-measurement pass (~1 s here), so cache
+    what it decides and replay it.
+
+    tight_layout only looks at titles, axis labels, ticks and the figure box --
+    never at free-floating ax.text artists. Since the editor overwhelmingly
+    edits those, the cached layout is reused almost every render. The key
+    covers everything tight_layout *does* look at, so changing a title or an
+    axis label still recomputes. Replaying is geometry-identical.
+    """
+    layout = spec.get("layout", {})
+    if not layout.get("tight", True):
+        return
+
+    key = _layout_key(spec)
+    cached = _LAYOUT_CACHE.get(key)
+    if cached is not None:
+        fig.subplots_adjust(**cached)
+        return
+
+    fig.tight_layout(rect=layout.get("rect", [0, 0, 1, 1]))
+    sp = fig.subplotpars
+    if len(_LAYOUT_CACHE) > 64:
+        _LAYOUT_CACHE.clear()
+    _LAYOUT_CACHE[key] = {
+        "left": sp.left, "right": sp.right, "top": sp.top,
+        "bottom": sp.bottom, "wspace": sp.wspace, "hspace": sp.hspace,
+    }
+
+
+def _layout_key(spec):
+    return json.dumps([
+        spec.get("size_in"), spec.get("layout"), spec.get("rcparams"),
+        spec.get("suptitle"),
+        [[p.get("title"), p.get("xlabel"), p.get("ylabel"), p.get("xlim"),
+          p.get("ylim"), p.get("xscale"), p.get("yscale"), p.get("aspect"),
+          p.get("legend")] for p in spec["panels"]],
+    ], sort_keys=True, default=str)
+
+
+def _draw_panel(ax, p, arrays, preview=False):
     for h in p.get("hlines", []):
         ax.axhline(h["y"], color=h.get("color", "0.8"), ls=h.get("ls", "-"),
                    lw=h.get("lw", 1.0))
@@ -85,8 +133,11 @@ def _draw_panel(ax, p, arrays):
         ax.axvline(0, color="0.88", lw=0.7)
 
     for s in p.get("series", []):
-        ax.plot(_resolve(s["x"], arrays), _resolve(s["y"], arrays),
-                label=s.get("label"), **_style(s.get("style")))
+        xs = _resolve(s["x"], arrays)
+        (line,) = ax.plot(xs, _resolve(s["y"], arrays),
+                          label=s.get("label"), **_style(s.get("style")))
+        if preview and len(xs) > RASTER_MIN_POINTS:
+            line.set_rasterized(True)
 
     for a in p.get("arrows", []):
         ax.add_patch(FancyArrowPatch(
@@ -181,16 +232,33 @@ def _f(seq):
     return [float(v) for v in seq]
 
 
-def render(spec, arrays):
-    """Returns (svg_string, geometry_dict)."""
-    fig, axes_by_id = build_figure(spec, arrays)
-    # Draw once so tight_layout, aspect-equal box adjustment and text layout
-    # have all settled before we read any geometry.
-    fig.canvas.draw()
+def render(spec, arrays, preview=False):
+    """Returns (svg_string, geometry_dict).
+
+    preview=True is the editor's view. It rasterizes dense data series, which
+    changes nothing about layout or geometry -- every coordinate the browser
+    inverts still comes from the same transforms -- but turns thousands of
+    per-marker <use> elements into one embedded image. That is ~12x less SVG
+    for the browser to parse and most of the serialization cost gone.
+
+    Exports (render_png, codegen) never use preview mode, so the figure you
+    download stays fully vector.
+    """
+    fig, axes_by_id = build_figure(spec, arrays, preview)
+
+    # tight_layout has already settled the layout; aspect='equal' resizes the
+    # axes box, which normally happens at draw time. Doing it explicitly lets
+    # us skip a full canvas.draw() that savefig would only repeat. Verified
+    # geometry-identical to the draw-based path.
+    for ax in axes_by_id.values():
+        ax.apply_aspect()
     geom = _geometry(fig, axes_by_id, spec)
 
     buf = io.StringIO()
-    fig.savefig(buf, format="svg", facecolor="white")
+    # dpi only affects the embedded raster images; the vector geometry is
+    # always emitted at 72 units-per-inch by the SVG backend.
+    extra = {"dpi": RASTER_DPI} if preview else {}
+    fig.savefig(buf, format="svg", facecolor="white", **extra)
     plt.close(fig)
     return buf.getvalue(), geom
 

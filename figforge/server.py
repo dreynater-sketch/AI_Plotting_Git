@@ -142,7 +142,7 @@ class Handler(BaseHTTPRequestHandler):
 
     # -------------------------------------------------------------- parts
     def _payload(self, fig, spec):
-        svg, geom = render.render(spec, fig.load_arrays())
+        svg, geom = render.render(spec, fig.load_arrays(), preview=True)
         return {"spec": spec, "svg": svg, "geometry": geom}
 
     def _static(self, path):
