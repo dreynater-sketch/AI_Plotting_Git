@@ -401,6 +401,10 @@ input:focus, textarea:focus, select:focus {
 }
 .colorwrap input[type=text] { font-family: var(--mono); }
 
+.opacitywrap { display: flex; align-items: center; gap: 8px; }
+.opacitywrap input[type=range] { flex: 1; min-width: 0; }
+.opacitywrap input[type=number] { width: 60px; flex: none; }
+
 .check {
   display: flex; align-items: center; gap: 7px;
   font-size: 12px; color: var(--ink-soft); margin-top: 2px;

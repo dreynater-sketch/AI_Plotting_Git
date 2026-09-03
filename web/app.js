@@ -668,6 +668,12 @@ function refreshSeriesInspector() {
   const ms = common((s) => s.obj.style?.ms ?? 6);
   $('f-series-ms').value = ms ?? '';
   $('f-series-ms').placeholder = ms === undefined ? 'mixed' : '';
+
+  // matplotlib's own default is fully opaque (alpha unset means 1).
+  const alpha = common((s) => s.obj.style?.alpha ?? 1);
+  $('f-series-alpha').value = alpha ?? 1;
+  $('f-series-alpha-num').value = alpha ?? '';
+  $('f-series-alpha-num').placeholder = alpha === undefined ? 'mixed' : '';
 }
 
 /** The Excel-like table below the figure: only meaningful for exactly one
@@ -1359,6 +1365,18 @@ $('f-series-lw').addEventListener('change', (e) => {
 $('f-series-ms').addEventListener('change', (e) => {
   const v = parseFloat(e.target.value);
   if (Number.isFinite(v) && v >= 0) edit((o) => { (o.style ??= {}).ms = v; });
+});
+$('f-series-alpha').addEventListener('input', (e) => {
+  const v = parseFloat(e.target.value);
+  $('f-series-alpha-num').value = v;
+  if (Number.isFinite(v)) edit((o) => { (o.style ??= {}).alpha = v; }, { immediate: false });
+});
+$('f-series-alpha-num').addEventListener('change', (e) => {
+  const v = parseFloat(e.target.value);
+  if (Number.isFinite(v) && v >= 0 && v <= 1) {
+    $('f-series-alpha').value = v;
+    edit((o) => { (o.style ??= {}).alpha = v; });
+  }
 });
 
 /* ------------------------------------------------------------ toolbar */

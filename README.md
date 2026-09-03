@@ -84,9 +84,10 @@ like panels (a) and (b) here), **tick label size**, and **frame width**.
 
 Click a curve (or a marker/line construct like the origin cross or the
 center dot) to select it. The Inspector shows its **legend label**,
-**color**, **marker**, **line width**, and **marker size** -- writing to
+**color**, **marker**, **line width**, **marker size**, and **opacity** -- writing to
 the series' own `style` dict in spec.json, same as matplotlib's own
-kwargs. Below the figure, a scrollable table shows that curve's actual
+kwargs. `a_meas` already ships at 0.75 opacity by default, since a dense
+scatter usually reads better slightly transparent. Below the figure, a scrollable table shows that curve's actual
 (x, y) values, fetched from the same data your CSV loaded -- not
 estimated, not AI-guessed, the real numbers. Ctrl-click curves in the
 same or other panels to bulk-edit style via **All curves in panel (a)**
