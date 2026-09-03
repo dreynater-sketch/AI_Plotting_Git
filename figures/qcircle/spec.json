@@ -93,7 +93,8 @@
       "legend": {
         "loc": "lower right",
         "frameon": false,
-        "size": 10
+        "size": 10,
+        "xy": null
       },
       "series": [
         {
@@ -354,7 +355,8 @@
       "legend": {
         "loc": "lower right",
         "frameon": false,
-        "size": 10
+        "size": 10,
+        "xy": null
       },
       "series": [
         {
@@ -615,7 +617,8 @@
       "legend": {
         "loc": "lower right",
         "frameon": false,
-        "size": 10
+        "size": 10,
+        "xy": null
       },
       "series": [
         {

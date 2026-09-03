@@ -56,7 +56,7 @@ def build_spec(d):
         "ytick_size": 11,
         "frame_lw": 0.8,
         "zero_lines": True,
-        "legend": {"loc": "lower right", "frameon": False, "size": 10},
+        "legend": {"loc": "lower right", "frameon": False, "size": 10, "xy": None},
         "series": [
             {"id": "a_meas", "x": "S11_re", "y": "S11_im", "label": "measured",
              "style": {"ls": "none", "marker": ".", "color": BLUE, "ms": 3.0,
@@ -118,7 +118,7 @@ def build_spec(d):
         "ytick_size": 11,
         "frame_lw": 0.8,
         "zero_lines": True,
-        "legend": {"loc": "lower right", "frameon": False, "size": 10},
+        "legend": {"loc": "lower right", "frameon": False, "size": 10, "xy": None},
         "series": [
             {"id": "b_meas", "x": "S33_re", "y": "S33_im", "label": "measured",
              "style": {"ls": "none", "marker": ".", "color": BLUE, "ms": 3.0,
@@ -180,7 +180,7 @@ def build_spec(d):
         "ytick_size": 11,
         "frame_lw": 0.8,
         "zero_lines": False,
-        "legend": {"loc": "lower right", "frameon": False, "size": 10},
+        "legend": {"loc": "lower right", "frameon": False, "size": 10, "xy": None},
         "series": [
             {"id": "c_meas", "x": "df_kHz", "y": "P_norm", "label": "measured",
              "style": {"ls": "none", "marker": ".", "color": BLUE, "ms": 3.0}},

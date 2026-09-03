@@ -170,8 +170,15 @@ def _panel(p, i):
 
     lg = p.get("legend")
     if lg and any(s.get("label") for s in p.get("series", [])):
-        L.append(f"ax.legend(loc={_s(lg.get('loc', 'best'))}, "
-                 f"frameon={lg.get('frameon', False)!r}, "
-                 f"fontsize={lg.get('size', 10)})")
+        if lg.get('xy'):
+            L.append(f"ax.legend(loc='upper left', "
+                     f"bbox_to_anchor=({lg['xy'][0]!r}, {lg['xy'][1]!r}), "
+                     f"bbox_transform=ax.transAxes, borderaxespad=0, "
+                     f"frameon={lg.get('frameon', False)!r}, "
+                     f"fontsize={lg.get('size', 10)})")
+        else:
+            L.append(f"ax.legend(loc={_s(lg.get('loc', 'best'))}, "
+                     f"frameon={lg.get('frameon', False)!r}, "
+                     f"fontsize={lg.get('size', 10)})")
     L.append("")
     return L

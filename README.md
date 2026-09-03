@@ -80,6 +80,25 @@ like panels (a) and (b) here), **tick label size**, and **frame width**.
   axes; **Aspect** and **Frame width** only appear for a full panel
   selection, since neither belongs to one axis.
 
+### Editing a legend
+
+Click a panel's legend box to select it. **Drag it anywhere** in the plot;
+**font size** and a **boxed frame** toggle live in the Inspector, and
+**Reset position** returns it to its default preset corner. Ctrl+Shift+>/<
+resizes it too, same as any other selection.
+
+A dragged legend is stored as an axes-fraction position (0-1 within the
+panel box), not a data coordinate -- "where in the box" shouldn't jump
+around if you later change the axis limits. The drop point lands exactly
+on the legend's corner: matplotlib's default legend padding
+(`borderaxespad`) is turned off for a dragged legend specifically, after
+measuring a deterministic few-pixel gap it would otherwise leave between
+where you drop it and where the box actually renders. A legend still on
+its default preset keeps the normal padding.
+
+Ctrl-click other panels' legends to bulk-edit them together via the **All
+legends** peer group, same pattern as everything else.
+
 ### Editing a family of labels at once
 
 Selecting one label at a time is the wrong unit of work when the actual problem

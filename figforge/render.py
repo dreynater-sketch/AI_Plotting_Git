@@ -211,8 +211,22 @@ def _draw_panel(ax, p, arrays, preview=False):
 
     lg = p.get("legend")
     if lg and any(s.get("label") for s in p.get("series", [])):
-        ax.legend(loc=lg.get("loc", "best"), frameon=lg.get("frameon", False),
-                  fontsize=lg.get("size", 10))
+        kw = dict(frameon=lg.get("frameon", False), fontsize=lg.get("size", 10))
+        if lg.get("xy"):
+            # Dragged to a free position: xy is the legend's own upper-left
+            # corner, in axes-fraction (0-1), matching how free text labels
+            # anchor. bbox_to_anchor placed via ax.transAxes is what makes a
+            # legend draggable-anywhere instead of stuck at a loc preset.
+            # borderaxespad=0 makes the rendered corner land exactly on the
+            # anchor point instead of matplotlib's usual small gap from it
+            # (confirmed empirically: default padding is a deterministic
+            # ~7px offset), so a drop lands where it was dropped.
+            kw.update(loc="upper left", bbox_to_anchor=tuple(lg["xy"]),
+                      bbox_transform=ax.transAxes, borderaxespad=0)
+        else:
+            kw["loc"] = lg.get("loc", "best")
+        legend_artist = ax.legend(**kw)
+        legend_artist.set_gid("t_" + p["id"] + "__legend")
 
 
 def _geometry(fig, axes_by_id, spec):
@@ -232,6 +246,12 @@ def _geometry(fig, axes_by_id, spec):
             "xscale": ax.get_xscale(),
             "yscale": ax.get_yscale(),
         }
+        lg = ax.get_legend()
+        if lg is not None:
+            lb = lg.get_window_extent()
+            panels[p["id"]]["legend"] = {
+                "bbox": _f([lb.x0, H - lb.y1, lb.width, lb.height]),
+            }
 
     texts = {}
     for p in spec["panels"]:

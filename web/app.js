@@ -123,9 +123,23 @@ function resolve(id, source = spec) {
     if (!p || !p[m[2]]) return null;
     return { id, kind: m[2], obj: p[m[2]], draggable: false, panel: p.id };
   }
+  const lgMatch = id.match(/^(.+)__legend$/);
+  if (lgMatch) {
+    const p = source.panels.find((q) => q.id === lgMatch[1]);
+    const hasLegend = p?.legend && (p.series || []).some((s) => s.label);
+    if (!hasLegend) return null;
+    // Position is always axes-fraction (0-1 within the panel box), not
+    // data coords -- "where in the box" shouldn't jump around when the
+    // data range changes the way a data-anchored point would.
+    return { id, kind: 'legend', obj: p.legend, draggable: true,
+             panel: p.id, coords: 'axes' };
+  }
   for (const p of source.panels) {
     for (const t of p.texts || []) {
-      if (t.id === id) return { id, kind: 'text', obj: t, draggable: true, panel: p.id };
+      if (t.id === id) {
+        return { id, kind: 'text', obj: t, draggable: true, panel: p.id,
+                 coords: t.coords ?? 'data' };
+      }
     }
   }
   return null;
@@ -139,6 +153,7 @@ function allElements(source = spec) {
     for (const k of ['title', 'xlabel', 'ylabel']) {
       if (p[k]?.text) out.push(resolve(`${p.id}__${k}`, source));
     }
+    out.push(resolve(`${p.id}__legend`, source));
     for (const t of p.texts || []) out.push(resolve(t.id, source));
   }
   return out.filter(Boolean);
@@ -147,7 +162,7 @@ function allElements(source = spec) {
 const KIND_LABEL = {
   suptitle: 'figure title', title: 'panel title', panel: 'panel axes',
   xlabel: 'x-axis label', ylabel: 'y-axis label', text: 'label',
-  xticks: 'x-axis ticks', yticks: 'y-axis ticks',
+  xticks: 'x-axis ticks', yticks: 'y-axis ticks', legend: 'legend',
 };
 
 /* ------------------------------------------- coordinate transformations */
@@ -168,28 +183,48 @@ function axisFrac(lim, scale, v) {
   return (v - lim[0]) / (lim[1] - lim[0]);
 }
 
-/** SVG user units -> data coords for a panel (spec section 3.3). */
-function svgToData(panelId, x, y) {
+/** SVG user units -> a panel's native coords (spec section 3.3).
+ *  coords='data' inverts through the axis limits/scale (what a free
+ *  label or a drawn point uses); coords='axes' is a plain 0-1 fraction of
+ *  the panel box, independent of xlim/ylim/scale -- what a legend uses,
+ *  since "where in the box" shouldn't jump around when the data range
+ *  changes. */
+function svgToData(panelId, x, y, coords = 'data') {
   const g = geometry.panels[panelId];
   const [bx, by, bw, bh] = g.bbox;
   const fx = (x - bx) / bw;
-  const fy = (by + bh - y) / bh;   // SVG y runs down, data y runs up
+  const fy = (by + bh - y) / bh;   // SVG y runs down, data/axes y runs up
+  if (coords === 'axes') return [fx, fy];
   return [invAxis(g.xlim, g.xscale, fx), invAxis(g.ylim, g.yscale, fy)];
 }
 
-/** data coords -> SVG user units, the inverse of svgToData. */
-function dataToSvg(panelId, x, y) {
+/** A panel's native coords -> SVG user units, the inverse of svgToData. */
+function dataToSvg(panelId, x, y, coords = 'data') {
   const g = geometry.panels[panelId];
   const [bx, by, bw, bh] = g.bbox;
+  if (coords === 'axes') return [bx + x * bw, by + bh - y * bh];
   return [bx + axisFrac(g.xlim, g.xscale, x) * bw,
           by + bh - axisFrac(g.ylim, g.yscale, y) * bh];
 }
 
-/** Round to ~1/10000 of the axis range so spec.json stays readable. */
+/** Round to ~1/10000 of the value's natural range so spec.json stays
+ *  readable. An axes-fraction's range is always exactly [0, 1]. */
 function roundTo(v, lim) {
   const range = Math.abs(lim[1] - lim[0]) || 1;
   const d = Math.min(12, Math.max(0, Math.ceil(-Math.log10(range / 1e4))));
   return Number(v.toFixed(d));
+}
+const AXES_FRAC_LIM = [0, 1];
+
+/** Where a drag starts from, in SVG units. Normally just the object's own
+ *  stored position -- but a legend still on its `loc` preset has no stored
+ *  `xy` yet, so the drag has to start from its current rendered corner
+ *  (the geometry map's legend bbox) instead; the first move is what commits
+ *  a real xy and switches it into free-position mode. */
+function dragBaseSvg(s) {
+  if (s.obj.xy) return dataToSvg(s.panel, s.obj.xy[0], s.obj.xy[1], s.coords);
+  const bb = geometry.panels[s.panel]?.legend?.bbox;
+  return bb ? [bb[0], bb[1]] : [0, 0];
 }
 
 function clientToSvg(evt) {
@@ -343,6 +378,7 @@ function reconcilePreviews() {
   if (!renderedSpec || !svgEl) return;
 
   for (const el of allElements(spec)) {
+    if (el.kind === 'legend') continue;  // handled separately below
     const old = resolve(el.id, renderedSpec);
     const g = groupFor(el.id);
     if (!old || !g) continue;
@@ -393,6 +429,33 @@ function reconcilePreviews() {
           if (anchor) setPreviewTransform(g, anchor, 0, 0, k);
         });
     }
+  }
+
+  // A legend is a compound group (frame + sample lines + text) with no
+  // single inner translate the way a text label has, so anchorFor() can't
+  // find it reliably -- use the geometry-provided bbox corner instead. That
+  // bbox always reflects exactly what renderedSpec currently shows (the
+  // server computed it from that spec), so it doubles as both the anchor to
+  // scale from AND the "old" position to measure a drag delta against --
+  // including the one-time preset-loc -> dragged-xy transition, since the
+  // bbox corner is correct either way.
+  for (const p of spec.panels) {
+    if (!p.legend) continue;
+    const oldPanel = renderedSpec.panels.find((q) => q.id === p.id);
+    if (!oldPanel) continue;
+    const g = groupFor(`${p.id}__legend`);
+    const bb = geometry.panels[p.id]?.legend?.bbox;
+    if (!g || !bb) continue;
+    const anchor = [bb[0], bb[1]];
+
+    let dx = 0, dy = 0;
+    if (p.legend.xy) {
+      const newSvg = dataToSvg(p.id, p.legend.xy[0], p.legend.xy[1], 'axes');
+      dx = newSvg[0] - bb[0];
+      dy = newSvg[1] - bb[1];
+    }
+    const k = (p.legend.size ?? 10) / (oldPanel.legend?.size ?? 10);
+    setPreviewTransform(g, anchor, dx, dy, k);
   }
 
   if (!selection.length) return;
@@ -474,9 +537,12 @@ function refreshInspector() {
 
   const allPanels = sel.every((s) => s.kind === 'panel'
     || s.kind === 'xticks' || s.kind === 'yticks');
-  $('label-fields').hidden = allPanels;
+  const allLegends = sel.every((s) => s.kind === 'legend');
+  $('label-fields').hidden = allPanels || allLegends;
   $('axes-fields').hidden = !allPanels;
+  $('legend-fields').hidden = !allLegends;
   if (allPanels) { refreshAxesInspector(); return; }
+  if (allLegends) { refreshLegendInspector(); return; }
 
   // Retyping many labels at once is meaningless; offer it only for one.
   $('text-field').hidden = multi;
@@ -552,6 +618,19 @@ function refreshAxesInspector() {
   $('axes-note').hidden = true;
 }
 
+function refreshLegendInspector() {
+  const sel = selected();
+  const size = common((s) => s.obj.size ?? 10);
+  $('f-legend-size').value = size ?? '';
+  $('f-legend-size').placeholder = size === undefined ? 'mixed' : '';
+
+  const framed = common((s) => !!s.obj.frameon);
+  $('f-legend-frame').indeterminate = framed === undefined;
+  $('f-legend-frame').checked = framed === true;
+
+  $('btn-legend-reset').disabled = !sel.some((s) => s.obj.xy);
+}
+
 function normHex(c) {
   if (typeof c !== 'string') return '#000000';
   if (/^#[0-9a-f]{6}$/i.test(c)) return c.toLowerCase();
@@ -603,6 +682,14 @@ function peerGroups() {
     const axis = primary.kind === 'xticks' ? 'x' : 'y';
     add(`All ${axis}-axis ticks`, spec.panels
       .map((p) => resolve(`panel:${p.id}:${axis}ticks`)).filter(Boolean));
+    return groups;
+  }
+
+  if (primary.kind === 'legend') {
+    // A dedicated early return, like panel/xticks/yticks: a legend has no
+    // .color, so the generic "Everything in #hex" bucket below would
+    // otherwise compare against a field it doesn't actually have.
+    add('All legends', spec.panels.map((p) => resolve(`${p.id}__legend`)).filter(Boolean));
     return groups;
   }
 
@@ -694,6 +781,7 @@ function buildList() {
     add(`panel (${p.id}) axes`, `panel:${p.id}`, '▭');
     add(`panel (${p.id}) x ticks`, `panel:${p.id}:xticks`, 'xt');
     add(`panel (${p.id}) y ticks`, `panel:${p.id}:yticks`, 'yt');
+    if (resolve(`${p.id}__legend`)) add(`panel (${p.id}) legend`, `${p.id}__legend`, 'lg');
   }
 
   group('figure');
@@ -717,6 +805,7 @@ function chipLabel(s) {
   if (s.kind === 'panel') return `panel (${s.panel}) axes`;
   if (s.kind === 'xticks') return `panel (${s.panel}) x ticks`;
   if (s.kind === 'yticks') return `panel (${s.panel}) y ticks`;
+  if (s.kind === 'legend') return `panel (${s.panel}) legend`;
   return preview(s.obj.text);
 }
 
@@ -825,8 +914,8 @@ canvas.addEventListener('pointerdown', (evt) => {
       // Where each label is *meant* to be right now, which may differ from
       // where the SVG draws it if a render is still in flight.
       items: movers.map((s) => ({
-        id: s.id, panel: s.panel, obj: s.obj,
-        baseSvg: dataToSvg(s.panel, s.obj.xy[0], s.obj.xy[1]),
+        id: s.id, panel: s.panel, obj: s.obj, coords: s.coords ?? 'data',
+        baseSvg: dragBaseSvg(s),
       })),
     };
     g.classList.add('ff-dragging');
@@ -860,8 +949,10 @@ canvas.addEventListener('pointermove', (evt) => {
     // any edit that hasn't been rendered yet.
     for (const it of drag.items) {
       const p = geometry.panels[it.panel];
-      const [nx, ny] = svgToData(it.panel, it.baseSvg[0] + dx, it.baseSvg[1] + dy);
-      it.obj.xy = [roundTo(nx, p.xlim), roundTo(ny, p.ylim)];
+      const [nx, ny] = svgToData(it.panel, it.baseSvg[0] + dx, it.baseSvg[1] + dy, it.coords);
+      const [limX, limY] = it.coords === 'axes'
+        ? [AXES_FRAC_LIM, AXES_FRAC_LIM] : [p.xlim, p.ylim];
+      it.obj.xy = [roundTo(nx, limX), roundTo(ny, limY)];
     }
     showXY();
     reconcilePreviews();
@@ -909,7 +1000,10 @@ canvas.addEventListener('pointercancel', () => {
 
 function showXY() {
   const sel = selected();
-  if (sel.length === 1 && sel[0].draggable) {
+  // A legend still on its loc preset has xy: null until the first drag
+  // commits one -- guard rather than assume, even though both call sites
+  // currently run just after that write.
+  if (sel.length === 1 && sel[0].draggable && sel[0].obj.xy) {
     $('f-x').value = sel[0].obj.xy[0];
     $('f-y').value = sel[0].obj.xy[1];
   }
@@ -960,9 +1054,11 @@ document.addEventListener('keydown', (evt) => {
   pushHistory();
   for (const s of movers) {
     const p = geometry.panels[s.panel];
-    const base = dataToSvg(s.panel, s.obj.xy[0], s.obj.xy[1]);
-    const [nx, ny] = svgToData(s.panel, base[0] + a[0] * step, base[1] + a[1] * step);
-    s.obj.xy = [roundTo(nx, p.xlim), roundTo(ny, p.ylim)];
+    const coords = s.coords ?? 'data';
+    const base = dragBaseSvg(s);
+    const [nx, ny] = svgToData(s.panel, base[0] + a[0] * step, base[1] + a[1] * step, coords);
+    const [limX, limY] = coords === 'axes' ? [AXES_FRAC_LIM, AXES_FRAC_LIM] : [p.xlim, p.ylim];
+    s.obj.xy = [roundTo(nx, limX), roundTo(ny, limY)];
   }
   showXY();
   reconcilePreviews();
@@ -1104,6 +1200,18 @@ for (const [fid, key] of [['f-xticksize', 'xtick_size'], ['f-yticksize', 'ytick_
 $('f-framewidth').addEventListener('change', (e) => {
   const v = parseFloat(e.target.value);
   if (Number.isFinite(v) && v >= 0) edit((o) => { o.frame_lw = v; });
+});
+
+$('f-legend-size').addEventListener('change', (e) => {
+  const v = parseFloat(e.target.value);
+  if (Number.isFinite(v) && v > 0) edit((o) => { o.size = v; });
+});
+$('f-legend-frame').addEventListener('change', (e) => {
+  const on = e.target.checked;
+  edit((o) => { o.frameon = on; });
+});
+$('btn-legend-reset').addEventListener('click', () => {
+  edit((o) => { delete o.xy; });
 });
 
 /* ------------------------------------------------------------ toolbar */
