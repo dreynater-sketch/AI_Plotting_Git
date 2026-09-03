@@ -883,6 +883,18 @@ document.addEventListener('keydown', (evt) => {
   const typing = ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName);
   if (typing || !selection.length) return;
 
+  // PowerPoint's Ctrl+Shift+> / Ctrl+Shift+< grow/shrink the selected text.
+  // evt.key is already the shifted character ('>'/'<') on a standard layout,
+  // but some browsers report the unshifted key with shiftKey set instead --
+  // check both so the shortcut isn't layout-fragile.
+  const grow = evt.key === '>' || (evt.shiftKey && evt.key === '.');
+  const shrink = evt.key === '<' || (evt.shiftKey && evt.key === ',');
+  if (isMulti(evt) && (grow || shrink)) {
+    evt.preventDefault();
+    bumpSize(grow ? 1 : -1);
+    return;
+  }
+
   const arrows = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
   const a = arrows[evt.key];
   if (!a) return;
@@ -918,12 +930,30 @@ $('f-size').addEventListener('input', (e) => setSize(parseFloat(e.target.value))
 
 /** A+ / A- bump every selected label, which is the point of multi-select:
  *  they may start at different sizes and should stay proportional. */
+/** Which font-size field a selected thing's own "A+/A-" applies to.
+ *  Free labels, titles and axis labels all share the ordinary text
+ *  `size`; a tick-axis selection has no such field, just its own
+ *  xtick_size/ytick_size; a whole-panel selection has neither -- there
+ *  is no single "panel font" to bump. */
+function fontSizeKey(s) {
+  if (s.kind === 'xticks') return 'xtick_size';
+  if (s.kind === 'yticks') return 'ytick_size';
+  if (s.kind === 'panel') return null;
+  return 'size';
+}
+
+/** Bump whatever is selected by `delta` pt -- the A+/A- buttons and
+ *  Ctrl+Shift+>/< both call this. They may start at different sizes and
+ *  should stay proportional, so this always adds/subtracts rather than
+ *  setting an absolute value. */
 function bumpSize(delta) {
-  const sel = selected();
+  const sel = selected().filter((s) => fontSizeKey(s));
   if (!sel.length) return;
   pushHistory();
   for (const s of sel) {
-    s.obj.size = Math.min(72, Math.max(4, (s.obj.size ?? 12) + delta));
+    const key = fontSizeKey(s);
+    const base = key === 'size' ? 12 : 11;
+    s.obj[key] = Math.min(72, Math.max(4, (s.obj[key] ?? base) + delta));
   }
   refreshInspector();
   reconcilePreviews();

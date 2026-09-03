@@ -83,6 +83,11 @@ selected; then size, color, alignment and the box toggle apply to all of them.
 - **A+ / A−** bump every selected label by 1 pt *relative to its own size*, so a
   set that started at different sizes stays proportional. Typing an absolute
   size sets them all the same. Fields show `mixed` when the selection disagrees.
+  **Ctrl+Shift+.** (i.e. Ctrl+Shift+>) and **Ctrl+Shift+,** (Ctrl+Shift+<) do
+  the same thing from the keyboard, PowerPoint-style — and work on whatever
+  kind of thing is selected: a free label, an axis title, or a tick-axis
+  selection (bumping that axis's tick size specifically, leaving the other
+  axis alone).
 - Dragging or arrow-nudging moves the entire selection together.
 - Retyping is offered only for a single label, since it has no sensible meaning
   for many at once.
