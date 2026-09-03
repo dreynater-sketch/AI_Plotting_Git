@@ -369,6 +369,32 @@ function reconcilePreviews() {
     }
   }
 
+  // Tick labels have no stored SPEC id per glyph -- matplotlib regenerates
+  // the actual tick set on every limit change -- but the same
+  // scale-about-anchor trick still applies: find every currently-rendered
+  // tick-label group for a panel whose xtick_size/ytick_size just changed,
+  // and scale each one about its own anchor. Without this, Ctrl+Shift+>/<
+  // on a tick-axis selection had no feedback at all until the real render
+  // landed -- a ~1s round trip, since every new tick size also busts the
+  // tight_layout cache -- making the same shortcut that feels instant on a
+  // free label feel badly broken here.
+  for (const p of spec.panels) {
+    const oldPanel = renderedSpec.panels.find((q) => q.id === p.id);
+    if (!oldPanel) continue;
+    for (const axis of ['x', 'y']) {
+      const key = `${axis}tick_size`;
+      const oldSize = oldPanel[key] ?? 11;
+      const newSize = p[key] ?? 11;
+      if (oldSize === newSize) continue;
+      const k = newSize / oldSize;
+      svgEl.querySelectorAll(`g[id^="t_${CSS.escape(p.id)}__${axis}tick_"]`)
+        .forEach((g) => {
+          const anchor = anchorFor(g.id.slice(2), g);
+          if (anchor) setPreviewTransform(g, anchor, 0, 0, k);
+        });
+    }
+  }
+
   if (!selection.length) return;
   if (drag) {
     // Mid-drag, recomputing getBBox every frame forces a synchronous layout.
