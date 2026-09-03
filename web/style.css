@@ -318,6 +318,19 @@ input:focus, textarea:focus, select:focus {
 .row { display: flex; gap: 8px; }
 .row .field { flex: 1; min-width: 0; }
 
+/* X axis / Y axis / Panel groupings in the axes inspector -- shown or
+   hidden depending on whether that axis is actually part of the
+   selection, so a y-tick click never shows x-axis controls. */
+#axes-x-fields, #axes-y-fields, #axes-panel-fields { margin-bottom: 12px; }
+.subhead {
+  font-size: 10px;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-soft);
+  margin-bottom: 6px;
+}
+
 .sizewrap { display: flex; gap: 4px; }
 .sizewrap input { text-align: center; }
 .sizewrap button {

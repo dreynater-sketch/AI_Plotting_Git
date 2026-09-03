@@ -60,6 +60,12 @@ like panels (a) and (b) here), **tick label size**, and **frame width**.
   selected axis toggles that whole axis back off, since every tick on one
   axis is always one selectable thing, never individually addressable --
   matplotlib regenerates the actual tick set on every limit change.
+- The Inspector only shows fields for the axis (or axes) actually
+  selected: clicking a y-tick shows just the Y axis section (min, max,
+  scale, tick size) -- no X axis controls in sight. Clicking blank plot
+  area, or selecting both an x-tick and a y-tick together, shows both
+  axes; **Aspect** and **Frame width** only appear for a full panel
+  selection, since neither belongs to one axis.
 
 ### Editing a family of labels at once
 

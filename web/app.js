@@ -498,6 +498,20 @@ function refreshAxesInspector() {
     $(id).value = v ?? '';
     $(id).placeholder = v === undefined ? 'mixed' : '';
   };
+
+  // A tick click selects one axis, not the whole panel -- so only show
+  // the fields for the axis (or axes) actually present in the selection.
+  // A plain panel selection (blank plot area) counts as both, matching
+  // what it always showed; mixing an x-tick and a y-tick selection (even
+  // from different panels) shows both, same as a panel selection would.
+  const kinds = new Set(selected().map((s) => s.kind));
+  const showX = kinds.has('panel') || kinds.has('xticks');
+  const showY = kinds.has('panel') || kinds.has('yticks');
+  const showPanel = kinds.has('panel');
+  $('axes-x-fields').hidden = !showX;
+  $('axes-y-fields').hidden = !showY;
+  $('axes-panel-fields').hidden = !showPanel;
+
   setNum('f-xmin', (s) => s.obj.xlim[0]);
   setNum('f-xmax', (s) => s.obj.xlim[1]);
   setNum('f-ymin', (s) => s.obj.ylim[0]);

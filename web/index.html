@@ -121,62 +121,74 @@
         </div>
 
         <div id="axes-fields" hidden>
-          <div class="row">
-            <label class="field">
-              <span>x min</span>
-              <input type="number" id="f-xmin" step="any">
-            </label>
-            <label class="field">
-              <span>x max</span>
-              <input type="number" id="f-xmax" step="any">
-            </label>
+          <div id="axes-x-fields">
+            <div class="subhead">X axis</div>
+            <div class="row">
+              <label class="field">
+                <span>min</span>
+                <input type="number" id="f-xmin" step="any">
+              </label>
+              <label class="field">
+                <span>max</span>
+                <input type="number" id="f-xmax" step="any">
+              </label>
+            </div>
+            <div class="row">
+              <label class="field">
+                <span>scale</span>
+                <select id="f-xscale">
+                  <option value="linear">linear</option><option value="log">log</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>tick size (pt)</span>
+                <input type="number" id="f-xticksize" min="4" max="48" step="0.5">
+              </label>
+            </div>
           </div>
-          <div class="row">
-            <label class="field">
-              <span>y min</span>
-              <input type="number" id="f-ymin" step="any">
-            </label>
-            <label class="field">
-              <span>y max</span>
-              <input type="number" id="f-ymax" step="any">
-            </label>
+
+          <div id="axes-y-fields">
+            <div class="subhead">Y axis</div>
+            <div class="row">
+              <label class="field">
+                <span>min</span>
+                <input type="number" id="f-ymin" step="any">
+              </label>
+              <label class="field">
+                <span>max</span>
+                <input type="number" id="f-ymax" step="any">
+              </label>
+            </div>
+            <div class="row">
+              <label class="field">
+                <span>scale</span>
+                <select id="f-yscale">
+                  <option value="linear">linear</option><option value="log">log</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>tick size (pt)</span>
+                <input type="number" id="f-yticksize" min="4" max="48" step="0.5">
+              </label>
+            </div>
           </div>
-          <div class="row">
-            <label class="field">
-              <span>x scale</span>
-              <select id="f-xscale">
-                <option value="linear">linear</option><option value="log">log</option>
-              </select>
-            </label>
-            <label class="field">
-              <span>y scale</span>
-              <select id="f-yscale">
-                <option value="linear">linear</option><option value="log">log</option>
-              </select>
-            </label>
+
+          <div id="axes-panel-fields">
+            <div class="subhead">Panel</div>
+            <div class="row">
+              <label class="field">
+                <span>Aspect</span>
+                <select id="f-aspect">
+                  <option value="auto">auto</option><option value="equal">equal (1:1)</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>Frame width (pt)</span>
+                <input type="number" id="f-framewidth" min="0" max="8" step="0.1">
+              </label>
+            </div>
           </div>
-          <div class="row">
-            <label class="field">
-              <span>x tick size (pt)</span>
-              <input type="number" id="f-xticksize" min="4" max="48" step="0.5">
-            </label>
-            <label class="field">
-              <span>y tick size (pt)</span>
-              <input type="number" id="f-yticksize" min="4" max="48" step="0.5">
-            </label>
-          </div>
-          <div class="row">
-            <label class="field">
-              <span>Aspect</span>
-              <select id="f-aspect">
-                <option value="auto">auto</option><option value="equal">equal (1:1)</option>
-              </select>
-            </label>
-            <label class="field">
-              <span>Frame width (pt)</span>
-              <input type="number" id="f-framewidth" min="0" max="8" step="0.1">
-            </label>
-          </div>
+
           <p class="note" id="axes-note" hidden></p>
         </div>
       </div>
