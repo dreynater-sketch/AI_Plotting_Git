@@ -25,8 +25,21 @@ Local only — the server binds `127.0.0.1` and talks to nothing else.
   Ctrl while dragging to add the box's contents to the current selection
   instead of replacing it. Clicking empty space outside any panel deselects.
 - **Drag** a label anywhere. Arrow keys nudge by 1 pt, Shift+arrows by 10.
-- **Retype** it, including matplotlib mathtext (`$\beta_1$`, `$Q_L$`), change
+- **Double-click** a label to jump straight into retyping it (the sidebar's
+  text field, cursor pre-selected — there's no real editable text sitting
+  in the figure itself, just matplotlib's rendered glyph shapes).
+- **Retype** it, including matplotlib mathtext (`$\beta_1$`, `$Q_L$`); change
   its **size**, **color**, alignment, and whether it has a background box.
+  A **Greek-letter/symbol palette** sits under the text field — click one to
+  insert it at the cursor. It inserts the literal Unicode character, not a
+  backslash command: matplotlib mathtext renders literal Unicode Greek
+  directly, correctly, in or out of `$...$` math mode, so no LaTeX-command
+  translation is needed.
+- Standard text-editing shortcuts work normally inside the text field —
+  **Ctrl+A/X/C/V** for select-all/cut/copy/paste, and **Ctrl+Z** undoes your
+  last keystroke via the browser's own native text undo rather than
+  reverting the whole figure (that only happens when a text field isn't
+  focused).
 - **Ctrl+Z** to undo. **Rebuild** discards all edits and regenerates from the CSV.
 - **figure.py** downloads a standalone script that reproduces exactly what you
   see. **PNG** exports at the spec's dpi.

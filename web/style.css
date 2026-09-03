@@ -360,6 +360,35 @@ input:focus, textarea:focus, select:focus {
   font-size: 11px;
   color: var(--ink-soft);
 }
+
+/* Greek-letter / symbol palette under the text field -- click inserts at
+   the cursor. matplotlib mathtext renders literal Unicode Greek directly,
+   so the inserted character IS the mathtext source, no backslash-command
+   translation needed. */
+.symbol-palette {
+  margin: -4px 0 8px;
+}
+.symbol-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  margin-bottom: 3px;
+}
+.symbol-btn {
+  flex: none;
+  width: 25px;
+  height: 25px;
+  padding: 0;
+  font-size: 14px;
+  line-height: 1;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--surface);
+  color: var(--ink);
+  cursor: pointer;
+}
+.symbol-btn:hover { background: #f0f1f3; border-color: #c6cad0; }
+.symbol-btn:active { background: rgba(31, 111, 235, 0.15); }
 .note code {
   font-family: var(--mono);
   background: var(--line-soft);

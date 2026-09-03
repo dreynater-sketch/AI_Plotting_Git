@@ -45,10 +45,12 @@
     </div>
 
     <div class="hint">
-      Click a label or a panel's axes to select it. <b>Ctrl-click</b> to add
-      more, drag an empty area for a <b>box select</b>, or pick a group above
-      to grab every matching label at once. Drag to move (the whole selection
-      moves together). Arrow keys nudge, Shift = ×10. Esc deselects.
+      Click a label or a panel's axes to select it. <b>Double-click</b> a
+      label to retype it. <b>Ctrl-click</b> to add more, drag an empty area
+      for a <b>box select</b>, or pick a group above to grab every matching
+      label at once. Drag to move (the whole selection moves together).
+      Arrow keys nudge, Shift = ×10, <b>Ctrl+Shift+&gt;/&lt;</b> resizes text.
+      Esc deselects.
     </div>
   </section>
 
@@ -65,6 +67,10 @@
           <span>Text</span>
           <textarea id="f-text" rows="3" spellcheck="false"></textarea>
         </label>
+        <div class="symbol-palette" id="symbol-palette">
+          <div class="symbol-row"><button type="button" class="symbol-btn" data-ch="α">α</button><button type="button" class="symbol-btn" data-ch="β">β</button><button type="button" class="symbol-btn" data-ch="γ">γ</button><button type="button" class="symbol-btn" data-ch="δ">δ</button><button type="button" class="symbol-btn" data-ch="ε">ε</button><button type="button" class="symbol-btn" data-ch="ζ">ζ</button><button type="button" class="symbol-btn" data-ch="η">η</button><button type="button" class="symbol-btn" data-ch="θ">θ</button><button type="button" class="symbol-btn" data-ch="λ">λ</button><button type="button" class="symbol-btn" data-ch="μ">μ</button><button type="button" class="symbol-btn" data-ch="ν">ν</button><button type="button" class="symbol-btn" data-ch="ξ">ξ</button><button type="button" class="symbol-btn" data-ch="π">π</button><button type="button" class="symbol-btn" data-ch="ρ">ρ</button><button type="button" class="symbol-btn" data-ch="σ">σ</button><button type="button" class="symbol-btn" data-ch="τ">τ</button><button type="button" class="symbol-btn" data-ch="φ">φ</button><button type="button" class="symbol-btn" data-ch="χ">χ</button><button type="button" class="symbol-btn" data-ch="ψ">ψ</button><button type="button" class="symbol-btn" data-ch="ω">ω</button></div>
+          <div class="symbol-row"><button type="button" class="symbol-btn" data-ch="Γ">Γ</button><button type="button" class="symbol-btn" data-ch="Δ">Δ</button><button type="button" class="symbol-btn" data-ch="Θ">Θ</button><button type="button" class="symbol-btn" data-ch="Λ">Λ</button><button type="button" class="symbol-btn" data-ch="Ξ">Ξ</button><button type="button" class="symbol-btn" data-ch="Π">Π</button><button type="button" class="symbol-btn" data-ch="Σ">Σ</button><button type="button" class="symbol-btn" data-ch="Φ">Φ</button><button type="button" class="symbol-btn" data-ch="Ψ">Ψ</button><button type="button" class="symbol-btn" data-ch="Ω">Ω</button><button type="button" class="symbol-btn" data-ch="±">±</button><button type="button" class="symbol-btn" data-ch="×">×</button><button type="button" class="symbol-btn" data-ch="°">°</button><button type="button" class="symbol-btn" data-ch="√">√</button><button type="button" class="symbol-btn" data-ch="≤">≤</button><button type="button" class="symbol-btn" data-ch="≥">≥</button><button type="button" class="symbol-btn" data-ch="≈">≈</button><button type="button" class="symbol-btn" data-ch="∞">∞</button></div>
+        </div>
         <p class="note" id="text-note">matplotlib mathtext: <code>$\beta_1$</code>, <code>$Q_L$</code>. Newlines allowed.</p>
 
         <div class="row">

@@ -454,6 +454,7 @@ function refreshInspector() {
 
   // Retyping many labels at once is meaningless; offer it only for one.
   $('text-field').hidden = multi;
+  $('symbol-palette').hidden = multi;
   $('text-note').hidden = multi;
   if (!multi) $('f-text').value = sel[0].obj.text ?? '';
 
@@ -755,6 +756,25 @@ function updateRubberBand(evt) {
   setSelection(rubber.ctrl ? [...rubber.baseSelection, ...hits] : hits);
 }
 
+/** Double-click a label to start retyping it immediately, the way
+ *  PowerPoint/Illustrator double-click into a text box. There is no real
+ *  editable text in the SVG itself -- labels are matplotlib glyph paths,
+ *  not text nodes -- so this jumps to the sidebar's text field (which
+ *  already shows the raw mathtext source) with the content pre-selected,
+ *  ready to type over. Panels and tick-axis selections have no `.text` to
+ *  retype, so a double-click there is a no-op. */
+canvas.addEventListener('dblclick', (evt) => {
+  const g = evt.target.closest('g[id^="t_"]');
+  if (!g) return;
+  const r = resolve(g.id.slice(2));
+  if (!r || r.obj.text === undefined) return;
+  evt.preventDefault();
+  setSelection([r.id]);
+  const ta = $('f-text');
+  ta.focus();
+  ta.select();
+});
+
 canvas.addEventListener('pointerdown', (evt) => {
   const g = evt.target.closest('g[id^="t_"]');
   if (g) {
@@ -874,13 +894,21 @@ function showXY() {
 document.addEventListener('keydown', (evt) => {
   if (evt.key === 'Escape') { setSelection([]); return; }
 
+  const typing = ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName);
+
   if ((evt.ctrlKey || evt.metaKey) && evt.key.toLowerCase() === 'z') {
+    // While typing (e.g. retyping a label's text), Ctrl+Z should undo the
+    // last keystroke in that field via the browser's own native text undo,
+    // not jump out and revert the whole app-level history stack.
+    if (typing) return;
     evt.preventDefault();
     undo();
     return;
   }
 
-  const typing = ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName);
+  // Ctrl+A / Ctrl+X / Ctrl+C / Ctrl+V are never intercepted here, so a
+  // focused text field always gets the browser's native select-all / cut /
+  // copy / paste -- nothing to wire up for those.
   if (typing || !selection.length) return;
 
   // PowerPoint's Ctrl+Shift+> / Ctrl+Shift+< grow/shrink the selected text.
@@ -919,6 +947,25 @@ document.addEventListener('keydown', (evt) => {
 
 $('f-text').addEventListener('input', (e) => {
   edit((o) => { o.text = e.target.value; }, { immediate: false });
+});
+
+// Greek letters / symbols insert at the cursor, matching how any real
+// symbol picker behaves -- not just appended to the end. matplotlib
+// mathtext renders literal Unicode Greek directly (confirmed against the
+// actual renderer), so the inserted character needs no backslash-command
+// translation and works identically inside or outside $...$ math mode.
+$('symbol-palette').addEventListener('click', (e) => {
+  const btn = e.target.closest('.symbol-btn');
+  if (!btn) return;
+  const ta = $('f-text');
+  const ch = btn.dataset.ch;
+  const start = ta.selectionStart ?? ta.value.length;
+  const end = ta.selectionEnd ?? ta.value.length;
+  ta.value = ta.value.slice(0, start) + ch + ta.value.slice(end);
+  const pos = start + ch.length;
+  ta.focus();
+  ta.setSelectionRange(pos, pos);
+  ta.dispatchEvent(new Event('input', { bubbles: true }));
 });
 
 function setSize(v) {
