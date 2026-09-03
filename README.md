@@ -107,6 +107,16 @@ which is exactly the several-thousand-point series that most need to
 stay clickable -- so the click target is a separate, always-vector
 artist, decoupled from how the curve is actually drawn.
 
+Overlapping curves are a real case here, not hypothetical: panel (a)'s
+fit line sits almost exactly on top of the data it was fit to, so their
+click targets cover nearly the same area. Whichever curve is drawn last
+wins a click at any shared point (matching normal visual stacking, since
+hit-paths are inserted in the same order as their visible curves) --
+which would otherwise make the one underneath permanently unreachable by
+clicking. Clicking the same spot again, on whatever's already selected,
+steps to the next thing down the stack instead -- click once for the fit
+line, click the same spot again for the raw data underneath it.
+
 ### Editing a legend
 
 Click a panel's legend box to select it. **Drag it anywhere** in the plot;

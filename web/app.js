@@ -989,8 +989,31 @@ canvas.addEventListener('dblclick', (evt) => {
   ta.select();
 });
 
+/** Which gid group a click resolves to. Ordinarily the topmost one at that
+ *  point, but when curves overlap almost exactly -- a fit line drawn right
+ *  on top of the data it was fit to, say -- the topmost one would otherwise
+ *  permanently shadow everything underneath it, since it wins every click
+ *  forever. Clicking the SAME spot again, on something already selected,
+ *  steps to the next one down the stack instead of reselecting the same
+ *  element every time (PowerPoint/Illustrator's alt-click-to-select-behind,
+ *  minus the modifier key since plain re-click is unambiguous here). */
+function pickClickTarget(evt) {
+  const stack = [];
+  const seen = new Set();
+  for (const el of document.elementsFromPoint(evt.clientX, evt.clientY)) {
+    const g = el.closest('g[id^="t_"]');
+    if (g && !seen.has(g.id)) { seen.add(g.id); stack.push(g); }
+  }
+  if (!stack.length) return null;
+  if (selection.length === 1 && stack.length > 1) {
+    const idx = stack.findIndex((g) => g.id.slice(2) === selection[0]);
+    if (idx !== -1) return stack[(idx + 1) % stack.length];
+  }
+  return stack[0];
+}
+
 canvas.addEventListener('pointerdown', (evt) => {
-  const g = evt.target.closest('g[id^="t_"]');
+  const g = pickClickTarget(evt);
   if (g) {
     // A click on one tick label selects every tick on that axis as a
     // single group; resolve() already normalises the per-tick svg gid to
