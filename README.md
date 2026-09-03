@@ -38,8 +38,8 @@ matplotlib positions those itself.
 
 Click anywhere inside a panel's plot area (not on a label) to select the panel
 itself. The Inspector switches to axis controls: **x/y min and max**, **x/y
-scale** (linear or log), and **aspect** (auto, or equal for a true 1:1 circle
-plot like panels (a) and (b) here).
+scale** (linear or log), **aspect** (auto, or equal for a true 1:1 circle plot
+like panels (a) and (b) here), **tick label size**, and **frame width**.
 
 - Ctrl-click other panels to bulk-edit axes together — useful for e.g. giving
   several panels the same aspect. Limits stay per-panel even in a bulk edit
@@ -47,6 +47,10 @@ plot like panels (a) and (b) here).
 - Switching to log scale is refused client-side, with an explanation, if the
   panel's current range on that axis touches zero or goes negative —
   matplotlib can't render that, so it's caught before the round-trip.
+- The same panel selection also controls **tick label size** (x and y
+  separately) and **frame width** (the spine linewidth around the plot box).
+  Both are per-panel, so bulk-selecting several panels bumps all of them
+  together the same way the label peer groups do.
 
 ### Editing a family of labels at once
 

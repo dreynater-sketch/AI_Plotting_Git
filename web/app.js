@@ -470,7 +470,10 @@ function refreshAxesInspector() {
   setNum('f-ymax', (s) => s.obj.ylim[1]);
   $('f-xscale').value = common((s) => s.obj.xscale ?? 'linear') ?? 'linear';
   $('f-yscale').value = common((s) => s.obj.yscale ?? 'linear') ?? 'linear';
+  setNum('f-xticksize', (s) => s.obj.xtick_size ?? 11);
+  setNum('f-yticksize', (s) => s.obj.ytick_size ?? 11);
   $('f-aspect').value = common((s) => s.obj.aspect ?? 'auto') ?? 'auto';
+  setNum('f-framewidth', (s) => s.obj.frame_lw ?? 0.8);
   $('axes-note').hidden = true;
 }
 
@@ -921,6 +924,17 @@ function trySetScale(axis, value) {
 $('f-xscale').addEventListener('change', (e) => trySetScale('x', e.target.value));
 $('f-yscale').addEventListener('change', (e) => trySetScale('y', e.target.value));
 $('f-aspect').addEventListener('change', (e) => edit((o) => { o.aspect = e.target.value; }));
+
+for (const [fid, key] of [['f-xticksize', 'xtick_size'], ['f-yticksize', 'ytick_size']]) {
+  $(fid).addEventListener('change', (e) => {
+    const v = parseFloat(e.target.value);
+    if (Number.isFinite(v)) edit((o) => { o[key] = v; });
+  });
+}
+$('f-framewidth').addEventListener('change', (e) => {
+  const v = parseFloat(e.target.value);
+  if (Number.isFinite(v) && v >= 0) edit((o) => { o.frame_lw = v; });
+});
 
 /* ------------------------------------------------------------ toolbar */
 

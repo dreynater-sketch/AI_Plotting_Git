@@ -52,6 +52,9 @@ def build_spec(d):
         "xscale": "linear",
         "yscale": "linear",
         "aspect": "equal",
+        "xtick_size": 11,
+        "ytick_size": 11,
+        "frame_lw": 0.8,
         "zero_lines": True,
         "legend": {"loc": "lower right", "frameon": False, "size": 10},
         "series": [
@@ -111,6 +114,9 @@ def build_spec(d):
         "xscale": "linear",
         "yscale": "linear",
         "aspect": "equal",
+        "xtick_size": 11,
+        "ytick_size": 11,
+        "frame_lw": 0.8,
         "zero_lines": True,
         "legend": {"loc": "lower right", "frameon": False, "size": 10},
         "series": [
@@ -170,6 +176,9 @@ def build_spec(d):
         "xscale": "linear",
         "yscale": "linear",
         "aspect": "auto",
+        "xtick_size": 11,
+        "ytick_size": 11,
+        "frame_lw": 0.8,
         "zero_lines": False,
         "legend": {"loc": "lower right", "frameon": False, "size": 10},
         "series": [

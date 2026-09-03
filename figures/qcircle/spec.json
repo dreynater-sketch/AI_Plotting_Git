@@ -86,6 +86,9 @@
       "xscale": "linear",
       "yscale": "linear",
       "aspect": "equal",
+      "xtick_size": 11,
+      "ytick_size": 11,
+      "frame_lw": 0.8,
       "zero_lines": true,
       "legend": {
         "loc": "lower right",
@@ -344,6 +347,9 @@
       "xscale": "linear",
       "yscale": "linear",
       "aspect": "equal",
+      "xtick_size": 11,
+      "ytick_size": 11,
+      "frame_lw": 0.8,
       "zero_lines": true,
       "legend": {
         "loc": "lower right",
@@ -602,6 +608,9 @@
       "xscale": "linear",
       "yscale": "linear",
       "aspect": "auto",
+      "xtick_size": 11,
+      "ytick_size": 11,
+      "frame_lw": 0.8,
       "zero_lines": false,
       "legend": {
         "loc": "lower right",

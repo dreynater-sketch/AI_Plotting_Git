@@ -155,12 +155,28 @@
               </select>
             </label>
           </div>
-          <label class="field">
-            <span>Aspect</span>
-            <select id="f-aspect">
-              <option value="auto">auto</option><option value="equal">equal (1:1)</option>
-            </select>
-          </label>
+          <div class="row">
+            <label class="field">
+              <span>x tick size (pt)</span>
+              <input type="number" id="f-xticksize" min="4" max="48" step="0.5">
+            </label>
+            <label class="field">
+              <span>y tick size (pt)</span>
+              <input type="number" id="f-yticksize" min="4" max="48" step="0.5">
+            </label>
+          </div>
+          <div class="row">
+            <label class="field">
+              <span>Aspect</span>
+              <select id="f-aspect">
+                <option value="auto">auto</option><option value="equal">equal (1:1)</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>Frame width (pt)</span>
+              <input type="number" id="f-framewidth" min="0" max="8" step="0.1">
+            </label>
+          </div>
           <p class="note" id="axes-note" hidden></p>
         </div>
       </div>

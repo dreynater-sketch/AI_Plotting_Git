@@ -164,6 +164,10 @@ def _panel(p, i):
     if p.get("aspect", "auto") == "equal":
         L.append("ax.set_aspect('equal', 'box')")
 
+    L.append(f'ax.tick_params(axis="x", labelsize={p.get("xtick_size", 11)})')
+    L.append(f'ax.tick_params(axis="y", labelsize={p.get("ytick_size", 11)})')
+    L.append(f"for _sp in ax.spines.values(): _sp.set_linewidth({p.get('frame_lw', 0.8)})")
+
     lg = p.get("legend")
     if lg and any(s.get("label") for s in p.get("series", [])):
         L.append(f"ax.legend(loc={_s(lg.get('loc', 'best'))}, "

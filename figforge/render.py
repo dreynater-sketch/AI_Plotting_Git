@@ -117,6 +117,7 @@ def _layout_key(spec):
         spec.get("suptitle"),
         [[p.get("title"), p.get("xlabel"), p.get("ylabel"), p.get("xlim"),
           p.get("ylim"), p.get("xscale"), p.get("yscale"), p.get("aspect"),
+          p.get("xtick_size"), p.get("ytick_size"),
           p.get("legend")] for p in spec["panels"]],
     ], sort_keys=True, default=str)
 
@@ -191,6 +192,11 @@ def _draw_panel(ax, p, arrays, preview=False):
     ax.set_ylim(*p["ylim"])
     if p.get("aspect", "auto") == "equal":
         ax.set_aspect("equal", "box")
+
+    ax.tick_params(axis="x", labelsize=p.get("xtick_size", 11))
+    ax.tick_params(axis="y", labelsize=p.get("ytick_size", 11))
+    for spine in ax.spines.values():
+        spine.set_linewidth(p.get("frame_lw", 0.8))
 
     lg = p.get("legend")
     if lg and any(s.get("label") for s in p.get("series", [])):
