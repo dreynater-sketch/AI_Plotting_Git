@@ -98,6 +98,19 @@ function resolve(id, source = spec) {
   if (id === 'suptitle') {
     return { id, kind: 'suptitle', obj: source.suptitle, draggable: false, panel: null };
   }
+  // Canonical tick-axis id (what selection actually stores) and the raw
+  // per-tick svg gid (what a click on the figure hands us) both resolve to
+  // the same thing: every tick label on that axis, as one group.
+  const canonicalTick = id.match(/^panel:(.+):(x|y)ticks$/);
+  const rawTick = !canonicalTick && id.match(/^(.+)__(x|y)tick_\d+$/);
+  const tickMatch = canonicalTick || rawTick;
+  if (tickMatch) {
+    const [, pid, axis] = tickMatch;
+    const p = source.panels.find((q) => q.id === pid);
+    if (!p) return null;
+    return { id: `panel:${pid}:${axis}ticks`, kind: `${axis}ticks`,
+             obj: p, draggable: false, panel: pid };
+  }
   if (id.startsWith('panel:')) {
     const pid = id.slice(6);
     const p = source.panels.find((q) => q.id === pid);
@@ -134,6 +147,7 @@ function allElements(source = spec) {
 const KIND_LABEL = {
   suptitle: 'figure title', title: 'panel title', panel: 'panel axes',
   xlabel: 'x-axis label', ylabel: 'y-axis label', text: 'label',
+  xticks: 'x-axis ticks', yticks: 'y-axis ticks',
 };
 
 /* ------------------------------------------- coordinate transformations */
@@ -260,6 +274,25 @@ function drawOutlines() {
   clearOutlines();
   if (!svgEl) return;
   selection.forEach((id, i) => {
+    const tickMatch = id.match(/^panel:(.+):(x|y)ticks$/);
+    if (tickMatch) {
+      const [, pid, axis] = tickMatch;
+      const els = svgEl.querySelectorAll(
+        `g[id^="t_${CSS.escape(pid)}__${axis}tick_"]`);
+      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+      els.forEach((g) => {
+        let bb;
+        try { bb = g.getBBox(); } catch { return; }
+        if (!bb.width || !bb.height) return;
+        x0 = Math.min(x0, bb.x); y0 = Math.min(y0, bb.y);
+        x1 = Math.max(x1, bb.x + bb.width); y1 = Math.max(y1, bb.y + bb.height);
+      });
+      if (!isFinite(x0)) return;
+      const pad = 3;
+      svgEl.appendChild(mkOutlineRect(
+        x0 - pad, y0 - pad, x1 - x0 + 2 * pad, y1 - y0 + 2 * pad, i === 0));
+      return;
+    }
     if (id.startsWith('panel:')) {
       const bb = geometry.panels[id.slice(6)]?.bbox;
       if (!bb) return;
@@ -413,7 +446,8 @@ function refreshInspector() {
     ? KIND_LABEL[kinds[0]] : 'mixed';
   $('insp-id').textContent = multi ? `${sel.length} selected` : sel[0].id;
 
-  const allPanels = sel.every((s) => s.kind === 'panel');
+  const allPanels = sel.every((s) => s.kind === 'panel'
+    || s.kind === 'xticks' || s.kind === 'yticks');
   $('label-fields').hidden = allPanels;
   $('axes-fields').hidden = !allPanels;
   if (allPanels) { refreshAxesInspector(); return; }
@@ -524,6 +558,13 @@ function peerGroups() {
     return groups;
   }
 
+  if (primary.kind === 'xticks' || primary.kind === 'yticks') {
+    const axis = primary.kind === 'xticks' ? 'x' : 'y';
+    add(`All ${axis}-axis ticks`, spec.panels
+      .map((p) => resolve(`panel:${p.id}:${axis}ticks`)).filter(Boolean));
+    return groups;
+  }
+
   if (primary.kind === 'text') {
     add(`All labels in panel (${primary.panel})`,
         all.filter((e) => e.kind === 'text' && e.panel === primary.panel));
@@ -608,7 +649,11 @@ function buildList() {
   };
 
   group('panels');
-  for (const p of spec.panels) add(`panel (${p.id}) axes`, `panel:${p.id}`, '▭');
+  for (const p of spec.panels) {
+    add(`panel (${p.id}) axes`, `panel:${p.id}`, '▭');
+    add(`panel (${p.id}) x ticks`, `panel:${p.id}:xticks`, 'xt');
+    add(`panel (${p.id}) y ticks`, `panel:${p.id}:yticks`, 'yt');
+  }
 
   group('figure');
   if (spec.suptitle?.text) add(preview(spec.suptitle.text), 'suptitle', 'sup');
@@ -628,7 +673,10 @@ function preview(s) {
 }
 
 function chipLabel(s) {
-  return s.kind === 'panel' ? `panel (${s.panel}) axes` : preview(s.obj.text);
+  if (s.kind === 'panel') return `panel (${s.panel}) axes`;
+  if (s.kind === 'xticks') return `panel (${s.panel}) x ticks`;
+  if (s.kind === 'yticks') return `panel (${s.panel}) y ticks`;
+  return preview(s.obj.text);
 }
 
 function escapeHtml(s) {
@@ -696,7 +744,12 @@ function updateRubberBand(evt) {
 canvas.addEventListener('pointerdown', (evt) => {
   const g = evt.target.closest('g[id^="t_"]');
   if (g) {
-    const id = g.id.slice(2);
+    // A click on one tick label selects every tick on that axis as a
+    // single group; resolve() already normalises the per-tick svg gid to
+    // that group's canonical id, so reuse it here rather than letting two
+    // different ticks pile up as separate selection entries.
+    const rawId = g.id.slice(2);
+    const id = resolve(rawId)?.id ?? rawId;
     if (isMulti(evt)) { toggleSelection(id); return; }
     // Clicking inside an existing multi-selection keeps it, so the whole group
     // can be dragged together.

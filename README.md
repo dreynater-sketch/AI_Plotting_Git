@@ -51,6 +51,15 @@ like panels (a) and (b) here), **tick label size**, and **frame width**.
   separately) and **frame width** (the spine linewidth around the plot box).
   Both are per-panel, so bulk-selecting several panels bumps all of them
   together the same way the label peer groups do.
+- **Click a tick label directly** (one of the numbers along an axis) and
+  every tick on that axis highlights as one group, ready to bulk-edit --
+  no need to find empty plot area to click. A **Similar** chip offers
+  *All x-axis ticks* / *All y-axis ticks* across every panel, same as the
+  label peer groups. Ctrl-click a tick on a different panel's axis to add
+  it to the selection; ctrl-clicking a different tick on an *already*
+  selected axis toggles that whole axis back off, since every tick on one
+  axis is always one selectable thing, never individually addressable --
+  matplotlib regenerates the actual tick set on every limit change.
 
 ### Editing a family of labels at once
 

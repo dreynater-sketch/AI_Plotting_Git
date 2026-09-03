@@ -198,6 +198,17 @@ def _draw_panel(ax, p, arrays, preview=False):
     for spine in ax.spines.values():
         spine.set_linewidth(p.get("frame_lw", 0.8))
 
+    # Individually gid-tagged so a click can be resolved to a specific
+    # tick, but only to canonicalise it: the editor treats every tick on
+    # an axis as one selectable, bulk-editable group (xtick_size /
+    # ytick_size), never as individually addressable SPEC elements --
+    # matplotlib regenerates the tick set on every limit change, so a
+    # stable per-tick id the way free labels have would be meaningless.
+    for i, lbl in enumerate(ax.get_xticklabels()):
+        lbl.set_gid(f't_{p["id"]}__xtick_{i}')
+    for i, lbl in enumerate(ax.get_yticklabels()):
+        lbl.set_gid(f't_{p["id"]}__ytick_{i}')
+
     lg = p.get("legend")
     if lg and any(s.get("label") for s in p.get("series", [])):
         ax.legend(loc=lg.get("loc", "best"), frameon=lg.get("frameon", False),
