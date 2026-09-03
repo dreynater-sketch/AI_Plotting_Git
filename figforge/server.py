@@ -87,7 +87,37 @@ class Handler(BaseHTTPRequestHandler):
             with open(png, "rb") as f:
                 return self._send(200, f.read(), "image/png")
 
+        if path.startswith("/api/data/"):
+            return self._series_data(path[len("/api/data/"):])
+
         return self._static(path)
+
+    def _series_data(self, rest):
+        """The raw (x, y) values behind one series -- what a clicked curve's
+        data table shows. Not folded into /api/figure: the spec stays small
+        and the bulk arrays only cross the wire when a curve is actually
+        selected (spec section 4, "data is referenced, not duplicated")."""
+        parts = rest.split("/", 1)
+        if len(parts) != 2:
+            return self._error(400, "expected /api/data/<figure>/<series id>")
+        fig_name, series_id = parts
+        fig = self._figure(fig_name)
+        if not fig or not NAME_RE.match(series_id):
+            return self._error(404, "unknown figure or series")
+
+        spec = fig.load_spec()
+        arrays = fig.load_arrays()
+        for p in spec["panels"]:
+            for s in p.get("series", []):
+                if s["id"] != series_id:
+                    continue
+                x = arrays[s["x"]] if isinstance(s["x"], str) else s["x"]
+                y = arrays[s["y"]] if isinstance(s["y"], str) else s["y"]
+                return self._json({
+                    "id": series_id, "panel": p["id"], "label": s.get("label", ""),
+                    "x": [float(v) for v in x], "y": [float(v) for v in y],
+                })
+        return self._error(404, "unknown series")
 
     # --------------------------------------------------------------- POST
     def do_POST(self):

@@ -143,6 +143,58 @@ main {
 
 .canvas svg { display: block; }
 
+/* ------------------------------------------------------------ data panel */
+.data-panel {
+  flex: none;
+  max-height: 240px;
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.data-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 14px;
+  border-bottom: 1px solid var(--line-soft);
+  font-size: 12px;
+}
+.data-title { font-weight: 600; }
+.data-count, .data-status { color: var(--ink-soft); font-variant-numeric: tabular-nums; }
+.data-status.err { color: var(--danger); }
+
+.data-table-wrap {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+.data-table thead th {
+  position: sticky;
+  top: 0;
+  background: var(--surface);
+  text-align: left;
+  padding: 6px 14px;
+  border-bottom: 1px solid var(--line);
+  color: var(--ink-soft);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-weight: 600;
+}
+.data-table td {
+  padding: 2px 14px;
+  white-space: nowrap;
+}
+.data-table tbody tr:nth-child(even) { background: var(--line-soft); }
+
 .hint {
   flex: none;
   padding: 7px 14px;

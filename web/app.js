@@ -141,6 +141,11 @@ function resolve(id, source = spec) {
                  coords: t.coords ?? 'data' };
       }
     }
+    for (const sr of p.series || []) {
+      // A curve isn't draggable -- moving data doesn't mean anything -- only
+      // its style (color/width/marker) and its legend label are editable.
+      if (sr.id === id) return { id, kind: 'series', obj: sr, draggable: false, panel: p.id };
+    }
   }
   return null;
 }
@@ -155,6 +160,7 @@ function allElements(source = spec) {
     }
     out.push(resolve(`${p.id}__legend`, source));
     for (const t of p.texts || []) out.push(resolve(t.id, source));
+    for (const sr of p.series || []) out.push(resolve(sr.id, source));
   }
   return out.filter(Boolean);
 }
@@ -163,6 +169,7 @@ const KIND_LABEL = {
   suptitle: 'figure title', title: 'panel title', panel: 'panel axes',
   xlabel: 'x-axis label', ylabel: 'y-axis label', text: 'label',
   xticks: 'x-axis ticks', yticks: 'y-axis ticks', legend: 'legend',
+  series: 'curve',
 };
 
 /* ------------------------------------------- coordinate transformations */
@@ -247,7 +254,11 @@ function applySvg(svgText) {
     const r = resolve(g.id.slice(2));
     if (!r) continue;
     if (!r.draggable) g.classList.add('ff-static');
-    addHitTarget(g);
+    // A curve's own bounding box can span most of the panel, so the usual
+    // bbox-padded hit rect (right for a compact text label) would swallow
+    // clicks meant for anything drawn on top of it. Its click target is
+    // already the wide invisible stroke the server drew alongside it.
+    if (r.kind !== 'series') addHitTarget(g);
   }
   reconcilePreviews();
   drawOutlines();
@@ -527,6 +538,7 @@ function refreshInspector() {
   const sel = selected();
   $('insp-empty').hidden = sel.length > 0;
   $('insp-body').hidden = sel.length === 0;
+  refreshDataPanel(sel);
   if (!sel.length) return;
 
   const multi = sel.length > 1;
@@ -538,11 +550,14 @@ function refreshInspector() {
   const allPanels = sel.every((s) => s.kind === 'panel'
     || s.kind === 'xticks' || s.kind === 'yticks');
   const allLegends = sel.every((s) => s.kind === 'legend');
-  $('label-fields').hidden = allPanels || allLegends;
+  const allSeries = sel.every((s) => s.kind === 'series');
+  $('label-fields').hidden = allPanels || allLegends || allSeries;
   $('axes-fields').hidden = !allPanels;
   $('legend-fields').hidden = !allLegends;
+  $('series-fields').hidden = !allSeries;
   if (allPanels) { refreshAxesInspector(); return; }
   if (allLegends) { refreshLegendInspector(); return; }
+  if (allSeries) { refreshSeriesInspector(); return; }
 
   // Retyping many labels at once is meaningless; offer it only for one.
   $('text-field').hidden = multi;
@@ -631,6 +646,78 @@ function refreshLegendInspector() {
   $('btn-legend-reset').disabled = !sel.some((s) => s.obj.xy);
 }
 
+/** A curve's style lives under obj.style, not on obj itself (unlike every
+ *  other kind so far), since that's how the SPEC already models it -- these
+ *  fields write to s.obj.style.xxx rather than s.obj.xxx accordingly. */
+function refreshSeriesInspector() {
+  const label = common((s) => s.obj.label ?? '');
+  $('f-series-label').value = label ?? '';
+  $('f-series-label').placeholder = label === undefined ? 'mixed' : '(none)';
+
+  const color = common((s) => normHex(s.obj.style?.color ?? '#000000'));
+  $('f-series-color').value = color ?? '#000000';
+  $('f-series-color-hex').value = color ?? '';
+  $('f-series-color-hex').placeholder = color === undefined ? 'mixed' : '';
+
+  $('f-series-marker').value = common((s) => s.obj.style?.marker ?? 'none') ?? 'none';
+
+  const lw = common((s) => s.obj.style?.lw ?? 1.5);
+  $('f-series-lw').value = lw ?? '';
+  $('f-series-lw').placeholder = lw === undefined ? 'mixed' : '';
+
+  const ms = common((s) => s.obj.style?.ms ?? 6);
+  $('f-series-ms').value = ms ?? '';
+  $('f-series-ms').placeholder = ms === undefined ? 'mixed' : '';
+}
+
+/** The Excel-like table below the figure: only meaningful for exactly one
+ *  selected curve (showing two different curves' data at once in one table
+ *  doesn't mean anything), fetched fresh from /api/data on every selection
+ *  change rather than cached -- the arrays are modest (a few thousand points
+ *  at most here) and this only runs on a real click, not on every render. */
+let dataPanelToken = 0;
+
+function refreshDataPanel(sel) {
+  const panelEl = $('data-panel');
+  const single = sel.length === 1 && sel[0].kind === 'series';
+  panelEl.hidden = !single;
+  if (!single) return;
+
+  const s = sel[0];
+  const p = panelById(s.panel);
+  $('data-title').textContent = s.obj.label ? `${s.obj.label} (${s.id})` : s.id;
+  $('data-col-x').textContent = stripMath(p.xlabel?.text) || 'x';
+  $('data-col-y').textContent = stripMath(p.ylabel?.text) || 'y';
+  $('data-count').textContent = '';
+  $('data-status').textContent = 'loading…';
+  $('data-status').className = 'data-status';
+  $('data-table-body').innerHTML = '';
+
+  const token = ++dataPanelToken;
+  fetch(`/api/data/${FIGURE}/${s.id}`)
+    .then((r) => r.json().then((data) => ({ ok: r.ok, data })))
+    .then(({ ok, data }) => {
+      if (token !== dataPanelToken) return;  // a newer selection fired since
+      if (!ok) throw new Error(data.error || 'failed to load');
+      $('data-status').textContent = '';
+      $('data-count').textContent = `${data.x.length} points`;
+      const rows = data.x.map((x, i) =>
+        `<tr><td>${fmtNum(x)}</td><td>${fmtNum(data.y[i])}</td></tr>`);
+      $('data-table-body').innerHTML = rows.join('');
+    })
+    .catch((e) => {
+      if (token !== dataPanelToken) return;
+      $('data-status').textContent = e.message;
+      $('data-status').className = 'data-status err';
+    });
+}
+
+function fmtNum(v) {
+  if (!Number.isFinite(v)) return String(v);
+  if (v !== 0 && (Math.abs(v) >= 1e5 || Math.abs(v) < 1e-4)) return v.toExponential(4);
+  return v.toFixed(6);
+}
+
 function normHex(c) {
   if (typeof c !== 'string') return '#000000';
   if (/^#[0-9a-f]{6}$/i.test(c)) return c.toLowerCase();
@@ -690,6 +777,16 @@ function peerGroups() {
     // .color, so the generic "Everything in #hex" bucket below would
     // otherwise compare against a field it doesn't actually have.
     add('All legends', spec.panels.map((p) => resolve(`${p.id}__legend`)).filter(Boolean));
+    return groups;
+  }
+
+  if (primary.kind === 'series') {
+    // Dedicated early return, same reason as legend: a curve's size/color
+    // live at different paths (no .size at all, .style.color not .color),
+    // so the generic buckets below would compare the wrong thing.
+    add(`All curves in panel (${primary.panel})`,
+        all.filter((e) => e.kind === 'series' && e.panel === primary.panel));
+    add('All curves', all.filter((e) => e.kind === 'series'));
     return groups;
   }
 
@@ -793,6 +890,7 @@ function buildList() {
     if (p.xlabel?.text) add(preview(p.xlabel.text), `${p.id}__xlabel`, 'x');
     if (p.ylabel?.text) add(preview(p.ylabel.text), `${p.id}__ylabel`, 'y');
     for (const t of p.texts || []) add(preview(t.text), t.id, '¶');
+    for (const sr of p.series || []) add(sr.label || sr.id, sr.id, 'cv');
   }
   markList();
 }
@@ -806,6 +904,7 @@ function chipLabel(s) {
   if (s.kind === 'xticks') return `panel (${s.panel}) x ticks`;
   if (s.kind === 'yticks') return `panel (${s.panel}) y ticks`;
   if (s.kind === 'legend') return `panel (${s.panel}) legend`;
+  if (s.kind === 'series') return s.obj.label || s.id;
   return preview(s.obj.text);
 }
 
@@ -1212,6 +1311,31 @@ $('f-legend-frame').addEventListener('change', (e) => {
 });
 $('btn-legend-reset').addEventListener('click', () => {
   edit((o) => { delete o.xy; });
+});
+
+$('f-series-label').addEventListener('input', (e) => {
+  edit((o) => { o.label = e.target.value; }, { immediate: false });
+});
+$('f-series-color').addEventListener('input', (e) => {
+  $('f-series-color-hex').value = e.target.value;
+  edit((o) => { (o.style ??= {}).color = e.target.value; }, { immediate: false });
+});
+$('f-series-color-hex').addEventListener('change', (e) => {
+  const v = e.target.value.trim();
+  if (!/^#[0-9a-f]{6}$/i.test(v)) { e.target.value = $('f-series-color').value; return; }
+  $('f-series-color').value = v;
+  edit((o) => { (o.style ??= {}).color = v; });
+});
+$('f-series-marker').addEventListener('change', (e) => {
+  edit((o) => { (o.style ??= {}).marker = e.target.value; });
+});
+$('f-series-lw').addEventListener('change', (e) => {
+  const v = parseFloat(e.target.value);
+  if (Number.isFinite(v) && v >= 0) edit((o) => { (o.style ??= {}).lw = v; });
+});
+$('f-series-ms').addEventListener('change', (e) => {
+  const v = parseFloat(e.target.value);
+  if (Number.isFinite(v) && v >= 0) edit((o) => { (o.style ??= {}).ms = v; });
 });
 
 /* ------------------------------------------------------------ toolbar */

@@ -122,6 +122,32 @@ def _layout_key(spec):
     ], sort_keys=True, default=str)
 
 
+HIT_STROKE_WIDTH = 10
+HIT_POINT_SIZE = 20
+HIT_PATH_MAX_POINTS = 150
+
+
+def _draw_series_hit_target(ax, s, xs, ys):
+    """A generous, always-vector click target for a series, independent of
+    how it's actually rendered (which may be rasterized for performance --
+    confirmed empirically that set_gid() does not survive rasterization, so
+    a curve's real Line2D can't be the click target once it's big enough to
+    raster). Decimated so it stays cheap even for a several-thousand-point
+    series; stroke-opacity 0 still emits real, gid-tagged path geometry and
+    is genuinely clickable (pointer-events treats an opacity-0 *painted*
+    stroke as hit-testable, unlike stroke: none) -- confirmed against the
+    actual SVG output, not assumed.
+    """
+    n = len(xs)
+    step = max(1, n // HIT_PATH_MAX_POINTS)
+    hx, hy = xs[::step], ys[::step]
+    if len(hx) >= 2:
+        (hit,) = ax.plot(hx, hy, alpha=0, lw=HIT_STROKE_WIDTH, solid_capstyle="round")
+    else:
+        (hit,) = ax.plot(hx, hy, alpha=0, marker="o", ms=HIT_POINT_SIZE, ls="none")
+    hit.set_gid("t_" + s["id"])
+
+
 def _draw_panel(ax, p, arrays, preview=False):
     for h in p.get("hlines", []):
         ax.axhline(h["y"], color=h.get("color", "0.8"), ls=h.get("ls", "-"),
@@ -135,10 +161,14 @@ def _draw_panel(ax, p, arrays, preview=False):
 
     for s in p.get("series", []):
         xs = _resolve(s["x"], arrays)
-        (line,) = ax.plot(xs, _resolve(s["y"], arrays),
+        ys = _resolve(s["y"], arrays)
+        (line,) = ax.plot(xs, ys,
                           label=s.get("label"), **_style(s.get("style")))
         if preview and len(xs) > RASTER_MIN_POINTS:
             line.set_rasterized(True)
+
+        if preview:
+            _draw_series_hit_target(ax, s, xs, ys)
 
     for a in p.get("arrows", []):
         ax.add_patch(FancyArrowPatch(

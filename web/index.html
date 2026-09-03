@@ -44,6 +44,21 @@
       </div>
     </div>
 
+    <div class="data-panel" id="data-panel" hidden>
+      <div class="data-head">
+        <span class="data-title" id="data-title">curve</span>
+        <span class="data-count" id="data-count"></span>
+        <span class="spacer"></span>
+        <span class="data-status" id="data-status"></span>
+      </div>
+      <div class="data-table-wrap" id="data-table-wrap">
+        <table class="data-table">
+          <thead><tr><th id="data-col-x">x</th><th id="data-col-y">y</th></tr></thead>
+          <tbody id="data-table-body"></tbody>
+        </table>
+      </div>
+    </div>
+
     <div class="hint">
       Click a label or a panel's axes to select it. <b>Double-click</b> a
       label to retype it. <b>Ctrl-click</b> to add more, drag an empty area
@@ -211,6 +226,47 @@
             <button type="button" id="btn-legend-reset" class="link">Reset position</button>
             to return it to its default corner.
           </p>
+        </div>
+
+        <div id="series-fields" hidden>
+          <div class="subhead">Curve</div>
+          <label class="field">
+            <span>Legend label</span>
+            <input type="text" id="f-series-label" spellcheck="false" placeholder="(none)">
+          </label>
+          <div class="row">
+            <label class="field">
+              <span>Color</span>
+              <span class="colorwrap">
+                <input type="color" id="f-series-color">
+                <input type="text" id="f-series-color-hex" spellcheck="false">
+              </span>
+            </label>
+            <label class="field">
+              <span>Marker</span>
+              <select id="f-series-marker">
+                <option value="none">none</option>
+                <option value=".">. dot</option>
+                <option value="o">o circle</option>
+                <option value="s">s square</option>
+                <option value="^">^ triangle</option>
+                <option value="D">D diamond</option>
+                <option value="+">+ plus</option>
+                <option value="x">x cross</option>
+              </select>
+            </label>
+          </div>
+          <div class="row">
+            <label class="field">
+              <span>Line width</span>
+              <input type="number" id="f-series-lw" min="0" max="10" step="0.1">
+            </label>
+            <label class="field">
+              <span>Marker size</span>
+              <input type="number" id="f-series-ms" min="0" max="30" step="0.5">
+            </label>
+          </div>
+          <p class="note">Its data shows below the figure.</p>
         </div>
       </div>
     </div>

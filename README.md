@@ -80,6 +80,33 @@ like panels (a) and (b) here), **tick label size**, and **frame width**.
   axes; **Aspect** and **Frame width** only appear for a full panel
   selection, since neither belongs to one axis.
 
+### Curves: style and their real data
+
+Click a curve (or a marker/line construct like the origin cross or the
+center dot) to select it. The Inspector shows its **legend label**,
+**color**, **marker**, **line width**, and **marker size** -- writing to
+the series' own `style` dict in spec.json, same as matplotlib's own
+kwargs. Below the figure, a scrollable table shows that curve's actual
+(x, y) values, fetched from the same data your CSV loaded -- not
+estimated, not AI-guessed, the real numbers. Ctrl-click curves in the
+same or other panels to bulk-edit style via **All curves in panel (a)**
+/ **All curves**; the table only shows for a single selected curve, since
+two curves' data in one table doesn't mean anything.
+
+A curve isn't draggable -- moving data doesn't mean anything -- and its
+click target is deliberately not its bounding box: for a scatter that
+spans most of the panel, a bbox hit-area would swallow clicks meant for
+labels drawn on top of it. Instead the server draws an invisible,
+decimated path tracing the curve's actual shape (confirmed to land
+exactly on the real data, not approximated) with a wide but fully
+transparent stroke -- genuinely clickable, since SVG hit-testing treats
+an opacity-0 stroke as painted, unlike `stroke: none`. This sidesteps a
+real limitation found while building it: matplotlib silently drops a
+gid from any artist it rasterizes for performance (see Latency above),
+which is exactly the several-thousand-point series that most need to
+stay clickable -- so the click target is a separate, always-vector
+artist, decoupled from how the curve is actually drawn.
+
 ### Editing a legend
 
 Click a panel's legend box to select it. **Drag it anywhere** in the plot;
@@ -219,7 +246,9 @@ figures/qcircle/
 
 ## Not in this build
 
-No AI, no chat, no git-commit-per-change, no multi-user, no Vercel. Arrows,
-legends and axis limits render from the SPEC but aren't interactive yet.
+No AI, no chat, no git-commit-per-change, no multi-user, no Vercel. Arrows
+render from the SPEC but aren't interactive yet — everything else (labels,
+panels, axes, ticks, legends, curves) is. The data table is read-only; there's
+no way yet to add a curve, delete one, or hand-edit a value in the table.
 Vercel needs a Python serverless function for the render step — matplotlib has
 to live somewhere — so that's a deliberate later step.
