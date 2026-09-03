@@ -275,6 +275,40 @@
           </label>
           <p class="note">Its data shows below the figure.</p>
         </div>
+
+        <div id="arrow-fields" hidden>
+          <div class="subhead">Arrow</div>
+          <div class="row">
+            <label class="field">
+              <span>Color</span>
+              <span class="colorwrap">
+                <input type="color" id="f-arrow-color">
+                <input type="text" id="f-arrow-color-hex" spellcheck="false">
+              </span>
+            </label>
+            <label class="field">
+              <span>Style</span>
+              <select id="f-arrow-style">
+                <option value="<->">&lt;-&gt; both ends</option>
+                <option value="->">-&gt; one end</option>
+                <option value="<-">&lt;- other end</option>
+                <option value="-">- no heads</option>
+              </select>
+            </label>
+          </div>
+          <div class="row">
+            <label class="field">
+              <span>Line width</span>
+              <input type="number" id="f-arrow-lw" min="0" max="10" step="0.1">
+            </label>
+            <label class="field">
+              <span>Head size</span>
+              <input type="number" id="f-arrow-scale" min="4" max="40" step="1">
+            </label>
+          </div>
+          <p class="note">Drag its body to move it, or either end to resize and
+            rotate it.</p>
+        </div>
       </div>
     </div>
 

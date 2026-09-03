@@ -118,6 +118,44 @@ clicking. Clicking the same spot again, on whatever's already selected,
 steps to the next thing down the stack instead -- click once for the fit
 line, click the same spot again for the raw data underneath it.
 
+### Editing an arrow
+
+Click an arrow (like the `R`/`|Γ_off|` callouts on panels (a) and (b)) to
+select it. The Inspector shows its **color**, **arrow style** (heads on
+one end, both ends, or none), **line width**, and **head size**, writing
+directly to the arrow's own fields in spec.json (`color`/`arrowstyle`/
+`lw`/`mutation_scale`) -- there's no nested `style` dict here, unlike a
+curve. Ctrl-click other arrows to bulk-edit via **All arrows in panel
+(a)** / **All arrows**; arrows get their own dedicated peer-group bucket
+rather than falling into the generic size-based grouping, since an arrow
+has no `.size` field to compare against.
+
+Unlike a curve, an arrow *is* draggable, and it has two distinct drag
+modes:
+
+- **Dragging its body** moves the whole arrow -- both endpoints shift by
+  the same amount, so it translates rigidly without changing its length
+  or angle. This gets an instant optimistic preview: an honest
+  `translate()` applied to the arrow's SVG group the moment you start
+  dragging, replaced by the real render a beat later.
+- **Dragging either endpoint** (once the arrow is already the only thing
+  selected -- selecting it shows small blue handles on both ends) resizes
+  and rotates it, moving just that one point while the other stays put.
+  This deliberately does *not* get a faked preview, since honestly
+  reflecting a new angle and length means recomputing the arrowhead
+  geometry, not just applying a transform -- it waits for the real
+  render, same as any edit that isn't a rigid translate.
+
+Clicking an endpoint handle before the arrow is the sole selection (e.g.
+the very first click, or while several things are selected together)
+just selects the arrow as a whole, the same as clicking its body --
+matching how PowerPoint/Illustrator only let you grab a handle once
+you've already selected the one shape it belongs to. Under the hood, an
+arrow gets the same click-target treatment as a curve: an always-vector,
+fully transparent hit-path along its body (plus a small invisible circle
+at each end) laid on top of however the arrow itself is drawn, so it
+stays clickable regardless of rendering mode.
+
 ### Editing a legend
 
 Click a panel's legend box to select it. **Drag it anywhere** in the plot;

@@ -76,10 +76,10 @@ def build_spec(d):
              "style": {"color": "black", "ls": "--", "lw": 1.2}},
         ],
         "arrows": [
-            {"id": "a_R", "p0": [d["c11x"], d["c11y"]], "p1": [d["n11x"], d["n11y"]],
+            {"id": "a_R_arrow", "p0": [d["c11x"], d["c11y"]], "p1": [d["n11x"], d["n11y"]],
              "arrowstyle": "<->", "color": GREEN, "lw": 1.8,
              "mutation_scale": 12, "zorder": 6},
-            {"id": "a_Goff", "p0": _perp(d, 0.018, 0.0, 0.0),
+            {"id": "a_Goff_arrow", "p0": _perp(d, 0.018, 0.0, 0.0),
              "p1": _perp(d, 0.018, d["f11x"], d["f11y"]),
              "arrowstyle": "->", "color": NAVY, "lw": 1.8,
              "mutation_scale": 12, "zorder": 6},
@@ -138,10 +138,10 @@ def build_spec(d):
              "style": {"color": "black", "ls": "--", "lw": 1.2}},
         ],
         "arrows": [
-            {"id": "b_R", "p0": [d["c33x"], d["c33y"]], "p1": [d["n33x"], d["n33y"]],
+            {"id": "b_R_arrow", "p0": [d["c33x"], d["c33y"]], "p1": [d["n33x"], d["n33y"]],
              "arrowstyle": "<->", "color": GREEN, "lw": 1.8,
              "mutation_scale": 12, "zorder": 6},
-            {"id": "b_Goff", "p0": [-off, 0.0], "p1": [d["f33x"] - off, d["f33y"]],
+            {"id": "b_Goff_arrow", "p0": [-off, 0.0], "p1": [d["f33x"] - off, d["f33y"]],
              "arrowstyle": "<->", "color": NAVY, "lw": 1.8,
              "mutation_scale": 12, "zorder": 6},
         ],
@@ -204,7 +204,7 @@ def build_spec(d):
             {"id": "c_h50", "y": 0.5, "color": "#cccccc", "ls": ":", "lw": 0.8},
         ],
         "arrows": [
-            {"id": "c_df", "p0": [d1, 0.5], "p1": [d2, 0.5], "arrowstyle": "<->",
+            {"id": "c_df_arrow", "p0": [d1, 0.5], "p1": [d2, 0.5], "arrowstyle": "<->",
              "color": ORANGE, "lw": 1.6, "mutation_scale": 10, "zorder": 6},
         ],
         "texts": [

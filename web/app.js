@@ -134,6 +134,23 @@ function resolve(id, source = spec) {
     return { id, kind: 'legend', obj: p.legend, draggable: true,
              panel: p.id, coords: 'axes' };
   }
+  // An endpoint handle's raw gid resolves straight to its OWN arrow (the
+  // same id, same object) rather than a separate selectable thing -- the
+  // arrow is what's selected either way, an endpoint click just carries a
+  // hint for pointerdown about which point a drag should move. See the
+  // comment there for why the hint only takes effect on an already-selected
+  // arrow.
+  const epMatch = id.match(/^(.+)__(p0|p1)$/);
+  const arrowId = epMatch ? epMatch[1] : id;
+  const pointKey = epMatch ? epMatch[2] : null;
+  for (const p of source.panels) {
+    for (const a of p.arrows || []) {
+      if (a.id === arrowId) {
+        return { id: a.id, kind: 'arrow', obj: a, draggable: true, panel: p.id, pointKey };
+      }
+    }
+  }
+
   for (const p of source.panels) {
     for (const t of p.texts || []) {
       if (t.id === id) {
@@ -161,6 +178,7 @@ function allElements(source = spec) {
     out.push(resolve(`${p.id}__legend`, source));
     for (const t of p.texts || []) out.push(resolve(t.id, source));
     for (const sr of p.series || []) out.push(resolve(sr.id, source));
+    for (const a of p.arrows || []) out.push(resolve(a.id, source));
   }
   return out.filter(Boolean);
 }
@@ -169,7 +187,7 @@ const KIND_LABEL = {
   suptitle: 'figure title', title: 'panel title', panel: 'panel axes',
   xlabel: 'x-axis label', ylabel: 'y-axis label', text: 'label',
   xticks: 'x-axis ticks', yticks: 'y-axis ticks', legend: 'legend',
-  series: 'curve',
+  series: 'curve', arrow: 'arrow',
 };
 
 /* ------------------------------------------- coordinate transformations */
@@ -257,8 +275,11 @@ function applySvg(svgText) {
     // A curve's own bounding box can span most of the panel, so the usual
     // bbox-padded hit rect (right for a compact text label) would swallow
     // clicks meant for anything drawn on top of it. Its click target is
-    // already the wide invisible stroke the server drew alongside it.
-    if (r.kind !== 'series') addHitTarget(g);
+    // already the wide invisible stroke the server drew alongside it. Same
+    // reasoning for an arrow: a diagonal one's bbox covers a rectangle well
+    // beyond its actual line, and the server already drew appropriately
+    // narrow/small hit targets along its body and at each endpoint.
+    if (r.kind !== 'series' && r.kind !== 'arrow') addHitTarget(g);
   }
   reconcilePreviews();
   drawOutlines();
@@ -295,7 +316,40 @@ function addHitTarget(g) {
 }
 
 function clearOutlines() {
-  svgEl?.querySelectorAll('.ff-outline').forEach((n) => n.remove());
+  svgEl?.querySelectorAll('.ff-outline, .ff-arrow-handle').forEach((n) => n.remove());
+}
+
+/** A draggable endpoint handle for a selected arrow. cx/cy are updated
+ *  directly (no getBBox involved) so redrawing them on every drag frame is
+ *  cheap -- unlike the outline rects, which the mid-drag path deliberately
+ *  avoids recomputing every frame. */
+function mkArrowHandle(arrowId, pointKey, x, y) {
+  const c = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+  c.setAttribute('class', 'ff-arrow-handle');
+  c.dataset.arrow = arrowId;
+  c.dataset.point = pointKey;
+  c.setAttribute('cx', x);
+  c.setAttribute('cy', y);
+  c.setAttribute('r', 5);
+  c.setAttribute('fill', '#1f6feb');
+  c.setAttribute('stroke', 'white');
+  c.setAttribute('stroke-width', '1.5');
+  c.setAttribute('pointer-events', 'none');
+  return c;
+}
+
+/** Reposition existing handle circles from the live spec, without touching
+ *  the DOM structure -- called on every drag frame, so it must stay cheap. */
+function updateArrowHandlePositions() {
+  svgEl?.querySelectorAll('.ff-arrow-handle').forEach((h) => {
+    const r = resolve(h.dataset.arrow);
+    if (!r) return;
+    const pt = r.obj[h.dataset.point];
+    if (!pt) return;
+    const [x, y] = dataToSvg(r.panel, pt[0], pt[1]);
+    h.setAttribute('cx', x);
+    h.setAttribute('cy', y);
+  });
 }
 
 function mkOutlineRect(x, y, w, h, primary) {
@@ -354,6 +408,14 @@ function drawOutlines() {
     const tf = g.getAttribute('transform');
     if (tf) rect.setAttribute('transform', tf);
     g.parentNode.insertBefore(rect, g.nextSibling);
+
+    const r = resolve(id);
+    if (r?.kind === 'arrow') {
+      const p0 = dataToSvg(r.panel, r.obj.p0[0], r.obj.p0[1]);
+      const p1 = dataToSvg(r.panel, r.obj.p1[0], r.obj.p1[1]);
+      svgEl.appendChild(mkArrowHandle(id, 'p0', p0[0], p0[1]));
+      svgEl.appendChild(mkArrowHandle(id, 'p1', p1[0], p1[1]));
+    }
   });
 }
 
@@ -469,10 +531,42 @@ function reconcilePreviews() {
     setPreviewTransform(g, anchor, dx, dy, k);
   }
 
+  // An arrow's visible shape is one FancyArrowPatch artist (shaft + heads
+  // together), separately gid-tagged from its invisible hit-line. Moving
+  // both endpoints by the identical delta -- a whole-arrow drag -- is an
+  // honest rigid translate, so it gets a real instant preview on both
+  // pieces. Moving just ONE endpoint changes the angle and length, which
+  // would need the arrowhead geometry recomputed, not just transformed --
+  // faking that would visibly distort the head, so it's intentionally left
+  // to settle on the real render instead (the grabbed handle itself still
+  // tracks the cursor immediately either way; see updateArrowHandlePositions).
+  for (const p of spec.panels) {
+    const oldPanel = renderedSpec.panels.find((q) => q.id === p.id);
+    if (!oldPanel) continue;
+    for (const a of p.arrows || []) {
+      const oldA = (oldPanel.arrows || []).find((x) => x.id === a.id);
+      if (!oldA) continue;
+      const dx0 = a.p0[0] - oldA.p0[0], dy0 = a.p0[1] - oldA.p0[1];
+      const dx1 = a.p1[0] - oldA.p1[0], dy1 = a.p1[1] - oldA.p1[1];
+      if (!dx0 && !dy0 && !dx1 && !dy1) continue;
+      if (Math.abs(dx0 - dx1) > 1e-9 || Math.abs(dy0 - dy1) > 1e-9) continue;
+      const a0 = dataToSvg(p.id, oldA.p0[0], oldA.p0[1]);
+      const a1 = dataToSvg(p.id, a.p0[0], a.p0[1]);
+      const tf = `translate(${a1[0] - a0[0]} ${a1[1] - a0[1]})`;
+      const vis = groupFor(a.id + '__vis');
+      const hit = groupFor(a.id);
+      if (vis) vis.setAttribute('transform', tf);
+      if (hit) hit.setAttribute('transform', tf);
+    }
+  }
+
   if (!selection.length) return;
   if (drag) {
     // Mid-drag, recomputing getBBox every frame forces a synchronous layout.
     // The outline shapes haven't changed, so just carry the same transforms.
+    // Arrow handles are cheap to reposition directly (no getBBox), so they
+    // still track the cursor every frame even when the shape itself doesn't.
+    updateArrowHandlePositions();
     for (const id of selection) {
       const g = groupFor(id);
       const o = g?.nextElementSibling;
@@ -551,13 +645,16 @@ function refreshInspector() {
     || s.kind === 'xticks' || s.kind === 'yticks');
   const allLegends = sel.every((s) => s.kind === 'legend');
   const allSeries = sel.every((s) => s.kind === 'series');
-  $('label-fields').hidden = allPanels || allLegends || allSeries;
+  const allArrows = sel.every((s) => s.kind === 'arrow');
+  $('label-fields').hidden = allPanels || allLegends || allSeries || allArrows;
   $('axes-fields').hidden = !allPanels;
   $('legend-fields').hidden = !allLegends;
   $('series-fields').hidden = !allSeries;
+  $('arrow-fields').hidden = !allArrows;
   if (allPanels) { refreshAxesInspector(); return; }
   if (allLegends) { refreshLegendInspector(); return; }
   if (allSeries) { refreshSeriesInspector(); return; }
+  if (allArrows) { refreshArrowInspector(); return; }
 
   // Retyping many labels at once is meaningless; offer it only for one.
   $('text-field').hidden = multi;
@@ -674,6 +771,26 @@ function refreshSeriesInspector() {
   $('f-series-alpha').value = alpha ?? 1;
   $('f-series-alpha-num').value = alpha ?? '';
   $('f-series-alpha-num').placeholder = alpha === undefined ? 'mixed' : '';
+}
+
+/** Unlike a curve, an arrow's own color/lw/arrowstyle/mutation_scale live
+ *  directly on the object -- that's how the SPEC already stores them, no
+ *  nested style dict to reach into. */
+function refreshArrowInspector() {
+  const color = common((s) => normHex(s.obj.color ?? '#000000'));
+  $('f-arrow-color').value = color ?? '#000000';
+  $('f-arrow-color-hex').value = color ?? '';
+  $('f-arrow-color-hex').placeholder = color === undefined ? 'mixed' : '';
+
+  $('f-arrow-style').value = common((s) => s.obj.arrowstyle ?? '->') ?? '->';
+
+  const lw = common((s) => s.obj.lw ?? 1.8);
+  $('f-arrow-lw').value = lw ?? '';
+  $('f-arrow-lw').placeholder = lw === undefined ? 'mixed' : '';
+
+  const scale = common((s) => s.obj.mutation_scale ?? 12);
+  $('f-arrow-scale').value = scale ?? '';
+  $('f-arrow-scale').placeholder = scale === undefined ? 'mixed' : '';
 }
 
 /** The Excel-like table below the figure: only meaningful for exactly one
@@ -796,6 +913,16 @@ function peerGroups() {
     return groups;
   }
 
+  if (primary.kind === 'arrow') {
+    // Dedicated too: an arrow has no .size (it has mutation_scale/lw
+    // instead), so the generic "Everything at Npt" bucket below would
+    // compare against a field that doesn't exist.
+    add(`All arrows in panel (${primary.panel})`,
+        all.filter((e) => e.kind === 'arrow' && e.panel === primary.panel));
+    add('All arrows', all.filter((e) => e.kind === 'arrow'));
+    return groups;
+  }
+
   if (primary.kind === 'text') {
     add(`All labels in panel (${primary.panel})`,
         all.filter((e) => e.kind === 'text' && e.panel === primary.panel));
@@ -897,6 +1024,7 @@ function buildList() {
     if (p.ylabel?.text) add(preview(p.ylabel.text), `${p.id}__ylabel`, 'y');
     for (const t of p.texts || []) add(preview(t.text), t.id, '¶');
     for (const sr of p.series || []) add(sr.label || sr.id, sr.id, 'cv');
+    for (const ar of p.arrows || []) add(ar.id, ar.id, '↗');
   }
   markList();
 }
@@ -911,6 +1039,7 @@ function chipLabel(s) {
   if (s.kind === 'yticks') return `panel (${s.panel}) y ticks`;
   if (s.kind === 'legend') return `panel (${s.panel}) legend`;
   if (s.kind === 'series') return s.obj.label || s.id;
+  if (s.kind === 'arrow') return s.id;
   return preview(s.obj.text);
 }
 
@@ -1024,9 +1153,19 @@ canvas.addEventListener('pointerdown', (evt) => {
     // A click on one tick label selects every tick on that axis as a
     // single group; resolve() already normalises the per-tick svg gid to
     // that group's canonical id, so reuse it here rather than letting two
-    // different ticks pile up as separate selection entries.
+    // different ticks pile up as separate selection entries. An arrow
+    // endpoint's raw gid likewise resolves to its own arrow's id -- the
+    // arrow is what gets selected either way.
     const rawId = g.id.slice(2);
-    const id = resolve(rawId)?.id ?? rawId;
+    const resolved = resolve(rawId);
+    const id = resolved?.id ?? rawId;
+    // An endpoint handle only "activates" (drags just that point, changing
+    // length and angle) once its arrow is already the sole selection;
+    // otherwise the click just selects the whole arrow, same as clicking
+    // its body -- you see the handles before you can grab one.
+    const arrowAlreadySelected = selection.length === 1 && selection[0] === id;
+    const pointKey = resolved?.pointKey && arrowAlreadySelected ? resolved.pointKey : null;
+
     if (isMulti(evt)) { toggleSelection(id); return; }
     // Clicking inside an existing multi-selection keeps it, so the whole group
     // can be dragged together.
@@ -1041,10 +1180,22 @@ canvas.addEventListener('pointerdown', (evt) => {
       moved: false,
       // Where each label is *meant* to be right now, which may differ from
       // where the SVG draws it if a render is still in flight.
-      items: movers.map((s) => ({
-        id: s.id, panel: s.panel, obj: s.obj, coords: s.coords ?? 'data',
-        baseSvg: dragBaseSvg(s),
-      })),
+      items: movers.map((s) => {
+        if (s.kind === 'arrow') {
+          if (s.id === id && pointKey) {
+            // This one arrow, grabbed by one endpoint: only that point moves.
+            return { id: s.id, panel: s.panel, obj: s.obj, mode: pointKey,
+                     baseSvg: dataToSvg(s.panel, s.obj[pointKey][0], s.obj[pointKey][1]) };
+          }
+          // Grabbed by its body (or swept up in a multi-selection): both
+          // endpoints translate together, so the arrow just moves as a whole.
+          return { id: s.id, panel: s.panel, obj: s.obj, mode: 'both',
+                   baseP0: dataToSvg(s.panel, s.obj.p0[0], s.obj.p0[1]),
+                   baseP1: dataToSvg(s.panel, s.obj.p1[0], s.obj.p1[1]) };
+        }
+        return { id: s.id, panel: s.panel, obj: s.obj, coords: s.coords ?? 'data',
+                 baseSvg: dragBaseSvg(s) };
+      }),
     };
     g.classList.add('ff-dragging');
     svgEl.setPointerCapture(evt.pointerId);
@@ -1077,10 +1228,25 @@ canvas.addEventListener('pointermove', (evt) => {
     // any edit that hasn't been rendered yet.
     for (const it of drag.items) {
       const p = geometry.panels[it.panel];
-      const [nx, ny] = svgToData(it.panel, it.baseSvg[0] + dx, it.baseSvg[1] + dy, it.coords);
-      const [limX, limY] = it.coords === 'axes'
-        ? [AXES_FRAC_LIM, AXES_FRAC_LIM] : [p.xlim, p.ylim];
-      it.obj.xy = [roundTo(nx, limX), roundTo(ny, limY)];
+      if (it.mode === 'both') {
+        // Whole arrow: both endpoints shift by the identical delta, so the
+        // shape and its length/angle are unchanged, just its position.
+        const [nx0, ny0] = svgToData(it.panel, it.baseP0[0] + dx, it.baseP0[1] + dy);
+        const [nx1, ny1] = svgToData(it.panel, it.baseP1[0] + dx, it.baseP1[1] + dy);
+        it.obj.p0 = [roundTo(nx0, p.xlim), roundTo(ny0, p.ylim)];
+        it.obj.p1 = [roundTo(nx1, p.xlim), roundTo(ny1, p.ylim)];
+      } else if (it.mode === 'p0' || it.mode === 'p1') {
+        // One endpoint, the other fixed: pulling it out lengthens the
+        // arrow, swinging it around rotates it -- the same gesture does
+        // both, same as dragging any line's endpoint handle.
+        const [nx, ny] = svgToData(it.panel, it.baseSvg[0] + dx, it.baseSvg[1] + dy);
+        it.obj[it.mode] = [roundTo(nx, p.xlim), roundTo(ny, p.ylim)];
+      } else {
+        const [nx, ny] = svgToData(it.panel, it.baseSvg[0] + dx, it.baseSvg[1] + dy, it.coords);
+        const [limX, limY] = it.coords === 'axes'
+          ? [AXES_FRAC_LIM, AXES_FRAC_LIM] : [p.xlim, p.ylim];
+        it.obj.xy = [roundTo(nx, limX), roundTo(ny, limY)];
+      }
     }
     showXY();
     reconcilePreviews();
@@ -1182,6 +1348,15 @@ document.addEventListener('keydown', (evt) => {
   pushHistory();
   for (const s of movers) {
     const p = geometry.panels[s.panel];
+    if (s.kind === 'arrow') {
+      // Nudging moves the whole arrow, same as dragging its body.
+      for (const key of ['p0', 'p1']) {
+        const base = dataToSvg(s.panel, s.obj[key][0], s.obj[key][1]);
+        const [nx, ny] = svgToData(s.panel, base[0] + a[0] * step, base[1] + a[1] * step);
+        s.obj[key] = [roundTo(nx, p.xlim), roundTo(ny, p.ylim)];
+      }
+      continue;
+    }
     const coords = s.coords ?? 'data';
     const base = dragBaseSvg(s);
     const [nx, ny] = svgToData(s.panel, base[0] + a[0] * step, base[1] + a[1] * step, coords);
@@ -1377,6 +1552,28 @@ $('f-series-alpha-num').addEventListener('change', (e) => {
     $('f-series-alpha').value = v;
     edit((o) => { (o.style ??= {}).alpha = v; });
   }
+});
+
+$('f-arrow-color').addEventListener('input', (e) => {
+  $('f-arrow-color-hex').value = e.target.value;
+  edit((o) => { o.color = e.target.value; }, { immediate: false });
+});
+$('f-arrow-color-hex').addEventListener('change', (e) => {
+  const v = e.target.value.trim();
+  if (!/^#[0-9a-f]{6}$/i.test(v)) { e.target.value = $('f-arrow-color').value; return; }
+  $('f-arrow-color').value = v;
+  edit((o) => { o.color = v; });
+});
+$('f-arrow-style').addEventListener('change', (e) => {
+  edit((o) => { o.arrowstyle = e.target.value; });
+});
+$('f-arrow-lw').addEventListener('change', (e) => {
+  const v = parseFloat(e.target.value);
+  if (Number.isFinite(v) && v >= 0) edit((o) => { o.lw = v; });
+});
+$('f-arrow-scale').addEventListener('change', (e) => {
+  const v = parseFloat(e.target.value);
+  if (Number.isFinite(v) && v > 0) edit((o) => { o.mutation_scale = v; });
 });
 
 /* ------------------------------------------------------------ toolbar */

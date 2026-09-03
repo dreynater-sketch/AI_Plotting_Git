@@ -148,6 +148,24 @@ def _draw_series_hit_target(ax, s, xs, ys):
     hit.set_gid("t_" + s["id"])
 
 
+def _draw_arrow_hit_targets(ax, a):
+    """A generous invisible click target along the arrow's body (the visible
+    FancyArrowPatch stroke is thin, ~1.8pt, and hard to click precisely), plus
+    one at each endpoint so a selected arrow can be resized/rotated by
+    dragging either end -- both are just invisible vector artists, same
+    stroke-opacity-0 technique as a curve's hit-path, unrelated to whatever
+    the visible patch itself is gid-tagged as.
+    """
+    x0, y0 = a["p0"]
+    x1, y1 = a["p1"]
+    (hit,) = ax.plot([x0, x1], [y0, y1], alpha=0, lw=HIT_STROKE_WIDTH, solid_capstyle="round")
+    hit.set_gid("t_" + a["id"])
+    (p0h,) = ax.plot([x0], [y0], alpha=0, marker="o", ms=HIT_POINT_SIZE, ls="none")
+    p0h.set_gid("t_" + a["id"] + "__p0")
+    (p1h,) = ax.plot([x1], [y1], alpha=0, marker="o", ms=HIT_POINT_SIZE, ls="none")
+    p1h.set_gid("t_" + a["id"] + "__p1")
+
+
 def _draw_panel(ax, p, arrays, preview=False):
     for h in p.get("hlines", []):
         ax.axhline(h["y"], color=h.get("color", "0.8"), ls=h.get("ls", "-"),
@@ -171,14 +189,19 @@ def _draw_panel(ax, p, arrays, preview=False):
             _draw_series_hit_target(ax, s, xs, ys)
 
     for a in p.get("arrows", []):
-        ax.add_patch(FancyArrowPatch(
+        patch = FancyArrowPatch(
             tuple(a["p0"]), tuple(a["p1"]),
             arrowstyle=a.get("arrowstyle", "->"),
             mutation_scale=a.get("mutation_scale", 12),
             lw=a.get("lw", 1.8),
             color=a.get("color", "black"),
             zorder=a.get("zorder", 6),
-        ))
+        )
+        ax.add_patch(patch)
+        patch.set_gid("t_" + a["id"] + "__vis")
+
+        if preview:
+            _draw_arrow_hit_targets(ax, a)
 
     for t in p.get("texts", []):
         art = ax.text(
