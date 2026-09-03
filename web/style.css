@@ -232,6 +232,16 @@ main {
 .canvas svg g[id^="t_"].ff-static { cursor: pointer; }
 .canvas svg g[id^="t_"].ff-dragging { cursor: grabbing; }
 
+/* rubber-band box select: a fixed-position div tracked in screen pixels,
+   independent of the svg's own coordinate system and current zoom. */
+.ff-rubber {
+  position: fixed;
+  border: 1px solid var(--sel);
+  background: rgba(31, 111, 235, 0.10);
+  pointer-events: none;
+  z-index: 50;
+}
+
 /* ------------------------------------------------------------- sidebar */
 .sidebar {
   flex: none;

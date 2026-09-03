@@ -23,6 +23,9 @@ let zoom = 100;
 const $ = (id) => document.getElementById(id);
 const canvas = $('canvas');
 
+/** The multi-select modifier. Ctrl on Windows/Linux, Cmd on macOS. */
+const isMulti = (evt) => evt.ctrlKey || evt.metaKey;
+
 /* ------------------------------------------------------------- plumbing */
 
 function setStatus(msg, cls = '') {
@@ -67,6 +70,14 @@ async function doSave() {
     setStatus(`saved · rev ${spec.rev}`);
   } catch (e) {
     setStatus(e.message, 'err');
+    // The bad edit is still sitting in `spec`. Left there, every future save
+    // would resend it and fail the same way -- roll back to the last state
+    // the server actually accepted, so editing can continue.
+    if (renderedSpec) {
+      spec = clone(renderedSpec);
+      reconcilePreviews();
+      refreshInspector();
+    }
   } finally {
     inFlight = false;
     if (needsSave) { needsSave = false; scheduleSave(0); }
@@ -79,11 +90,19 @@ function panelById(pid) {
   return spec.panels.find((p) => p.id === pid);
 }
 
-/** Map an SVG element id (minus the "t_" prefix) to its place in the SPEC. */
+/** Map an element id to its place in the SPEC. Free labels and titles/axis
+ *  labels keep the "t_"-prefixed svg gid as their id; a panel's own axes
+ *  (for xlim/ylim/scale/aspect) use the synthetic id "panel:<panel id>". */
 function resolve(id, source = spec) {
   if (!id || !source) return null;
   if (id === 'suptitle') {
     return { id, kind: 'suptitle', obj: source.suptitle, draggable: false, panel: null };
+  }
+  if (id.startsWith('panel:')) {
+    const pid = id.slice(6);
+    const p = source.panels.find((q) => q.id === pid);
+    if (!p) return null;
+    return { id, kind: 'panel', obj: p, draggable: false, panel: pid };
   }
   const m = id.match(/^(.+)__(title|xlabel|ylabel)$/);
   if (m) {
@@ -113,7 +132,7 @@ function allElements(source = spec) {
 }
 
 const KIND_LABEL = {
-  suptitle: 'figure title', title: 'panel title',
+  suptitle: 'figure title', title: 'panel title', panel: 'panel axes',
   xlabel: 'x-axis label', ylabel: 'y-axis label', text: 'label',
 };
 
@@ -219,27 +238,40 @@ function clearOutlines() {
   svgEl?.querySelectorAll('.ff-outline').forEach((n) => n.remove());
 }
 
-/** Selection boxes, inserted as siblings of each target to share its space. */
+function mkOutlineRect(x, y, w, h, primary) {
+  const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+  rect.setAttribute('class', 'ff-outline');
+  rect.setAttribute('x', x);
+  rect.setAttribute('y', y);
+  rect.setAttribute('width', w);
+  rect.setAttribute('height', h);
+  rect.setAttribute('fill', 'none');
+  rect.setAttribute('stroke', '#1f6feb');
+  rect.setAttribute('stroke-width', primary ? '1.2' : '1');
+  rect.setAttribute('stroke-dasharray', primary ? '' : '4 3');
+  rect.setAttribute('pointer-events', 'none');
+  return rect;
+}
+
+/** Selection boxes. A label's outline is inserted as a sibling so it shares
+ *  the label's own drag/resize transform; a panel's outline is drawn straight
+ *  from the geometry map, since axes never move or preview-transform. */
 function drawOutlines() {
   clearOutlines();
   if (!svgEl) return;
   selection.forEach((id, i) => {
+    if (id.startsWith('panel:')) {
+      const bb = geometry.panels[id.slice(6)]?.bbox;
+      if (!bb) return;
+      svgEl.appendChild(mkOutlineRect(bb[0], bb[1], bb[2], bb[3], i === 0));
+      return;
+    }
     const g = groupFor(id);
     if (!g) return;
     let bb;
     try { bb = g.getBBox(); } catch { return; }
     const pad = 3;
-    const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-    rect.setAttribute('class', 'ff-outline');
-    rect.setAttribute('x', bb.x - pad);
-    rect.setAttribute('y', bb.y - pad);
-    rect.setAttribute('width', bb.width + 2 * pad);
-    rect.setAttribute('height', bb.height + 2 * pad);
-    rect.setAttribute('fill', 'none');
-    rect.setAttribute('stroke', '#1f6feb');
-    rect.setAttribute('stroke-width', i === 0 ? '1.2' : '1');
-    rect.setAttribute('stroke-dasharray', i === 0 ? '' : '4 3');
-    rect.setAttribute('pointer-events', 'none');
+    const rect = mkOutlineRect(bb.x - pad, bb.y - pad, bb.width + 2 * pad, bb.height + 2 * pad, i === 0);
     const tf = g.getAttribute('transform');
     if (tf) rect.setAttribute('transform', tf);
     g.parentNode.insertBefore(rect, g.nextSibling);
@@ -381,6 +413,11 @@ function refreshInspector() {
     ? KIND_LABEL[kinds[0]] : 'mixed';
   $('insp-id').textContent = multi ? `${sel.length} selected` : sel[0].id;
 
+  const allPanels = sel.every((s) => s.kind === 'panel');
+  $('label-fields').hidden = allPanels;
+  $('axes-fields').hidden = !allPanels;
+  if (allPanels) { refreshAxesInspector(); return; }
+
   // Retyping many labels at once is meaningless; offer it only for one.
   $('text-field').hidden = multi;
   $('text-note').hidden = multi;
@@ -416,6 +453,25 @@ function refreshInspector() {
     $('f-box').indeterminate = boxed === undefined;
     $('f-box').checked = boxed === true;
   }
+}
+
+/** Axis limits/scale/aspect for one or more selected panels. Bulk edits set
+ *  each panel's own array index (e.g. xlim[0]) rather than sharing one array,
+ *  so panels keep their own range on the axis you didn't touch. */
+function refreshAxesInspector() {
+  const setNum = (id, get) => {
+    const v = common(get);
+    $(id).value = v ?? '';
+    $(id).placeholder = v === undefined ? 'mixed' : '';
+  };
+  setNum('f-xmin', (s) => s.obj.xlim[0]);
+  setNum('f-xmax', (s) => s.obj.xlim[1]);
+  setNum('f-ymin', (s) => s.obj.ylim[0]);
+  setNum('f-ymax', (s) => s.obj.ylim[1]);
+  $('f-xscale').value = common((s) => s.obj.xscale ?? 'linear') ?? 'linear';
+  $('f-yscale').value = common((s) => s.obj.yscale ?? 'linear') ?? 'linear';
+  $('f-aspect').value = common((s) => s.obj.aspect ?? 'auto') ?? 'auto';
+  $('axes-note').hidden = true;
 }
 
 function normHex(c) {
@@ -460,6 +516,11 @@ function peerGroups() {
     if (members.length > 1) groups.push({ label, ids: members.map((m) => m.id) });
   };
 
+  if (primary.kind === 'panel') {
+    add('All panels', spec.panels.map((p) => resolve(`panel:${p.id}`)).filter(Boolean));
+    return groups;
+  }
+
   if (primary.kind === 'text') {
     add(`All labels in panel (${primary.panel})`,
         all.filter((e) => e.kind === 'text' && e.panel === primary.panel));
@@ -494,9 +555,9 @@ function refreshPeerBar() {
     const b = document.createElement('button');
     b.className = 'chip' + (sameSet(g.ids, selection) ? ' on' : '');
     b.innerHTML = `${escapeHtml(g.label)}<span class="n">${g.ids.length}</span>`;
-    b.title = 'Click to select this group · Shift-click to add it';
+    b.title = 'Click to select this group · Ctrl-click to add it';
     b.onclick = (evt) => setSelection(
-      evt.shiftKey ? [...selection, ...g.ids] : g.ids);
+      isMulti(evt) ? [...selection, ...g.ids] : g.ids);
     groups.appendChild(b);
   }
   if (!groups.children.length) {
@@ -511,7 +572,7 @@ function refreshPeerBar() {
     for (const s of sel) {
       const b = document.createElement('button');
       b.className = 'chip small';
-      b.innerHTML = `${escapeHtml(preview(s.obj.text))}<span class="x">×</span>`;
+      b.innerHTML = `${escapeHtml(chipLabel(s))}<span class="x">×</span>`;
       b.title = `${s.id} — click to remove from the selection`;
       b.onclick = () => toggleSelection(s.id);
       chips.appendChild(b);
@@ -530,9 +591,9 @@ function buildList() {
     const b = document.createElement('button');
     b.dataset.eid = id;
     b.innerHTML = `<span class="tag">${tag}</span>${escapeHtml(label)}`;
-    b.title = `${label}\n${id}  (Shift-click to add to the selection)`;
+    b.title = `${label}\n${id}  (Ctrl-click to add to the selection)`;
     b.onclick = (evt) => {
-      if (evt.shiftKey) toggleSelection(id); else setSelection([id]);
+      if (isMulti(evt)) toggleSelection(id); else setSelection([id]);
     };
     list.appendChild(b);
   };
@@ -542,6 +603,9 @@ function buildList() {
     d.textContent = name;
     list.appendChild(d);
   };
+
+  group('panels');
+  for (const p of spec.panels) add(`panel (${p.id}) axes`, `panel:${p.id}`, '▭');
 
   group('figure');
   if (spec.suptitle?.text) add(preview(spec.suptitle.text), 'suptitle', 'sup');
@@ -560,6 +624,10 @@ function preview(s) {
   return (s || '').replace(/\n/g, ' ⏎ ').slice(0, 44);
 }
 
+function chipLabel(s) {
+  return s.kind === 'panel' ? `panel (${s.panel}) axes` : preview(s.obj.text);
+}
+
 function escapeHtml(s) {
   return String(s).replace(/[&<>"]/g, (c) => (
     { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -571,71 +639,156 @@ function markList() {
   }
 }
 
-/* --------------------------------------------------------------- drag */
+/* --------------------------------------------------------------- drag,
+ * click-to-select-a-panel, and rubber-band box select
+ *
+ * Empty canvas space is overloaded: on release, a click that never moved
+ * selects the panel it landed in (for axis editing) or clears the selection
+ * if it landed outside every panel; a click that DID move becomes a box
+ * select instead. Which one it turns out to be is only known at pointerup.
+ */
 
 let drag = null;
+let rubber = null;
+
+/** Which panel (if any) an SVG-space point falls inside. */
+function panelAt(pt) {
+  for (const [pid, p] of Object.entries(geometry.panels)) {
+    const [bx, by, bw, bh] = p.bbox;
+    if (pt.x >= bx && pt.x <= bx + bw && pt.y >= by && pt.y <= by + bh) return pid;
+  }
+  return null;
+}
+
+const rectsIntersect = (a, b) =>
+  a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
+
+/** Grow/redraw the rubber-band div and live-update the selection under it.
+ *  Tracked in screen pixels throughout, so it needs no svg coordinate math
+ *  and works the same at any zoom level. */
+function updateRubberBand(evt) {
+  const x0 = Math.min(rubber.startClient.x, evt.clientX);
+  const y0 = Math.min(rubber.startClient.y, evt.clientY);
+  const x1 = Math.max(rubber.startClient.x, evt.clientX);
+  const y1 = Math.max(rubber.startClient.y, evt.clientY);
+  if (!rubber.el) {
+    rubber.el = document.createElement('div');
+    rubber.el.className = 'ff-rubber';
+    document.body.appendChild(rubber.el);
+  }
+  Object.assign(rubber.el.style, {
+    left: `${x0}px`, top: `${y0}px`, width: `${x1 - x0}px`, height: `${y1 - y0}px`,
+  });
+
+  const box = { left: x0, top: y0, right: x1, bottom: y1 };
+  const hits = allElements(spec)
+    .filter((el) => {
+      const g = groupFor(el.id);
+      return g && rectsIntersect(box, g.getBoundingClientRect());
+    })
+    .map((el) => el.id);
+  setSelection(rubber.ctrl ? [...rubber.baseSelection, ...hits] : hits);
+}
 
 canvas.addEventListener('pointerdown', (evt) => {
   const g = evt.target.closest('g[id^="t_"]');
-  if (!g) { if (!evt.shiftKey) setSelection([]); return; }
-  const id = g.id.slice(2);
+  if (g) {
+    const id = g.id.slice(2);
+    if (isMulti(evt)) { toggleSelection(id); return; }
+    // Clicking inside an existing multi-selection keeps it, so the whole group
+    // can be dragged together.
+    if (!selection.includes(id)) setSelection([id]);
 
-  if (evt.shiftKey) { toggleSelection(id); return; }
-  // Clicking inside an existing multi-selection keeps it, so the whole group
-  // can be dragged together.
-  if (!selection.includes(id)) setSelection([id]);
+    const movers = selected().filter((s) => s.draggable);
+    if (!movers.length) return;
 
-  const movers = selected().filter((s) => s.draggable);
-  if (!movers.length) return;
+    evt.preventDefault();
+    drag = {
+      start: clientToSvg(evt),
+      moved: false,
+      // Where each label is *meant* to be right now, which may differ from
+      // where the SVG draws it if a render is still in flight.
+      items: movers.map((s) => ({
+        id: s.id, panel: s.panel, obj: s.obj,
+        baseSvg: dataToSvg(s.panel, s.obj.xy[0], s.obj.xy[1]),
+      })),
+    };
+    g.classList.add('ff-dragging');
+    svgEl.setPointerCapture(evt.pointerId);
+    return;
+  }
 
   evt.preventDefault();
-  drag = {
-    start: clientToSvg(evt),
+  rubber = {
+    startClient: { x: evt.clientX, y: evt.clientY },
     moved: false,
-    // Where each label is *meant* to be right now, which may differ from where
-    // the SVG draws it if a render is still in flight.
-    items: movers.map((s) => ({
-      id: s.id, panel: s.panel, obj: s.obj,
-      baseSvg: dataToSvg(s.panel, s.obj.xy[0], s.obj.xy[1]),
-    })),
+    ctrl: isMulti(evt),
+    baseSelection: [...selection],
+    hitPanel: panelAt(clientToSvg(evt)),
+    el: null,
   };
-  g.classList.add('ff-dragging');
   svgEl.setPointerCapture(evt.pointerId);
 });
 
 canvas.addEventListener('pointermove', (evt) => {
-  if (!drag) return;
-  const now = clientToSvg(evt);
-  const dx = now.x - drag.start.x;
-  const dy = now.y - drag.start.y;
-  if (!drag.moved && Math.hypot(dx, dy) < 1.5) return;
-  if (!drag.moved) pushHistory();
-  drag.moved = true;
+  if (drag) {
+    const now = clientToSvg(evt);
+    const dx = now.x - drag.start.x;
+    const dy = now.y - drag.start.y;
+    if (!drag.moved && Math.hypot(dx, dy) < 1.5) return;
+    if (!drag.moved) pushHistory();
+    drag.moved = true;
 
-  // Move the SPEC and let the preview machinery draw it. Going through the
-  // SPEC rather than nudging the SVG directly means a drag composes with any
-  // edit that hasn't been rendered yet.
-  for (const it of drag.items) {
-    const p = geometry.panels[it.panel];
-    const [nx, ny] = svgToData(it.panel, it.baseSvg[0] + dx, it.baseSvg[1] + dy);
-    it.obj.xy = [roundTo(nx, p.xlim), roundTo(ny, p.ylim)];
+    // Move the SPEC and let the preview machinery draw it. Going through the
+    // SPEC rather than nudging the SVG directly means a drag composes with
+    // any edit that hasn't been rendered yet.
+    for (const it of drag.items) {
+      const p = geometry.panels[it.panel];
+      const [nx, ny] = svgToData(it.panel, it.baseSvg[0] + dx, it.baseSvg[1] + dy);
+      it.obj.xy = [roundTo(nx, p.xlim), roundTo(ny, p.ylim)];
+    }
+    showXY();
+    reconcilePreviews();
+    return;
   }
-  showXY();
-  reconcilePreviews();
+
+  if (rubber) {
+    const dx = evt.clientX - rubber.startClient.x;
+    const dy = evt.clientY - rubber.startClient.y;
+    if (!rubber.moved && Math.hypot(dx, dy) < 3) return;
+    rubber.moved = true;
+    updateRubberBand(evt);
+  }
 });
 
 canvas.addEventListener('pointerup', (evt) => {
-  if (!drag) return;
-  const moved = drag.moved;
-  svgEl.querySelectorAll('.ff-dragging').forEach((n) => n.classList.remove('ff-dragging'));
-  try { svgEl.releasePointerCapture(evt.pointerId); } catch { /* already gone */ }
-  drag = null;
-  if (moved) { drawOutlines(); scheduleSave(0); }
+  if (drag) {
+    const moved = drag.moved;
+    svgEl.querySelectorAll('.ff-dragging').forEach((n) => n.classList.remove('ff-dragging'));
+    try { svgEl.releasePointerCapture(evt.pointerId); } catch { /* already gone */ }
+    drag = null;
+    if (moved) { drawOutlines(); scheduleSave(0); }
+    return;
+  }
+
+  if (rubber) {
+    try { svgEl.releasePointerCapture(evt.pointerId); } catch { /* already gone */ }
+    if (rubber.moved) {
+      rubber.el?.remove();                         // selection already live-set
+    } else if (rubber.hitPanel) {
+      const id = `panel:${rubber.hitPanel}`;
+      if (rubber.ctrl) toggleSelection(id); else setSelection([id]);
+    } else if (!rubber.ctrl) {
+      setSelection([]);                            // click in the margin
+    }
+    rubber = null;
+  }
 });
 
 canvas.addEventListener('pointercancel', () => {
   svgEl?.querySelectorAll('.ff-dragging').forEach((n) => n.classList.remove('ff-dragging'));
   drag = null;
+  if (rubber) { rubber.el?.remove(); rubber = null; }
 });
 
 function showXY() {
@@ -734,6 +887,40 @@ $('f-box').addEventListener('change', (e) => {
     else delete o.bbox;
   });
 });
+
+for (const [fid, lim, idx] of [
+  ['f-xmin', 'xlim', 0], ['f-xmax', 'xlim', 1],
+  ['f-ymin', 'ylim', 0], ['f-ymax', 'ylim', 1],
+]) {
+  $(fid).addEventListener('change', (e) => {
+    const v = parseFloat(e.target.value);
+    if (Number.isFinite(v)) edit((o) => { o[lim][idx] = v; });
+  });
+}
+
+/** Log scale needs strictly positive limits; matplotlib throws otherwise.
+ *  Checked client-side so the field snaps back with an explanation instead
+ *  of round-tripping to the server for a 422. */
+function trySetScale(axis, value) {
+  const key = axis === 'x' ? 'xlim' : 'ylim';
+  if (value === 'log') {
+    const bad = selected().find((s) => s.obj[key].some((v) => v <= 0));
+    if (bad) {
+      const note = $('axes-note');
+      note.hidden = false;
+      note.textContent =
+        `Can't use log scale on the ${axis}-axis: panel (${bad.panel})'s range ` +
+        `includes zero or a negative value.`;
+      $(`f-${axis}scale`).value = 'linear';
+      return;
+    }
+  }
+  $('axes-note').hidden = true;
+  edit((o) => { o[axis === 'x' ? 'xscale' : 'yscale'] = value; });
+}
+$('f-xscale').addEventListener('change', (e) => trySetScale('x', e.target.value));
+$('f-yscale').addEventListener('change', (e) => trySetScale('y', e.target.value));
+$('f-aspect').addEventListener('change', (e) => edit((o) => { o.aspect = e.target.value; }));
 
 /* ------------------------------------------------------------ toolbar */
 

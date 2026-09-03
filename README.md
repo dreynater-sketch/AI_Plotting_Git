@@ -17,9 +17,14 @@ Local only — the server binds `127.0.0.1` and talks to nothing else.
 
 ## What you can do
 
-- **Click** any label to select it (or pick it from the Elements list, which is
-  how you reach labels hidden under others).
-- **Drag** it anywhere. Arrow keys nudge by 1 pt, Shift+arrows by 10.
+- **Click** any label to select it, or **click a panel's plot area** to select
+  its axes (for xlim/ylim/scale/aspect — see below). Pick either from the
+  Elements list too, which is how you reach labels hidden under others.
+- **Ctrl-click** (Cmd on macOS) adds or removes one thing from the selection.
+  **Drag a box** over empty canvas space to select everything under it — hold
+  Ctrl while dragging to add the box's contents to the current selection
+  instead of replacing it. Clicking empty space outside any panel deselects.
+- **Drag** a label anywhere. Arrow keys nudge by 1 pt, Shift+arrows by 10.
 - **Retype** it, including matplotlib mathtext (`$\beta_1$`, `$Q_L$`), change
   its **size**, **color**, alignment, and whether it has a background box.
 - **Ctrl+Z** to undo. **Rebuild** discards all edits and regenerates from the CSV.
@@ -28,6 +33,20 @@ Local only — the server binds `127.0.0.1` and talks to nothing else.
 
 Panel titles and axis labels are editable (text/size/color) but not draggable —
 matplotlib positions those itself.
+
+### Editing a panel's axes
+
+Click anywhere inside a panel's plot area (not on a label) to select the panel
+itself. The Inspector switches to axis controls: **x/y min and max**, **x/y
+scale** (linear or log), and **aspect** (auto, or equal for a true 1:1 circle
+plot like panels (a) and (b) here).
+
+- Ctrl-click other panels to bulk-edit axes together — useful for e.g. giving
+  several panels the same aspect. Limits stay per-panel even in a bulk edit
+  (setting min doesn't overwrite each panel's own max).
+- Switching to log scale is refused client-side, with an explanation, if the
+  panel's current range on that axis touches zero or goes negative —
+  matplotlib can't render that, so it's caught before the round-trip.
 
 ### Editing a family of labels at once
 
@@ -39,7 +58,7 @@ families it belongs to — *All y-axis labels*, *All labels in panel (a)*,
 *Everything at 12pt*, *Everything in #2e8b57*. Click one and the whole family is
 selected; then size, color, alignment and the box toggle apply to all of them.
 
-- **Shift-click** a label in the figure, in the Elements list, or a family chip
+- **Ctrl-click** a label in the figure, in the Elements list, or a family chip
   to add or remove it from the selection.
 - The **Selected** row lists what you have; click any chip's × to drop it.
 - **A+ / A−** bump every selected label by 1 pt *relative to its own size*, so a

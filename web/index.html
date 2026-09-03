@@ -45,9 +45,10 @@
     </div>
 
     <div class="hint">
-      Click a label to select. <b>Shift-click</b> to add more, or pick a group
-      above to grab every matching label at once. Drag to move (the whole
-      selection moves together). Arrow keys nudge, Shift = ×10. Esc deselects.
+      Click a label or a panel's axes to select it. <b>Ctrl-click</b> to add
+      more, drag an empty area for a <b>box select</b>, or pick a group above
+      to grab every matching label at once. Drag to move (the whole selection
+      moves together). Arrow keys nudge, Shift = ×10. Esc deselects.
     </div>
   </section>
 
@@ -59,6 +60,7 @@
       <div id="insp-body" hidden>
         <div class="elid"><span id="insp-kind">text</span><code id="insp-id"></code></div>
 
+        <div id="label-fields">
         <label class="field" id="text-field">
           <span>Text</span>
           <textarea id="f-text" rows="3" spellcheck="false"></textarea>
@@ -115,6 +117,51 @@
           <label class="check">
             <input type="checkbox" id="f-box"> boxed background
           </label>
+        </div>
+        </div>
+
+        <div id="axes-fields" hidden>
+          <div class="row">
+            <label class="field">
+              <span>x min</span>
+              <input type="number" id="f-xmin" step="any">
+            </label>
+            <label class="field">
+              <span>x max</span>
+              <input type="number" id="f-xmax" step="any">
+            </label>
+          </div>
+          <div class="row">
+            <label class="field">
+              <span>y min</span>
+              <input type="number" id="f-ymin" step="any">
+            </label>
+            <label class="field">
+              <span>y max</span>
+              <input type="number" id="f-ymax" step="any">
+            </label>
+          </div>
+          <div class="row">
+            <label class="field">
+              <span>x scale</span>
+              <select id="f-xscale">
+                <option value="linear">linear</option><option value="log">log</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>y scale</span>
+              <select id="f-yscale">
+                <option value="linear">linear</option><option value="log">log</option>
+              </select>
+            </label>
+          </div>
+          <label class="field">
+            <span>Aspect</span>
+            <select id="f-aspect">
+              <option value="auto">auto</option><option value="equal">equal (1:1)</option>
+            </select>
+          </label>
+          <p class="note" id="axes-note" hidden></p>
         </div>
       </div>
     </div>
