@@ -295,9 +295,9 @@ figures/qcircle/
 
 ## Not in this build
 
-No AI, no chat, no git-commit-per-change, no multi-user, no Vercel. Arrows
-render from the SPEC but aren't interactive yet — everything else (labels,
-panels, axes, ticks, legends, curves) is. The data table is read-only; there's
-no way yet to add a curve, delete one, or hand-edit a value in the table.
+No AI, no chat, no git-commit-per-change, no multi-user, no Vercel. Every
+figure element (labels, panels, axes, ticks, legends, curves, arrows) is
+interactive now. The data table is read-only; there's no way yet to add a
+curve, delete one, or hand-edit a value in the table.
 Vercel needs a Python serverless function for the render step — matplotlib has
 to live somewhere — so that's a deliberate later step.
