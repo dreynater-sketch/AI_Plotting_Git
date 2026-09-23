@@ -6,6 +6,11 @@
     POST /api/figure/<name>    {spec} -> re-render -> {spec, svg, geometry}
     GET  /api/code/<name>      standalone figure.py (text/plain)
     GET  /api/png/<name>       rendered PNG at the spec's export dpi
+    GET  /api/code/<name>?edited=1   the user's hand-edited figure.py instead
+    GET  /api/script/<name>    {generated, custom: {code, base_rev, saved_at} | null, rev}
+    POST /api/script/<name>    {code, base_rev} -> save the hand-edited figure.py
+    POST /api/script/<name>/reset   drop the hand-edited version
+    GET  /api/npz/<name>       data/curves.npz, for running figure.py in the browser
     GET  /api/history/<name>   saved undo/redo stacks {undo: [spec...], redo: [...]}
     POST /api/history/<name>   {undo, redo} -> persist both stacks
     POST /api/project/duplicate  {from, name} -> copy a project ("Save as")
@@ -39,6 +44,7 @@ import mimetypes
 import os
 import posixpath
 import re
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import unquote, urlparse
 
@@ -49,6 +55,7 @@ from figforge.project import AUTH, ROOT, STORE, Figure, list_figures
 WEB = os.path.join(ROOT, "web")
 NAME_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 HISTORY_MAX = 100  # per stack; matches the editor's HISTORY_MAX
+SCRIPT_MAX = 512 * 1024  # a hand-edited figure.py; the generated one is ~6 KB
 SESSION_MAX_AGE = 30 * 24 * 3600  # cookies; Supabase's refresh token outlives the 1 h access token
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
@@ -111,8 +118,27 @@ class Handler(BaseHTTPRequestHandler):
             fig = self._figure(path[len("/api/code/"):])
             if not fig:
                 return self._error(404, "unknown figure")
+            if "edited=1" in urlparse(self.path).query:
+                custom = fig.load_script()
+                if not custom:
+                    return self._error(404, "no edited version saved")
+                return self._send(200, custom["code"], "text/plain; charset=utf-8")
             return self._send(200, codegen.generate(fig.load_spec()),
                               "text/plain; charset=utf-8")
+
+        if path.startswith("/api/script/"):
+            fig = self._figure(path[len("/api/script/"):])
+            if not fig:
+                return self._error(404, "unknown figure")
+            spec = fig.load_spec()
+            return self._json({"generated": codegen.generate(spec),
+                               "custom": fig.load_script(), "rev": spec.get("rev")})
+
+        if path.startswith("/api/npz/"):
+            fig = self._figure(path[len("/api/npz/"):])
+            if not fig:
+                return self._error(404, "unknown figure")
+            return self._send(200, fig.npz_bytes(), "application/octet-stream")
 
         if path.startswith("/api/png/"):
             fig = self._figure(path[len("/api/png/"):])
@@ -193,6 +219,25 @@ class Handler(BaseHTTPRequestHandler):
 
         if path in ("/api/project/duplicate", "/api/project/rename"):
             return self._project_op(path.rsplit("/", 1)[1])
+
+        if path.startswith("/api/script/"):
+            rest = path[len("/api/script/"):]
+            reset = rest.endswith("/reset")
+            fig = self._figure(rest[:-len("/reset")] if reset else rest)
+            if not fig:
+                return self._error(404, "unknown figure")
+            if reset:
+                fig.clear_script()
+                return self._json({"ok": True})
+            body = self._body()
+            code = body.get("code") if isinstance(body, dict) else None
+            if not isinstance(code, str):
+                return self._error(400, "expected {code, base_rev}")
+            if len(code.encode("utf-8")) > SCRIPT_MAX:
+                return self._error(413, "that script is over 512 KB")
+            saved_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+            fig.save_script(code, body.get("base_rev"), saved_at)
+            return self._json({"ok": True, "saved_at": saved_at})
 
         if not path.startswith("/api/figure/"):
             return self._error(404, "not found")

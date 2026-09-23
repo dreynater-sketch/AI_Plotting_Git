@@ -9,6 +9,8 @@ A figure is a folder (spec section 6.1):
         figure.svg             last render (generated)
         figure.py              standalone reproducer (generated)
         history.json           editor undo/redo stacks (generated, not versioned)
+        custom_figure.json     the user's hand-edited figure.py, if any
+                               ({code, base_rev, saved_at}; see the code editor)
 
 A figure folder is also a "project" in the editor: Save as copies the folder,
 rename moves it.
@@ -69,6 +71,12 @@ class LocalStore:
 
     def has(self, rel):
         return os.path.isfile(self._path(rel))
+
+    def delete(self, rel):
+        try:
+            os.remove(self._path(rel))
+        except FileNotFoundError:
+            pass
 
     def projects(self):
         if not os.path.isdir(FIGURES):
@@ -171,6 +179,10 @@ class SupabaseStore:
 
     def has(self, rel):
         return self.read(rel) is not None
+
+    def delete(self, rel):
+        self._ensure_bucket()
+        self._call("DELETE", f"/object/{self.bucket}", {"prefixes": [self._key(rel)]})
 
     def _list(self, folder):
         """Direct children of a folder: ([file names], [subfolder names])."""
@@ -304,6 +316,30 @@ class Figure:
         self.store.write(self._rel("history.json"),
                     json.dumps({"undo": undo, "redo": redo},
                                ensure_ascii=False).encode("utf-8"))
+
+    # ------------------------------------------------------ hand-edited code
+    def load_script(self):
+        """The user's edited figure.py, or None if they've never saved one.
+        base_rev is the spec rev it was forked from: the generated code moves
+        on whenever the figure is edited in the drag editor, this doesn't."""
+        raw = self.store.read(self._rel("custom_figure.json"))
+        try:
+            return json.loads(raw) if raw else None
+        except ValueError:
+            return None
+
+    def save_script(self, code, base_rev, saved_at):
+        self.store.write(self._rel("custom_figure.json"), json.dumps(
+            {"code": code, "base_rev": base_rev, "saved_at": saved_at},
+            ensure_ascii=False).encode("utf-8"))
+
+    def clear_script(self):
+        self.store.delete(self._rel("custom_figure.json"))
+
+    def npz_bytes(self):
+        """The analysed arrays as the .npz file figure.py loads -- what the
+        in-browser runner puts next to the script."""
+        return self.store.read(self._rel("data/curves.npz"))
 
     # ---------------------------------------------------------------- data
     def load_arrays(self):

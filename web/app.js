@@ -1827,7 +1827,34 @@ async function download(url, filename) {
   }
 }
 
-$('btn-py').onclick = () => download(`/api/code/${FIGURE}`, `${FIGURE}.py`);
+/* figure.py: a small menu -- open the code editor (code.html, a new tab) or
+ * download. "Download my edited version" only shows once one is saved. */
+$('btn-py').onclick = async () => {
+  const menu = $('py-menu');
+  if (!menu.hidden) { menu.hidden = true; return; }
+  menu.hidden = false;
+  $('py-download-edited').hidden = true;
+  try {
+    const r = await fetch(`/api/script/${FIGURE}`);
+    if (r.ok) $('py-download-edited').hidden = !(await r.json()).custom;
+  } catch { /* the menu still works without the edited-version entry */ }
+};
+document.addEventListener('pointerdown', (e) => {
+  if (!e.target.closest('.menu-wrap')) $('py-menu').hidden = true;
+});
+$('py-view').onclick = async () => {
+  $('py-menu').hidden = true;
+  await flushPending();  // the code is generated from what's saved
+  window.open(`code.html?project=${encodeURIComponent(FIGURE)}`, '_blank');
+};
+$('py-download').onclick = () => {
+  $('py-menu').hidden = true;
+  download(`/api/code/${FIGURE}`, `${FIGURE}.py`);
+};
+$('py-download-edited').onclick = () => {
+  $('py-menu').hidden = true;
+  download(`/api/code/${FIGURE}?edited=1`, `${FIGURE}_edited.py`);
+};
 $('btn-png').onclick = () => download(`/api/png/${FIGURE}`, `${FIGURE}.png`);
 
 // Two-step confirm rather than a modal dialog.

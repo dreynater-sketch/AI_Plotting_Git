@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>figure.py — FigForge</title>
+  <link rel="stylesheet" href="vendor/codemirror/lib/codemirror.css">
+  <link rel="stylesheet" href="vendor/codemirror/theme/monokai.css">
+  <link rel="stylesheet" href="vendor/codemirror/addon/dialog/dialog.css">
+  <link rel="stylesheet" href="code.css">
+</head>
+<body>
+
+<div class="window">
+  <!-- tab strip, as in Sublime: open file tabs on the left, tools on the right -->
+  <header class="tabstrip">
+    <div class="tab active" id="tab">
+      <span class="tab-name">figure.py</span>
+      <span class="tab-dirty" id="tab-dirty" title="Unsaved changes">●</span>
+    </div>
+    <div class="strip-spacer"></div>
+    <button class="strip-btn run" id="btn-run" title="Run in this browser tab (Ctrl+B)">▶ Run</button>
+    <button class="strip-btn" id="btn-save" title="Save (Ctrl+S)">Save</button>
+    <button class="strip-btn" id="btn-download" title="Download this file">Download</button>
+    <button class="strip-btn" id="btn-palette" title="Command Palette (Ctrl+Shift+P or F1)">⌘ Commands</button>
+  </header>
+
+  <div class="body">
+    <aside class="sidebar" id="sidebar">
+      <div class="side-title">FOLDERS</div>
+      <div class="tree">
+        <div class="tree-folder open"><span class="caret">▾</span> <span id="tree-project">project</span></div>
+        <div class="tree-folder open nested"><span class="caret">▾</span> data</div>
+        <div class="tree-file nested2 muted" title="Loaded by figure.py; not editable here">curves.npz</div>
+        <div class="tree-file nested2 muted" title="The raw measurement; not editable here">vna_sweep.csv</div>
+        <div class="tree-file nested active">figure.py</div>
+      </div>
+      <div class="side-note" id="side-note"></div>
+    </aside>
+
+    <main class="main">
+      <div class="banner" id="banner" hidden></div>
+      <div class="editor-row">
+        <div class="editor" id="editor"></div>
+        <canvas class="minimap" id="minimap" title="Minimap: click or drag to scroll"></canvas>
+      </div>
+
+      <!-- Sublime's build output panel -->
+      <section class="panel" id="panel" hidden>
+        <div class="panel-resize" id="panel-resize"></div>
+        <div class="panel-head">
+          <span class="panel-title">Output</span>
+          <span class="panel-state" id="panel-state"></span>
+          <span class="strip-spacer"></span>
+          <button class="panel-close" id="panel-close" title="Hide panel (Esc)">×</button>
+        </div>
+        <div class="panel-body">
+          <pre class="console" id="console"></pre>
+          <div class="figures" id="figures"></div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <footer class="statusbar">
+    <span id="status-pos">Line 1, Column 1</span>
+    <span id="status-msg"></span>
+    <span class="strip-spacer"></span>
+    <span id="status-source">Generated</span>
+    <span>Spaces: 4</span>
+    <span>Python</span>
+  </footer>
+</div>
+
+<!-- Command palette (Ctrl+Shift+P) -->
+<div class="palette" id="palette" hidden>
+  <input id="palette-input" placeholder="Type a command…" autocomplete="off" spellcheck="false">
+  <ul id="palette-list"></ul>
+</div>
+
+<!-- Signed out / unknown project -->
+<div class="blocker" id="blocker" hidden>
+  <div class="blocker-card" id="blocker-card"></div>
+</div>
+
+<script src="vendor/codemirror/lib/codemirror.js"></script>
+<script src="vendor/codemirror/mode/python/python.js"></script>
+<script src="vendor/codemirror/addon/search/searchcursor.js"></script>
+<script src="vendor/codemirror/addon/search/search.js"></script>
+<script src="vendor/codemirror/addon/search/jump-to-line.js"></script>
+<script src="vendor/codemirror/addon/dialog/dialog.js"></script>
+<script src="vendor/codemirror/addon/edit/matchbrackets.js"></script>
+<script src="vendor/codemirror/addon/edit/closebrackets.js"></script>
+<script src="vendor/codemirror/addon/comment/comment.js"></script>
+<script src="vendor/codemirror/addon/selection/active-line.js"></script>
+<script src="vendor/codemirror/keymap/sublime.js"></script>
+<script src="code.js"></script>
+</body>
+</html>

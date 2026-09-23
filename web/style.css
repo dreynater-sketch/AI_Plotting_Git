@@ -560,3 +560,20 @@ input:focus, textarea:focus, select:focus {
 .auth-msg { min-height: 1.3em; margin: 12px 0 0; font-size: 12.5px; text-align: center; color: var(--ink-soft); }
 button.primary { background: var(--sel); border-color: var(--sel); color: #fff; font-weight: 600; }
 button.primary:hover:not(:disabled) { background: #1a5fcc; border-color: #1a5fcc; }
+
+/* ----------------------------------------------------- figure.py menu */
+.menu-wrap { position: relative; }
+.py-menu {
+  position: absolute; right: 0; top: calc(100% + 6px); z-index: 60;
+  width: 280px; padding: 5px;
+  background: var(--surface);
+  border: 1px solid var(--line); border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+}
+.py-menu button {
+  display: block; width: 100%; text-align: left;
+  border: none; background: none; padding: 8px 10px;
+}
+.py-menu button:hover { background: #f0f1f3; }
+.py-menu b { display: block; font-weight: 600; font-size: 12.5px; }
+.py-menu span { display: block; color: var(--ink-soft); font-size: 11.5px; margin-top: 1px; }
