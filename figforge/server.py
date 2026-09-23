@@ -8,7 +8,8 @@
     GET  /api/png/<name>       rendered PNG at the spec's export dpi
     GET  /api/code/<name>?edited=1   the user's hand-edited figure.py instead
     GET  /api/script/<name>    {generated, custom: {code, base_rev, saved_at} | null, rev}
-    POST /api/script/<name>    {code, base_rev} -> save the hand-edited figure.py
+    POST /api/script/<name>    {code} -> save the hand-edited figure.py and apply
+                               what it can back onto the figure (codesync.py)
     POST /api/script/<name>/reset   drop the hand-edited version
     GET  /api/npz/<name>       data/curves.npz, for running figure.py in the browser
     GET  /api/history/<name>   saved undo/redo stacks {undo: [spec...], redo: [...]}
@@ -48,7 +49,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import unquote, urlparse
 
-from figforge import codegen, render
+from figforge import codegen, codesync, render
 from figforge.auth import AuthError, public_user
 from figforge.project import AUTH, ROOT, STORE, Figure, list_figures
 
@@ -235,9 +236,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._error(400, "expected {code, base_rev}")
             if len(code.encode("utf-8")) > SCRIPT_MAX:
                 return self._error(413, "that script is over 512 KB")
-            saved_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-            fig.save_script(code, body.get("base_rev"), saved_at)
-            return self._json({"ok": True, "saved_at": saved_at})
+            return self._save_script(fig, code)
 
         if not path.startswith("/api/figure/"):
             return self._error(404, "not found")
@@ -305,6 +304,40 @@ class Handler(BaseHTTPRequestHandler):
         else:
             self.store.rename_project(src.name, name)
         return self._json({"name": name, "figures": list_figures(self.store)})
+
+    def _save_script(self, fig, code):
+        """Keep the user's code as written, then fold what it can into the
+        figure. The spec only changes if the result renders; the old spec
+        goes onto the undo stack so the figure editor can undo the sync."""
+        saved_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        spec = fig.load_spec()
+        sync = {"changed": [], "added": [], "removed": [], "skipped": [], "error": None}
+        new_spec = None
+        try:
+            new_spec, report = codesync.apply(code, spec, set(fig.load_arrays()))
+            sync.update(report)
+        except SyntaxError as e:
+            sync["error"] = f"Python syntax error on line {e.lineno}: {e.msg} -- saved, but not applied"
+        except (RecursionError, MemoryError):
+            sync["error"] = "that code is too deeply nested to read -- saved, but not applied"
+
+        if new_spec is not None and (sync["changed"] or sync["added"] or sync["removed"]):
+            new_spec["rev"] = int(spec.get("rev", 0)) + 1
+            try:
+                payload = self._payload(fig, new_spec)
+            except Exception as e:  # a value matplotlib rejects: keep the figure as it was
+                sync["error"] = (f"the figure couldn't be drawn with these changes "
+                                 f"({type(e).__name__}: {e}) -- saved, but not applied")
+                sync["changed"] = sync["added"] = sync["removed"] = []
+            else:
+                fig.save_spec(new_spec)
+                fig.write_outputs(payload["svg"], codegen.generate(new_spec))
+                h = fig.load_history()
+                fig.save_history((h["undo"] + [spec])[-HISTORY_MAX:], [])
+                spec = new_spec
+        fig.save_script(code, spec.get("rev"), saved_at)
+        return self._json({"ok": True, "saved_at": saved_at, "rev": spec.get("rev"),
+                           "generated": codegen.generate(spec), "sync": sync})
 
     # ------------------------------------------------------------ accounts
     def _cookie(self, name):

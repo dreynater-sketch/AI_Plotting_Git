@@ -1760,17 +1760,24 @@ $('f-arrow-scale').addEventListener('change', (e) => {
 
 /* ------------------------------------------------------------ toolbar */
 
+// A snapshot carries the rev it had back then; keep the current one so the
+// revision only ever counts up. (The code editor compares revs to tell
+// whether the figure has changed since code was saved.)
 function undo() {
   if (!history.length) return;
   future.push(clone(spec));
+  const rev = spec.rev;
   spec = history.pop();
+  spec.rev = rev;
   afterHistoryJump();
 }
 
 function redo() {
   if (!future.length) return;
   history.push(clone(spec));
+  const rev = spec.rev;
   spec = future.pop();
+  spec.rev = rev;
   afterHistoryJump();
 }
 
@@ -1825,6 +1832,37 @@ async function download(url, filename) {
   } catch (e) {
     setStatus(e.message, 'err');
   }
+}
+
+/* The code editor (another tab) saved code that changed this figure: load
+ * the new version. The server put the old spec on the undo stack, so Ctrl+Z
+ * here undoes the whole sync. A pending local save is dropped rather than
+ * sent -- it would overwrite what the code just did. */
+if ('BroadcastChannel' in window) {
+  new BroadcastChannel('figforge').onmessage = async (e) => {
+    if (e.data?.type !== 'figure-synced' || e.data.project !== FIGURE) return;
+    clearTimeout(saveTimer);
+    savePending = needsSave = false;
+    try {
+      const [r, hr] = await Promise.all([fetch(`/api/figure/${FIGURE}`), fetch(`/api/history/${FIGURE}`)]);
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || r.statusText);
+      const saved = hr.ok ? await hr.json() : {};
+      spec = data.spec;
+      renderedSpec = clone(data.spec);
+      geometry = data.geometry;
+      history = saved.undo || [];
+      future = saved.redo || [];
+      lastCoalesce = null;
+      refreshUndoButtons();
+      applySvg(data.svg);
+      buildList();
+      setSelection(selection);
+      setStatus(`updated from your code · rev ${spec.rev} · Ctrl+Z to undo`);
+    } catch (err) {
+      setStatus(`couldn't load the change from your code: ${err.message}`, 'err');
+    }
+  };
 }
 
 /* figure.py: a small menu -- open the code editor (code.html, a new tab) or

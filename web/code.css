@@ -176,3 +176,8 @@ body { background: var(--edit); color: var(--text); font: 13px/1.4 var(--ui); ov
 
 /* the line a Run failed on */
 .cm-error-line { background: rgba(249, 38, 114, 0.22); }
+
+/* sync report after Save */
+.console .ok { color: var(--accent); }
+.console .warn { color: var(--orange); }
+.console .jump { color: var(--blue); cursor: pointer; text-decoration: underline; }

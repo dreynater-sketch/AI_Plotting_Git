@@ -2,10 +2,15 @@
  *
  * Opened from the figure editor's "figure.py" menu as code.html?project=X.
  * Shows the user's saved hand-edited figure.py if there is one, otherwise the
- * code generated from the current figure. Save keeps an edited copy with the
- * project (it never changes the draggable figure); Run executes the script
- * in this browser via Pyodide (see pyworker.js) -- never on the server.
+ * code generated from the current figure. Save keeps the edited copy with the
+ * project AND applies what it can back onto the draggable figure (the server
+ * parses it, never runs it -- see figforge/codesync.py); lines it can't apply
+ * are listed in the Output panel. Run executes the script in this browser via
+ * Pyodide (see pyworker.js) -- never on the server.
  */
+
+// Tells an open figure-editor tab that the figure just changed from code.
+const channel = 'BroadcastChannel' in window ? new BroadcastChannel('figforge') : null;
 
 const $ = (id) => document.getElementById(id);
 const PROJECT = new URLSearchParams(location.search).get('project') || '';
@@ -89,8 +94,9 @@ function block(html) {
 function showBanner() {
   const b = $('banner');
   if (hasCustom && baseRev != null && rev != null && baseRev !== rev) {
-    b.innerHTML = `The figure has been edited in FigForge since you saved this code ` +
-      `(rev ${baseRev} → ${rev}), and your version doesn't include those changes. ` +
+    b.innerHTML = `The figure has been edited in the figure editor since you saved this code ` +
+      `(rev ${baseRev} → ${rev}), and your version doesn't include those changes — saving ` +
+      `this version would undo them. ` +
       `<button id="banner-gen">Open the generated code instead</button>`;
     b.hidden = false;
     $('banner-gen').onclick = () => loadGenerated();
@@ -123,8 +129,9 @@ async function load() {
   cm.clearHistory();
   $('tree-project').textContent = PROJECT;
   $('side-note').innerHTML = `Run executes this script <b>in your browser</b> (Python via Pyodide); ` +
-    `nothing runs on the server. Saving keeps your edited copy with the project — ` +
-    `the draggable figure isn’t changed. <br><br><a href="/?project=${encodeURIComponent(PROJECT)}">` +
+    `nothing runs on the server. <b>Saving</b> keeps your code and applies what it can to ` +
+    `the draggable figure (labels, titles, axes, curves, arrows, legend); anything else stays ` +
+    `in your code only and is listed after you save. <br><br><a href="/?project=${encodeURIComponent(PROJECT)}">` +
     `← Back to the figure editor</a>`;
   refreshDirty();
   showBanner();
@@ -146,19 +153,64 @@ async function save() {
   try {
     const r = await fetch(`/api/script/${PROJECT}`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ code, base_rev: baseRev }),
+      body: JSON.stringify({ code }),
     });
     const d = await r.json();
     if (!r.ok) throw new Error(d.error || r.statusText);
     savedValue = code;
     hasCustom = true;
+    rev = baseRev = d.rev;
+    generated = d.generated;
     refreshDirty();
     showBanner();
-    setStatus('Saved');
+    showSyncReport(d.sync);
   } catch (e) {
     setStatus(`Save failed: ${e.message}`, 'err');
   }
 }
+
+const esc = (t) => String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+
+/** What Save did to the figure, in the Output panel. Lines that couldn't be
+ *  applied are clickable and jump to that line. */
+function showSyncReport(sync) {
+  const applied = sync.changed.length + sync.added.length + sync.removed.length;
+  if (applied) channel?.postMessage({ type: 'figure-synced', project: PROJECT, rev });
+  if (!applied && !sync.skipped.length && !sync.error) {
+    setStatus('Saved · the figure already matches this code');
+    return;
+  }
+  setStatus(sync.error ? 'Saved (not applied to the figure)' : `Saved · ${applied} change${applied === 1 ? '' : 's'} applied to the figure`,
+            sync.error ? 'err' : '');
+  const out = [];
+  if (sync.error) {
+    out.push(`<span class="err">${esc(sync.error).replace(/line (\d+)/, '<a class="jump" data-line="$1">line $1</a>')}</span>`);
+  }
+  if (applied) {
+    out.push('<span class="ok">Applied to the figure</span> <span class="info">(Ctrl+Z in the figure editor undoes it)</span>');
+    sync.changed.forEach((c) => out.push(`  • ${esc(c)}`));
+    sync.added.forEach((c) => out.push(`  + added ${esc(c)}`));
+    sync.removed.forEach((c) => out.push(`  − removed ${esc(c)}`));
+  }
+  if (sync.skipped.length) {
+    out.push('', '<span class="warn">Kept in your code only</span> <span class="info">(saved, runs with ▶ Run, but not shown in the figure editor)</span>');
+    sync.skipped.forEach((s) => out.push(
+      `  <a class="jump" data-line="${s.line}">line ${s.line}</a>  ${esc(s.code)}  <span class="info">— ${esc(s.reason)}</span>`));
+  }
+  $('console').innerHTML = out.join('\n');
+  $('figures').innerHTML = '';
+  togglePanel(true);
+  panelState(sync.error ? 'Not applied' : applied ? `Synced · rev ${rev}` : 'Saved', sync.error ? 'err' : 'ok');
+}
+
+$('console').addEventListener('click', (e) => {
+  const a = e.target.closest('.jump');
+  if (!a) return;
+  const line = +a.dataset.line - 1;
+  cm.setCursor({ line, ch: 0 });
+  cm.scrollIntoView({ line, ch: 0 }, 120);
+  cm.focus();
+});
 
 async function resetToGenerated() {
   if (hasCustom && !confirm('Discard your edited figure.py and go back to the generated code?')) return;
