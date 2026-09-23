@@ -126,6 +126,46 @@ collided with pre-existing text label ids of the same name, harmless until
 arrows got gid-tagged and it became a genuine duplicate-SVG-id defect — fixed
 by giving every arrow id an explicit `_arrow` suffix.
 
+**Projects, undo/redo, delete** — a project picker with Save as / Rename
+that reopens the last project; Ctrl+Z / Ctrl+Y (or Ctrl+Shift+Z) with 100
+steps each way, kept per project across reloads, typing bursts coalesced;
+Delete/Backspace removes labels, arrows, curves and legends and blanks
+titles/axis labels (panels and ticks are refused). Label boxes got
+white/black fill and border and a padding control.
+
+**Hosted on Vercel** — `api/index.py` runs the same server as a Python
+function. Storage moved behind a small interface in `project.py`: local
+folders, or a private Supabase Storage bucket (reads bypass the CDN so a save
+is what the next request sees). The undo history travels gzipped to stay
+under Vercel's 4.5 MB body cap.
+
+**Accounts, invite-only** — Supabase Auth proxied by the server, session in
+HttpOnly cookies; every `/api/` route needs a signed-in user and works in
+that user's own `users/<id>/` space, seeded with the example figure. Profile
+menu: display name, password, sign out. The admin (an `app_metadata` flag
+only the service key can set) invites friends by email; the invite link lets
+them pick a name and password. Public sign-up is refused.
+
+**New figure from any CSV** — upload, pick an x column and y columns, lines
+or points; tolerant of separators, European decimals, comments and gaps.
+Rebuild regenerates it from the stored CSV.
+
+**figure.py editor** — a Sublime-style code editor (CodeMirror 5, Monokai,
+Sublime keys, minimap, command palette) in its own tab. Run executes the
+script in the browser with Pyodide in a Web Worker — never on the server,
+which holds the storage key. Saving applies the edit back to the draggable
+figure: `codesync.py` parses the code (never executes it) and maps what
+codegen writes back to the spec, matched by the `gid=` codegen now puts on
+each label, curve and arrow; anything it can't map stays in the code and is
+listed by line. Generate → parse is lossless on both the original and the
+edited figure.
+
+**Groundwork for an AI assistant** — `ops.py`: ten editing operations as
+strict Claude API tool definitions, a compact `describe_figure`, and a
+dispatcher returning one result per call (bad arguments come back as errors
+the model can correct). `POST /api/ops/<project>` applies a batch, saves it
+only if it renders, and makes it one undo step.
+
 ## Verification discipline, throughout
 
 Every feature above was checked against the real thing, not assumed:
@@ -133,13 +173,16 @@ render-twice-and-diff-the-geometry for anything claiming "no layout impact,"
 actual SVG output inspected for hit-testing semantics, a stubbed-DOM harness
 run against the *live* local server (not mocked data) for every selection/
 resolve/peer-group/bulk-edit path, and a rendered PNG read back for anything
-visual. There are now 17 dedicated test files covering selection, axes,
-ticks, fonts, editing UX, legends, curves, click-cycling, opacity, and arrows.
+visual. The suites that exist in the repo are in `tests/` —
+`python tests/run_all.py` runs 11 suites (~220 checks) covering undo/delete,
+label boxes, CSV import, the code editor and code→figure sync, the assistant
+operations, and accounts/invites against a stand-in Supabase
+(`tests/mock_supabase.py`); `tests/live/` exercises the real Supabase project
+and a deployed URL. (The 17 earlier test files this log used to mention were
+never committed.)
 
 ## Not yet built
 
-No AI, no chat, no git-commit-per-change, no multi-user editing, no Vercel
-deploy. The data table is read-only — no adding or deleting a curve, no
-hand-editing a value in the table. Photo-to-data-points and CSV-upload-picks-
-a-chart are explicitly out of scope for this phase; the plan is local-first,
-one figure at a time, before any of that.
+The assistant's chat loop (its tools are ready, see above); deleting a
+project; editing data-table values or adding curves to an existing figure;
+figure → saved-code sync; a phone layout; photo-to-data-points.

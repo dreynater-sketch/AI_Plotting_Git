@@ -1,19 +1,31 @@
-# FigForge — MVP
+# FigForge
 
 Drag-and-edit publication figures that stay reproducible as matplotlib code.
 
-This is the **Phase 0/1 spike** from `figforge_spec.md`: the risky core proven
-end to end, with **no AI and no API keys**. The first figure is the Q-circle
-extraction (`qcircle_C_R_Goff.py`) for the 2 K Nb-plated Cu cavity.
+Runs two ways from the same code: **locally** (`python serve.py`, projects in
+`figures/`, no account) or **hosted** on Vercel with invite-only accounts and
+projects in a private Supabase Storage bucket. The first figure is the Q-circle
+extraction (`qcircle_C_R_Goff.py`) for the 2 K Nb-plated Cu cavity; any CSV can
+start a new figure.
 
 ## Run it
 
 ```bash
+python -m venv .venv && .venv\Scripts\activate   # (source .venv/bin/activate elsewhere)
+pip install -r requirements.txt
 python build.py     # CSV -> analysis -> spec.json -> figure.svg + figure.py
 python serve.py     # opens http://127.0.0.1:8000
 ```
 
-Local only — the server binds `127.0.0.1` and talks to nothing else.
+Locally the server binds `127.0.0.1` and needs no account. The code editor's
+in-browser Run downloads Python (Pyodide) from jsDelivr the first time.
+
+Hosted: `vercel.json` routes every URL to `api/index.py`, which runs the same
+server. It needs `SUPABASE_URL` and `SUPABASE_SECRET_KEY` in the Vercel project
+settings; sign-up is invite-only (the admin invites from the profile menu).
+
+Tests: `pip install -r requirements-dev.txt`, then `python tests/run_all.py`
+(see that file).
 
 ## What you can do
 
@@ -274,14 +286,23 @@ pixel; the only subtlety is that SVG y runs down and data y runs up.
 ```
 build.py                bootstrap a figure from raw data
 serve.py                start the local editor
+api/index.py            the same server as a Vercel Python function
 figforge/
-  analyze.py            CSV -> curve arrays + derived scalars (the science)
-  spec_builder.py       analysis -> initial SPEC
+  analyze.py            CSV -> curve arrays + derived scalars (the Q-circle science)
+  spec_builder.py       analysis -> initial SPEC for the Q-circle figure
+  csvimport.py          any CSV + chosen x/y columns -> a new figure
   render.py             SPEC -> SVG with gids + geometry map
   codegen.py            SPEC -> standalone figure.py
-  server.py             local HTTP API
-  project.py            figure folder layout
+  codesync.py           edited figure.py -> SPEC (parsed, never executed)
+  ops.py                editing operations as Claude API tool definitions
+  server.py             HTTP API (local and hosted)
+  project.py            project storage: local folders or Supabase Storage
+  auth.py               accounts on Supabase Auth (hosted only)
 web/                    the editor (vanilla JS, no build step)
+  code.html / code.js   the Sublime-style figure.py editor
+  pyworker.js           runs figure.py in the browser (Pyodide)
+  vendor/codemirror/    CodeMirror 5 (MIT), vendored
+tests/                  run_all.py + the suites; tests/live needs .env
 figures/qcircle/
   data/vna_sweep.csv    raw VNA measurement
   data/curves.npz       analysed arrays (generated)
@@ -293,11 +314,13 @@ figures/qcircle/
 `figure.py` imports nothing from FigForge. It needs numpy, matplotlib and
 `data/curves.npz` next to it, and that's it.
 
-## Not in this build
+## Not in this build yet
 
-No AI, no chat, no git-commit-per-change, no multi-user, no Vercel. Every
-figure element (labels, panels, axes, ticks, legends, curves, arrows) is
-interactive now. The data table is read-only; there's no way yet to add a
-curve, delete one, or hand-edit a value in the table.
-Vercel needs a Python serverless function for the render step — matplotlib has
-to live somewhere — so that's a deliberate later step.
+- **The AI assistant itself.** `figforge/ops.py` has the editing operations as
+  Claude API tool definitions and `POST /api/ops/<project>` runs them; the
+  chat loop that calls the model is the next step.
+- Deleting a whole project; editing values in the data table; adding a curve
+  to an existing figure (a CSV figure picks its curves when it's created).
+- Syncing figure edits back into a saved hand-edited `figure.py` (code →
+  figure is synced; figure → your saved code shows a "figure changed" banner).
+- A phone layout.

@@ -15,3 +15,7 @@ Thumbs.db
 
 # Local secrets (Supabase key). Never commit.
 .env
+
+# Test run output (screenshots, server logs) and any aborted test projects
+tests/_out/
+figures/zz_*/

@@ -1,0 +1,3 @@
+-r requirements.txt
+# Test suites (tests/run_all.py): Playwright drives the installed Microsoft Edge.
+playwright==1.63.0
