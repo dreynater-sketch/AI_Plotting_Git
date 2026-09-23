@@ -23,11 +23,11 @@ plt.rcParams.update({
     'ytick.labelsize': 11,
 })
 
-fig, axes = plt.subplots(1, 3, figsize=(16.2, 5.35))
+fig, axes = plt.subplots(1, 3, figsize=(16.2, 5.35), squeeze=False)
 fig.patch.set_facecolor('white')
 
 # -------------------------------------------------------------- (a)
-ax = axes[0]
+ax = axes[0, 0]
 ax.axhline(0, color='0.88', lw=0.7)
 ax.axvline(0, color='0.88', lw=0.7)
 ax.plot(D["S11_re"], D["S11_im"], ls='none', marker='.', color='#4C78A8', ms=10, alpha=1, label='measured', gid='a_meas')
@@ -52,7 +52,7 @@ for _sp in ax.spines.values(): _sp.set_linewidth(0.8)
 ax.legend(loc='lower right', frameon=False, fontsize=10)
 
 # -------------------------------------------------------------- (b)
-ax = axes[1]
+ax = axes[0, 1]
 ax.axhline(0, color='0.88', lw=0.7)
 ax.axvline(0, color='0.88', lw=0.7)
 ax.plot(D["S33_re"], D["S33_im"], ls='none', marker='.', color='#4C78A8', ms=10, alpha=1, label='measured', gid='b_meas')
@@ -77,7 +77,7 @@ for _sp in ax.spines.values(): _sp.set_linewidth(0.8)
 ax.legend(loc='lower right', frameon=False, fontsize=10)
 
 # -------------------------------------------------------------- (c)
-ax = axes[2]
+ax = axes[0, 2]
 ax.axhline(0.5, color='#cccccc', ls=':', lw=0.8)
 ax.axvline(-6.221435998916626, color='#E07A3D', ls=':', lw=1.1)
 ax.axvline(0, color='#E07A3D', ls=':', lw=1.1)

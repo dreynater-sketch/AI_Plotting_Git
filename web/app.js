@@ -1456,6 +1456,7 @@ function showXY() {
 
 document.addEventListener('keydown', (evt) => {
   if (!spec) return;  // signed out / still loading: nothing to edit yet
+  if (!$('csv-modal').hidden) return;  // the new-figure dialog has the keyboard
   if (evt.key === 'Escape') { setSelection([]); return; }
 
   const typing = ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName);
@@ -1998,6 +1999,131 @@ $('project-select').onchange = (e) => {
   if (e.target.value !== FIGURE) openProject(e.target.value);
 };
 
+/* ------------------------------------------------ new from a CSV file
+ * The server reads the file (so the browser and figure.py agree on how it
+ * parses), lists its columns, and builds the figure from the picks. */
+
+let csvText = null, csvFilename = '';
+
+function csvMessage(msg, cls = '') {
+  $('csv-msg').textContent = msg;
+  $('csv-msg').className = 'csv-msg ' + cls;
+}
+
+function openCsvDialog() {
+  csvText = null;
+  $('csv-file').value = '';
+  $('csv-pick').hidden = true;
+  $('csv-create').disabled = true;
+  $('csv-drop-text').innerHTML = '<b>Choose a CSV file</b> or drop it here<br>' +
+    '<em>comma, semicolon, tab or space separated · up to 4 MB</em>';
+  csvMessage('');
+  $('csv-modal').hidden = false;
+}
+
+function closeCsvDialog() { $('csv-modal').hidden = true; }
+
+function projectNameFrom(filename) {
+  let base = filename.replace(/\.[^.]+$/, '').replace(/[^A-Za-z0-9_-]+/g, '_')
+    .replace(/^_+|_+$/g, '').slice(0, 40) || 'figure';
+  const taken = new Set([...$('project-select').options].map((o) => o.value));
+  let name = base, n = 2;
+  while (taken.has(name)) name = `${base}_${n++}`;
+  return name;
+}
+
+const fmt = (v) => (Math.abs(v) >= 1e5 || (Math.abs(v) < 1e-3 && v !== 0)) ? v.toExponential(2) : +v.toPrecision(4);
+
+async function loadCsvFile(file) {
+  if (!file) return;
+  if (file.size > 4 * 1024 * 1024) { csvMessage('That file is over 4 MB.', 'err'); return; }
+  csvMessage('Reading…');
+  csvText = await file.text();
+  csvFilename = file.name;
+  try {
+    const r = await fetch('/api/csv/inspect', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ csv: csvText }),
+    });
+    const info = await r.json();
+    if (!r.ok) throw new Error(info.error || r.statusText);
+    const numeric = info.columns.filter((c) => c.numeric);
+    $('csv-drop-text').innerHTML = `<b>${escapeHtml(file.name)}</b> · choose another file`;
+    $('csv-summary').textContent = `${info.rows} rows · ${info.columns.length} columns · ${info.separator}-separated. ` +
+      'Pick the x column and one or more columns to plot.';
+    $('csv-cols').innerHTML = info.columns.map((c) => {
+      const range = c.numeric ? `${fmt(c.min)} … ${fmt(c.max)}` : 'not numbers';
+      const dis = c.numeric ? '' : 'disabled';
+      const isX = c.index === numeric[0]?.index;
+      const isY = numeric.length > 1 && c.index === numeric[1].index;
+      return `<tr class="${c.numeric ? '' : 'muted'}"><td>${escapeHtml(c.name)}</td><td>${range}</td>` +
+        `<td><input type="radio" name="csv-x" value="${c.index}" ${dis} ${isX ? 'checked' : ''}></td>` +
+        `<td><input type="checkbox" name="csv-y" value="${c.index}" ${dis} ${isY ? 'checked' : ''}></td></tr>`;
+    }).join('');
+    $('csv-name').value = projectNameFrom(file.name);
+    $('csv-pick').hidden = false;
+    csvMessage(numeric.length < 2 ? 'Only one column holds numbers, so there is nothing to plot against it.' : '',
+               numeric.length < 2 ? 'err' : '');
+    refreshCsvCreate();
+  } catch (e) {
+    csvText = null;
+    $('csv-pick').hidden = true;
+    csvMessage(`Couldn’t read that file: ${e.message}`, 'err');
+  }
+}
+
+function csvChoice() {
+  const x = document.querySelector('input[name="csv-x"]:checked');
+  const ys = [...document.querySelectorAll('input[name="csv-y"]:checked')].map((i) => +i.value);
+  return { x: x ? +x.value : null, ys: ys.filter((y) => y !== (x ? +x.value : null)) };
+}
+
+function refreshCsvCreate() {
+  const { x, ys } = csvChoice();
+  $('csv-create').disabled = !(csvText && x !== null && ys.length && /^[A-Za-z0-9_-]+$/.test($('csv-name').value));
+}
+
+$('btn-new').onclick = openCsvDialog;
+$('csv-close').onclick = closeCsvDialog;
+$('csv-cancel').onclick = closeCsvDialog;
+$('csv-file').onchange = (e) => loadCsvFile(e.target.files[0]);
+$('csv-cols').addEventListener('change', (e) => {
+  // The x column can't also be a y column.
+  if (e.target.name === 'csv-x') {
+    const y = document.querySelector(`input[name="csv-y"][value="${e.target.value}"]`);
+    if (y) y.checked = false;
+  }
+  refreshCsvCreate();
+});
+$('csv-name').addEventListener('input', refreshCsvCreate);
+// At the document level: after picking a file, focus isn't inside the dialog.
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !$('csv-modal').hidden) closeCsvDialog();
+});
+const drop = $('csv-drop');
+['dragenter', 'dragover'].forEach((t) => drop.addEventListener(t, (e) => { e.preventDefault(); drop.classList.add('over'); }));
+['dragleave', 'drop'].forEach((t) => drop.addEventListener(t, (e) => { e.preventDefault(); drop.classList.remove('over'); }));
+drop.addEventListener('drop', (e) => loadCsvFile(e.dataTransfer.files[0]));
+
+$('csv-create').onclick = async () => {
+  const { x, ys } = csvChoice();
+  const name = $('csv-name').value.trim();
+  $('csv-create').disabled = true;
+  csvMessage('Building the figure…');
+  try {
+    const r = await fetch('/api/project/from-csv', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, csv: csvText, filename: csvFilename, x, ys, plot: $('csv-plot').value }),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || r.statusText);
+    openProject(d.name);
+  } catch (e) {
+    csvMessage(e.message, 'err');
+    refreshCsvCreate();
+  }
+};
+
 $('btn-saveas').onclick = async () => {
   const name = askName('Save a copy of this project as:', `${FIGURE}-copy`);
   if (!name) return;
@@ -2061,10 +2187,15 @@ function authMessage(msg, cls = '') {
   el.className = 'auth-msg ' + cls;
 }
 
+let inviteOnly = true;
+
 function showAuth(view = 'login', msg = '', cls = '') {
   $('auth-screen').hidden = false;
+  // Invite-only: no Sign up tab, just a note on the log-in screen.
+  document.querySelector('#auth-tabs [data-view="signup"]').hidden = inviteOnly;
+  $('invite-note').hidden = !(inviteOnly && view === 'login');
   document.querySelectorAll('.auth-form').forEach((f) => { f.hidden = f.dataset.view !== view; });
-  $('auth-tabs').hidden = !['login', 'signup'].includes(view);
+  $('auth-tabs').hidden = !['login', 'signup'].includes(view) || inviteOnly;
   document.querySelectorAll('#auth-tabs button').forEach((b) => {
     b.classList.toggle('on', b.dataset.view === view);
   });
@@ -2103,6 +2234,10 @@ document.querySelectorAll('.auth-form').forEach((form) => {
       } else if (view === 'forgot') {
         await authPost('recover', f);
         showAuth('login', `If ${f.email} has an account, a reset link is on its way.`, 'ok');
+      } else if (view === 'welcome') {
+        await authPost('password', { password: f.password });
+        await authPost('profile', { display_name: f.display_name });
+        location.replace(location.pathname);
       } else if (view === 'reset') {
         if (f.password !== f.password2) throw new Error('the two passwords don’t match');
         await authPost('password', { password: f.password });
@@ -2124,6 +2259,34 @@ function takeAuthFragment() {
   return Object.fromEntries(h);
 }
 
+async function loadInvites() {
+  try {
+    const r = await fetch('/api/admin/users');
+    if (!r.ok) return;
+    const { users } = await r.json();
+    $('invite-list').innerHTML = users.map((u) =>
+      `<li><span class="who" title="${escapeHtml(u.email)}">${escapeHtml(u.display_name || u.email)}</span>` +
+      `<span class="state ${u.status}">${u.admin ? 'admin' : u.status}</span></li>`).join('');
+  } catch { /* the list is a convenience */ }
+}
+
+$('invite-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const email = $('invite-email').value.trim();
+  if (!email) return;
+  try {
+    const r = await fetch('/api/admin/invite', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email }),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || r.statusText);
+    $('invite-email').value = '';
+    profileMessage(`Invite sent to ${d.email}.`, 'ok');
+    loadInvites();
+  } catch (err) { profileMessage(err.message, 'err'); }
+});
+
 function showAccount(user) {
   const name = user.display_name || user.email;
   $('account').hidden = false;
@@ -2132,6 +2295,8 @@ function showAccount(user) {
   $('profile-email').textContent = `Signed in as ${user.email}`;
   $('profile-username').value = user.email;
   $('profile-name').value = user.display_name || '';
+  $('admin-box').hidden = !user.admin;
+  if (user.admin) loadInvites();
 }
 
 function profileMessage(msg, cls = '') {
@@ -2200,10 +2365,12 @@ async function boot() {
       showAuth('login', `That link didn’t work: ${err.message}`, 'err');
       return;
     }
-    if (link.type === 'recovery') { showAuth('reset'); return; }
   }
   const r = await fetch('/api/auth/me');
   const me = await r.json().catch(() => ({ mode: 'local' }));
+  inviteOnly = me.invite_only !== false;
+  if (link?.type === 'recovery') { showAuth('reset'); return; }
+  if (link?.type === 'invite') { showAuth('welcome'); return; }
   if (me.mode === 'online') {
     if (!me.user) { showAuth('login'); return; }
     showAccount(me.user);

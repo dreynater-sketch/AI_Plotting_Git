@@ -78,7 +78,8 @@ def generate(spec):
 
     n = len(spec["panels"])
     w, h = spec["size_in"]
-    L.append(f"fig, axes = plt.subplots(1, {n}, figsize=({w}, {h}))")
+    # squeeze=False: axes is always a grid, so `axes[0, i]` works for one panel too
+    L.append(f"fig, axes = plt.subplots(1, {n}, figsize=({w}, {h}), squeeze=False)")
     L.append("fig.patch.set_facecolor('white')")
     if sup.get("text"):
         L.append(f"fig.suptitle({_s(sup['text'])}, fontsize={sup.get('size', 16)}, "
@@ -99,7 +100,7 @@ def generate(spec):
 
 def _panel(p, i):
     bar = "# " + "-" * 62 + f" ({p['id']})"
-    L = [bar, f"ax = axes[{i}]"]
+    L = [bar, f"ax = axes[0, {i}]"]
 
     for hl in p.get("hlines", []):
         L.append(f"ax.axhline({hl['y']!r}, color={_s(hl.get('color', '0.8'))}, "

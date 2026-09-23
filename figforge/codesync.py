@@ -6,7 +6,7 @@ follows the code. It is the inverse of codegen.py and only understands the
 shapes codegen writes -- top-level statements with literal arguments:
 
     fig.suptitle(...), plt.subplots(..., figsize=...), plt.rcParams.update({...})
-    ax = axes[i]                          which panel the lines below belong to
+    ax = axes[0, i]  (or axes[i])         which panel the lines below belong to
     ax.text / ax.plot / ax.add_patch(FancyArrowPatch(...))
     ax.set_title / set_xlabel / set_ylabel / set_xlim / set_ylim / set_xscale ...
     ax.axhline / ax.axvline, ax.tick_params, ax.legend, the spines loop
@@ -200,6 +200,8 @@ def _statement(node, new, panels, state, taken, array_keys):
                 and _name(node.value.func) == "plt.subplots":
             call = node.value
             args = [_lit(a, "subplot count") for a in call.args]
+            if "squeeze" in _kwargs(call) and _lit(_kwargs(call)["squeeze"], "squeeze") is not False:
+                raise Skip("squeeze=True would break `axes[0, i]`")
             if args and args[-1] != len(panels):
                 raise Skip("changing the number of panels isn't supported")
             kw = _kwargs(call)
@@ -207,10 +209,12 @@ def _statement(node, new, panels, state, taken, array_keys):
                 w, h = _lit(kw["figsize"], "figsize")
                 new["size_in"] = [_num(w, "figure width"), _num(h, "figure height")]
             return
-        # ax = axes[i]
+        # ax = axes[0, i]   (older code: ax = axes[i])
         if tname == "ax" and isinstance(node.value, ast.Subscript) \
                 and _name(node.value.value) == "axes":
             i = _lit(node.value.slice, "panel index")
+            if isinstance(i, tuple) and len(i) == 2 and i[0] == 0:
+                i = i[1]
             if not isinstance(i, int) or not 0 <= i < len(panels):
                 raise Skip("there's no panel with that index")
             state["ax"] = panels[i]

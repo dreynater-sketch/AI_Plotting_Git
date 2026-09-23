@@ -12,6 +12,7 @@
   <div class="brand">FigForge <span class="sub" id="storage-badge">local</span></div>
   <div class="project">
     <select id="project-select" title="Open project"></select>
+    <button id="btn-new" title="Start a new figure from a CSV file">New from CSV…</button>
     <button id="btn-saveas" title="Copy this project under a new name">Save as…</button>
     <button id="btn-rename" title="Rename this project">Rename</button>
   </div>
@@ -50,6 +51,16 @@
         <input type="password" id="profile-pw2" placeholder="Repeat new password" autocomplete="new-password">
         <button type="submit">Update password</button>
       </form>
+      <div class="admin-box" id="admin-box" hidden>
+        <form id="invite-form" class="field">
+          <span>Invite a friend</span>
+          <span class="inline">
+            <input type="email" id="invite-email" placeholder="friend@example.com" autocomplete="off">
+            <button type="submit">Invite</button>
+          </span>
+        </form>
+        <ul class="invite-list" id="invite-list"></ul>
+      </div>
       <p class="profile-msg" id="profile-msg"></p>
       <button id="btn-signout" class="danger">Sign out</button>
     </div>
@@ -373,6 +384,46 @@
   </aside>
 </main>
 
+<!-- New project from a CSV: pick the file, then the x and y columns. -->
+<div class="modal" id="csv-modal" hidden>
+  <div class="modal-card" role="dialog" aria-labelledby="csv-title">
+    <div class="modal-head">
+      <h3 id="csv-title">New figure from a CSV</h3>
+      <button class="link" id="csv-close" title="Close (Esc)">×</button>
+    </div>
+    <label class="csv-drop" id="csv-drop">
+      <input type="file" id="csv-file" accept=".csv,.tsv,.txt,.dat,text/csv,text/plain">
+      <span id="csv-drop-text"><b>Choose a CSV file</b> or drop it here<br><em>comma, semicolon, tab or space separated · up to 4 MB</em></span>
+    </label>
+    <div id="csv-pick" hidden>
+      <p class="csv-summary" id="csv-summary"></p>
+      <table class="csv-cols">
+        <thead><tr><th>Column</th><th>Range</th><th title="Horizontal axis">x</th><th title="Plot these">y</th></tr></thead>
+        <tbody id="csv-cols"></tbody>
+      </table>
+      <div class="row">
+        <label class="field">
+          <span>Plot as</span>
+          <select id="csv-plot">
+            <option value="line">Lines</option>
+            <option value="scatter">Points</option>
+            <option value="line+markers">Lines + points</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>Project name</span>
+          <input type="text" id="csv-name" spellcheck="false">
+        </label>
+      </div>
+    </div>
+    <p class="csv-msg" id="csv-msg" role="status"></p>
+    <div class="modal-foot">
+      <button id="csv-cancel">Cancel</button>
+      <button class="primary" id="csv-create" disabled>Create figure</button>
+    </div>
+  </div>
+</div>
+
 <!-- Hosted editor only: sign in / sign up. The local editor never shows it. -->
 <div class="auth-screen" id="auth-screen" hidden>
   <div class="auth-card">
@@ -403,6 +454,17 @@
       <label class="field"><span>Email</span><input type="email" name="email" autocomplete="username" required></label>
       <button type="submit" class="primary">Send reset link</button>
       <button type="button" class="link" data-goto="login">Back to log in</button>
+    </form>
+
+    <p class="auth-note invite-only" id="invite-note" hidden>
+      FigForge is invite-only. Got an invite email? Open its link to set up your account.
+    </p>
+
+    <form class="auth-form" data-view="welcome" hidden>
+      <p class="auth-note">Welcome! You were invited to FigForge. Pick a name and a password to finish setting up.</p>
+      <label class="field"><span>Display name</span><input type="text" name="display_name" maxlength="60" autocomplete="nickname" required></label>
+      <label class="field"><span>Password <em>(8+ characters)</em></span><input type="password" name="password" minlength="8" autocomplete="new-password" required></label>
+      <button type="submit" class="primary">Start using FigForge</button>
     </form>
 
     <form class="auth-form" data-view="reset" hidden>

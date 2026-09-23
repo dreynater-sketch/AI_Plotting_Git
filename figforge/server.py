@@ -16,6 +16,11 @@
     POST /api/history/<name>   {undo, redo} -> persist both stacks
     POST /api/project/duplicate  {from, name} -> copy a project ("Save as")
     POST /api/project/rename     {from, name} -> rename a project folder
+    POST /api/csv/inspect        {csv} -> the file's columns, for picking x / y
+    GET  /api/assistant/tools    editing operations as Claude API tool definitions (ops.py)
+    GET  /api/describe/<name>    the compact figure summary an assistant reads first
+    POST /api/ops/<name>         {calls: [{name, input}]} -> apply them; one result per call
+    POST /api/project/from-csv   {name, csv, filename, x, ys, plot} -> new project
 
 Hosted only (accounts, see figforge/auth.py) -- every other /api/ route
 then requires a signed-in user and works in that user's own project space:
@@ -28,6 +33,10 @@ then requires a signed-in user and works in that user's own project space:
     POST /api/auth/recover     {email} -> password-reset email
     POST /api/auth/profile     {display_name}
     POST /api/auth/password    {password}
+    GET  /api/admin/users      (admins) everyone with an account or an invite
+    POST /api/admin/invite     (admins) {email} -> Supabase emails an invite link
+
+Sign-up is invite-only unless FIGFORGE_OPEN_SIGNUP=1 is set.
 
 Locally this binds 127.0.0.1 and talks to nothing external; there is no AI in
 this build. The same Handler also runs as FigForge's Vercel function
@@ -49,13 +58,14 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import unquote, urlparse
 
-from figforge import codegen, codesync, render
-from figforge.auth import AuthError, public_user
+from figforge import codegen, codesync, csvimport, ops, render
+from figforge.auth import AuthError, is_admin, public_user
 from figforge.project import AUTH, ROOT, STORE, Figure, list_figures
 
 WEB = os.path.join(ROOT, "web")
 NAME_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 HISTORY_MAX = 100  # per stack; matches the editor's HISTORY_MAX
+OPEN_SIGNUP = os.environ.get("FIGFORGE_OPEN_SIGNUP") == "1"
 SCRIPT_MAX = 512 * 1024  # a hand-edited figure.py; the generated one is ~6 KB
 SESSION_MAX_AGE = 30 * 24 * 3600  # cookies; Supabase's refresh token outlives the 1 h access token
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -102,6 +112,8 @@ class Handler(BaseHTTPRequestHandler):
         self._cookies = []
         if path == "/api/auth/me":
             return self._auth_me()
+        if path == "/api/admin/users":
+            return self._admin_users()
         if path.startswith("/api/") and not self._authorize():
             return
 
@@ -153,6 +165,15 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith("/api/data/"):
             return self._series_data(path[len("/api/data/"):])
 
+        if path == "/api/assistant/tools":
+            return self._json({"model": "claude-opus-5", "tools": ops.TOOLS})
+
+        if path.startswith("/api/describe/"):
+            fig = self._figure(path[len("/api/describe/"):])
+            if not fig:
+                return self._error(404, "unknown figure")
+            return self._json(ops.describe(fig.load_spec(), fig.load_arrays()))
+
         if path.startswith("/api/history/"):
             fig = self._figure(path[len("/api/history/"):])
             if not fig:
@@ -186,9 +207,11 @@ class Handler(BaseHTTPRequestHandler):
                     continue
                 x = arrays[s["x"]] if isinstance(s["x"], str) else s["x"]
                 y = arrays[s["y"]] if isinstance(s["y"], str) else s["y"]
+                # NaN (a gap in imported data) isn't valid JSON: send null.
+                clean = lambda vs: [None if v != v else float(v) for v in vs]
                 return self._json({
                     "id": series_id, "panel": p["id"], "label": s.get("label", ""),
-                    "x": [float(v) for v in x], "y": [float(v) for v in y],
+                    "x": clean(x), "y": clean(y),
                 })
         return self._error(404, "unknown series")
 
@@ -198,6 +221,8 @@ class Handler(BaseHTTPRequestHandler):
         self._cookies = []
         if path.startswith("/api/auth/"):
             return self._auth_api(path[len("/api/auth/"):])
+        if path == "/api/admin/invite":
+            return self._admin_invite()
         if not self._authorize():
             return
 
@@ -220,6 +245,28 @@ class Handler(BaseHTTPRequestHandler):
 
         if path in ("/api/project/duplicate", "/api/project/rename"):
             return self._project_op(path.rsplit("/", 1)[1])
+
+        if path == "/api/csv/inspect":
+            body = self._body()
+            if not isinstance(body, dict) or not isinstance(body.get("csv"), str):
+                return self._error(400, "expected {csv}")
+            try:
+                return self._json(csvimport.inspect(body["csv"]))
+            except csvimport.CSVError as e:
+                return self._error(400, str(e))
+
+        if path == "/api/project/from-csv":
+            return self._project_from_csv()
+
+        if path.startswith("/api/ops/"):
+            fig = self._figure(path[len("/api/ops/"):])
+            if not fig:
+                return self._error(404, "unknown figure")
+            body = self._body()
+            calls = body.get("calls") if isinstance(body, dict) else None
+            if not isinstance(calls, list) or len(calls) > 50:
+                return self._error(400, "expected {calls: [{name, input}, ...]} (at most 50)")
+            return self._apply_ops(fig, calls)
 
         if path.startswith("/api/script/"):
             rest = path[len("/api/script/"):]
@@ -262,13 +309,50 @@ class Handler(BaseHTTPRequestHandler):
         fig.write_outputs(payload["svg"], codegen.generate(spec))
         return self._json(payload)
 
+    def _project_from_csv(self):
+        body = self._body()
+        if not isinstance(body, dict) or not isinstance(body.get("csv"), str):
+            return self._error(400, "expected {name, csv, x, ys}")
+        name = str(body.get("name") or "")
+        if not NAME_RE.match(name):
+            return self._error(400, "names may use letters, digits, - and _ only")
+        if self.store.project_exists(name):
+            return self._error(409, f"a project named '{name}' already exists")
+        try:
+            spec, arrays = csvimport.build(name, body["csv"], body.get("x"), body.get("ys") or [],
+                                           body.get("plot", "line"), str(body.get("filename") or ""))
+        except csvimport.CSVError as e:
+            return self._error(400, str(e))
+        fig = Figure(name, self.store)
+        fig.save_arrays(arrays)
+        try:
+            payload = self._payload(fig, spec)
+        except Exception as e:
+            return self._error(422, f"couldn't draw that data: {type(e).__name__}: {e}")
+        fig.save_source_csv(body["csv"])
+        fig.save_spec(spec)
+        fig.write_outputs(payload["svg"], codegen.generate(spec))
+        return self._json({"name": name, "figures": list_figures(self.store)})
+
     def _rebuild(self, fig):
-        """Throw away layout edits and regenerate the spec from raw data."""
+        """Throw away layout edits and regenerate the spec from raw data:
+        the Q-circle analysis, or the column choices a CSV project was made with."""
+        source = fig.load_spec().get("source") or {}
+        if source.get("kind") == "csv":
+            text = fig.load_source_csv()
+            if text is None:
+                return self._error(404, "this project's source CSV is missing")
+            spec, arrays = csvimport.build(fig.name, text, source["x"], source["ys"],
+                                           source.get("plot", "line"), source.get("filename", ""))
+            fig.save_arrays(arrays)
+            return self._finish_rebuild(fig, spec)
         from figforge import analyze, spec_builder
         with fig.csv_file() as csv_path:
             arrays, derived = analyze.analyze(csv_path)
         fig.save_arrays(arrays)
-        spec = spec_builder.build_spec(derived)
+        return self._finish_rebuild(fig, spec_builder.build_spec(derived))
+
+    def _finish_rebuild(self, fig, spec):
         fig.save_spec(spec)
         fig.save_history([], [])  # the old stacks belong to the discarded edits
         payload = self._payload(fig, spec)
@@ -304,6 +388,31 @@ class Handler(BaseHTTPRequestHandler):
         else:
             self.store.rename_project(src.name, name)
         return self._json({"name": name, "figures": list_figures(self.store)})
+
+    def _apply_ops(self, fig, calls):
+        """Editing operations (ops.py) -- what a future assistant's tool calls
+        run through. Saved only if the result renders; the old spec goes on
+        the undo stack so the whole batch undoes in one step."""
+        spec = fig.load_spec()
+        arrays = fig.load_arrays()
+        new_spec, results, changed = ops.apply(spec, calls, arrays)
+        payload = None
+        if changed:
+            new_spec["rev"] = int(spec.get("rev", 0)) + 1
+            try:
+                payload = self._payload(fig, new_spec)
+            except Exception as e:
+                return self._json({"changed": False, "rev": spec.get("rev"), "results": results,
+                                   "error": f"the figure couldn't be drawn after these edits "
+                                            f"({type(e).__name__}: {e}); nothing was saved"}, 422)
+            fig.save_spec(new_spec)
+            fig.write_outputs(payload["svg"], codegen.generate(new_spec))
+            h = fig.load_history()
+            fig.save_history((h["undo"] + [spec])[-HISTORY_MAX:], [])
+        out = {"changed": changed, "rev": (new_spec if changed else spec).get("rev"), "results": results}
+        if payload:
+            out.update(payload)
+        return self._json(out)
 
     def _save_script(self, fig, code):
         """Keep the user's code as written, then fold what it can into the
@@ -411,8 +520,54 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"mode": "local"})
         user = self._current_user()
         if not user:
-            return self._json({"mode": "online", "user": None}, 401)
-        return self._json({"mode": "online", "user": public_user(user)})
+            return self._json({"mode": "online", "user": None, "invite_only": not OPEN_SIGNUP}, 401)
+        return self._json({"mode": "online", "user": public_user(user), "invite_only": not OPEN_SIGNUP})
+
+    def _require_admin(self):
+        if AUTH is None:
+            self._error(404, "accounts are only available on the hosted editor")
+            return None
+        user = self._current_user()
+        if not user:
+            self._error(401, "sign in required")
+            return None
+        if not is_admin(user):
+            self._error(403, "only the site admin can manage invites")
+            return None
+        return user
+
+    def _admin_users(self):
+        if not self._require_admin():
+            return
+        try:
+            users = AUTH.list_users()
+        except AuthError as e:
+            return self._error(502, e.message)
+        rows = [{"email": u.get("email"),
+                 "display_name": (u.get("user_metadata") or {}).get("display_name") or "",
+                 "status": "active" if u.get("last_sign_in_at") else
+                           ("invited" if u.get("invited_at") else "unconfirmed"),
+                 "invited_at": u.get("invited_at"), "last_sign_in_at": u.get("last_sign_in_at"),
+                 "admin": is_admin(u)} for u in users]
+        rows.sort(key=lambda r: (r["status"] != "invited", (r["email"] or "").lower()))
+        return self._json({"users": rows})
+
+    def _admin_invite(self):
+        self._cookies = []
+        if not self._require_admin():
+            return
+        body = self._body()
+        email = str((body or {}).get("email") or "").strip().lower()
+        if not EMAIL_RE.match(email):
+            return self._error(400, "enter a valid email address")
+        try:
+            AUTH.invite(email, self._site_url())
+        except AuthError as e:
+            if "already" in e.message.lower() or e.status == 422:
+                return self._error(409, f"{email} already has an account")
+            code = 429 if e.status == 429 else 502
+            return self._error(code, e.message)
+        return self._json({"ok": True, "email": email})
 
     def _auth_api(self, op):
         if AUTH is None:
@@ -434,6 +589,8 @@ class Handler(BaseHTTPRequestHandler):
                     return self._error(400, "passwords need at least 8 characters")
 
             if op == "signup":
+                if not OPEN_SIGNUP:
+                    return self._error(403, "FigForge is invite-only -- ask the site owner for an invite")
                 sess = AUTH.signup(email, body["password"], text("display_name")[:60],
                                    self._site_url())
                 if not sess:

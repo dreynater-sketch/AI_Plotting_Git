@@ -336,6 +336,14 @@ class Figure:
     def clear_script(self):
         self.store.delete(self._rel("custom_figure.json"))
 
+    def save_source_csv(self, text):
+        """The CSV a general project was made from, kept for Rebuild."""
+        self.store.write(self._rel("data/source.csv"), text.encode("utf-8"))
+
+    def load_source_csv(self):
+        raw = self.store.read(self._rel("data/source.csv"))
+        return raw.decode("utf-8") if raw is not None else None
+
     def npz_bytes(self):
         """The analysed arrays as the .npz file figure.py loads -- what the
         in-browser runner puts next to the script."""

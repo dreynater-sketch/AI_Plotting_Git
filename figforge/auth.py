@@ -5,10 +5,14 @@ the local editor has no accounts. The browser never talks to Supabase
 directly: the server proxies sign-up / log-in and keeps the resulting
 session in HttpOnly cookies, so page scripts can't read the tokens.
 
-Email links (confirm sign-up, reset password) come back to the site as
-"#access_token=...&type=signup|recovery" in the URL fragment; the page
-posts those tokens to /api/auth/session, which verifies them with Supabase
-before turning them into a session.
+Email links (confirm sign-up, reset password, accept an invite) come back
+to the site as "#access_token=...&type=signup|recovery|invite" in the URL
+fragment; the page posts those tokens to /api/auth/session, which verifies
+them with Supabase before turning them into a session.
+
+Invite-only: an admin (app_metadata.figforge_admin, which only the service
+key can set -- users can't grant it to themselves) invites friends by
+email; Supabase sends the invite and the link lets them pick a password.
 """
 
 import base64
@@ -109,6 +113,16 @@ class SupabaseAuth:
     def recover(self, email, redirect_to):
         self._call("POST", "/recover", {"email": email}, query={"redirect_to": redirect_to})
 
+    # ---------------------------------------------------------- admin
+    def invite(self, email, redirect_to):
+        """Supabase creates the account and emails an invite link. Works
+        with public sign-ups switched off -- which is the point."""
+        return self._call("POST", "/invite", {"email": email}, query={"redirect_to": redirect_to})
+
+    def list_users(self):
+        res = self._call("GET", "/admin/users", query={"per_page": 200})
+        return res.get("users", []) if isinstance(res, dict) else res
+
     def logout(self, access_token):
         self._cache.pop(access_token, None)
         try:
@@ -121,4 +135,10 @@ def public_user(u):
     """What the page is allowed to know about the signed-in user."""
     meta = u.get("user_metadata") or {}
     return {"id": u.get("id"), "email": u.get("email"),
-            "display_name": meta.get("display_name") or ""}
+            "display_name": meta.get("display_name") or "",
+            "admin": is_admin(u)}
+
+
+def is_admin(u):
+    """app_metadata is writable only with the service key, never by the user."""
+    return bool((u.get("app_metadata") or {}).get("figforge_admin"))
