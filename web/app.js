@@ -1960,7 +1960,9 @@ window.addEventListener('beforeunload', (e) => {
 
 async function pickProject() {
   const r = await fetch('/api/figures');
-  const names = (await r.json()).figures || [];
+  const listing = await r.json();
+  const names = listing.figures || [];
+  $('storage-badge').textContent = listing.storage || 'local';
   if (!names.length) throw new Error('no projects found in figures/');
   const wanted = [new URLSearchParams(location.search).get('project'), readLastProject()];
   const name = wanted.find((n) => n && names.includes(n)) || names[0];

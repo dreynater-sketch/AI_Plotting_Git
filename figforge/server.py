@@ -75,7 +75,8 @@ class Handler(BaseHTTPRequestHandler):
         path = unquote(urlparse(self.path).path)
 
         if path == "/api/figures":
-            return self._json({"figures": list_figures()})
+            return self._json({"figures": list_figures(),
+                               "storage": "local" if STORE.persistent_outputs else "online"})
 
         if path.startswith("/api/figure/"):
             fig = self._figure(path[len("/api/figure/"):])
