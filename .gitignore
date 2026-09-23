@@ -7,6 +7,7 @@ venv/
 # spec.json and the generated figure.py ARE versioned — they're the deliverable.
 figures/*/figure.png
 figures/*/figure.svg
+figures/*/history.json
 
 .DS_Store
 Thumbs.db

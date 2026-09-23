@@ -15,6 +15,10 @@
 
 * { box-sizing: border-box; }
 
+/* Classes like .data-panel set display:flex, which would otherwise beat the
+   hidden attribute and leave "hidden" panels on screen. */
+[hidden] { display: none !important; }
+
 html, body {
   height: 100%;
   margin: 0;
@@ -63,6 +67,19 @@ body {
   font-family: var(--mono);
   font-size: 12px;
   color: var(--ink-soft);
+}
+
+.project { display: flex; align-items: center; gap: 6px; }
+.project button { white-space: nowrap; }
+.project select {
+  font: inherit;
+  font-size: 13px;
+  padding: 4px 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--ink);
+  max-width: 220px;
 }
 
 .spacer { flex: 1; }
@@ -340,6 +357,7 @@ main {
   border-radius: 4px;
 }
 .elid code { font-family: var(--mono); font-size: 11.5px; color: var(--ink-soft); }
+.elid #btn-delete { margin-left: auto; font-size: 11.5px; padding: 2px 8px; }
 
 .field { display: block; margin-bottom: 10px; }
 .field > span {
@@ -383,7 +401,7 @@ input:focus, textarea:focus, select:focus {
   margin-bottom: 6px;
 }
 
-.sizewrap { display: flex; gap: 4px; }
+.field > .sizewrap { display: flex; gap: 4px; }
 .sizewrap input { text-align: center; }
 .sizewrap button {
   flex: none;
@@ -393,7 +411,7 @@ input:focus, textarea:focus, select:focus {
   line-height: 1;
 }
 
-.colorwrap { display: flex; gap: 6px; }
+.field > .colorwrap { display: flex; gap: 6px; }
 .colorwrap input[type=color] {
   width: 30px; height: 28px; padding: 2px;
   border: 1px solid var(--line); border-radius: 5px; background: #fff;
@@ -401,7 +419,7 @@ input:focus, textarea:focus, select:focus {
 }
 .colorwrap input[type=text] { font-family: var(--mono); }
 
-.opacitywrap { display: flex; align-items: center; gap: 8px; }
+.field > .opacitywrap { display: flex; align-items: center; gap: 8px; }
 .opacitywrap input[type=range] { flex: 1; min-width: 0; }
 .opacitywrap input[type=number] { width: 60px; flex: none; }
 

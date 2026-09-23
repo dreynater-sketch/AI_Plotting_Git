@@ -7,18 +7,25 @@
  * loop, so it isn't in it: edits are faked in the SVG immediately and the real
  * render replaces the fake when it lands. See reconcilePreviews().
  *
- * No AI, no external calls. Everything goes to 127.0.0.1.
+ * No AI, no external calls. Everything goes to the FigForge server that
+ * served this page: 127.0.0.1 locally, or its own Vercel function when hosted.
  */
 
-const FIGURE = 'qcircle';
+/** The open project (a figure folder name). Chosen at boot from ?project=,
+ *  then the last one opened, then the first that exists. */
+let FIGURE = null;
+const LAST_PROJECT_KEY = 'figforge.lastProject';
 
 let spec = null;          // live, authoritative
 let renderedSpec = null;  // what the SVG currently on screen was rendered from
 let geometry = null;
 let svgEl = null;
 let selection = [];       // element ids; selection[0] is the primary
-let history = [];
+let history = [];         // undo stack: past specs, newest last
+let future = [];          // redo stack: specs undone, newest last
 let zoom = 100;
+
+const HISTORY_MAX = 100;  // per stack; the server enforces the same cap
 
 const $ = (id) => document.getElementById(id);
 const canvas = $('canvas');
@@ -36,20 +43,82 @@ function setStatus(msg, cls = '') {
 
 const clone = (o) => JSON.parse(JSON.stringify(o));
 
-function pushHistory() {
+/** Snapshot the spec before an edit. A new edit discards the redo stack,
+ *  as in any editor. `coalesceKey` merges a burst of edits into one undo
+ *  step: typing a label's text shouldn't take one Ctrl+Z per keystroke. */
+let lastCoalesce = null;
+
+function pushHistory(coalesceKey = null) {
+  const now = Date.now();
+  if (coalesceKey && lastCoalesce?.key === coalesceKey && now - lastCoalesce.t < 1000) {
+    lastCoalesce.t = now;
+    return;
+  }
+  lastCoalesce = coalesceKey ? { key: coalesceKey, t: now } : null;
   history.push(clone(spec));
-  if (history.length > 60) history.shift();
-  $('btn-undo').disabled = false;
+  if (history.length > HISTORY_MAX) history.shift();
+  future = [];
+  refreshUndoButtons();
+  scheduleHistorySave();
 }
 
-let inFlight = false, needsSave = false, saveTimer = null;
+function refreshUndoButtons() {
+  $('btn-undo').disabled = !history.length;
+  $('btn-redo').disabled = !future.length;
+}
+
+/* The undo stack is persisted per project (history.json) so undo still works
+ * after closing the browser. Debounced: it's up to ~1 MB, and a burst of
+ * nudges shouldn't write it once per keypress. */
+let historyTimer = null, historyPending = false;
+
+function scheduleHistorySave() {
+  historyPending = true;
+  clearTimeout(historyTimer);
+  historyTimer = setTimeout(saveHistoryNow, 800);
+}
+
+async function saveHistoryNow() {
+  clearTimeout(historyTimer);
+  if (!historyPending) return;
+  historyPending = false;
+  try {
+    // Gzipped on the way up: 100 undo + 100 redo specs is ~4 MB of JSON,
+    // right at the hosted (Vercel) request-size cap. It compresses ~20x.
+    const json = JSON.stringify({ undo: history, redo: future });
+    const headers = { 'Content-Type': 'application/json' };
+    let body = json;
+    if (typeof CompressionStream !== 'undefined') {
+      body = await new Response(new Blob([json]).stream()
+        .pipeThrough(new CompressionStream('gzip'))).blob();
+      headers['X-Body-Encoding'] = 'gzip';
+    }
+    await fetch(`/api/history/${FIGURE}`, { method: 'POST', headers, body });
+  } catch (e) {
+    // Losing undo history is not worth interrupting editing over.
+    console.warn('history save failed', e);
+  }
+}
+
+let inFlight = false, needsSave = false, saveTimer = null, savePending = false;
 
 function scheduleSave(delay = 0) {
   clearTimeout(saveTimer);
+  savePending = true;
   saveTimer = setTimeout(doSave, delay);
 }
 
+/** Resolve once every edit made so far is on disk -- before leaving this
+ *  project for another one, so a switch never drops the last change. */
+async function flushPending() {
+  while (savePending || inFlight || needsSave) {
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  await saveHistoryNow();
+}
+
 async function doSave() {
+  savePending = false;
   if (inFlight) { needsSave = true; return; }
   inFlight = true;
   setStatus('rendering…', 'busy');
@@ -189,6 +258,13 @@ const KIND_LABEL = {
   xticks: 'x-axis ticks', yticks: 'y-axis ticks', legend: 'legend',
   series: 'curve', arrow: 'arrow',
 };
+
+/* Panels and tick labels are structure, not items -- deleting one would
+ * mean re-laying-out the figure, so they're refused rather than guessed at.
+ * Titles and axis labels are blanked, not removed, so their size/color
+ * survive if the text is ever typed back. */
+const DELETABLE = new Set(['text', 'arrow', 'series', 'legend',
+                           'title', 'xlabel', 'ylabel', 'suptitle']);
 
 /* ------------------------------------------- coordinate transformations */
 
@@ -447,8 +523,26 @@ function anchorFor(id, g) {
   return null;
 }
 
+/** Every svg group drawn for one element: its own gid plus any "<gid>__*"
+ *  parts (arrow endpoints and visible body). An exact/prefix match rather
+ *  than a bare prefix, so "a_R" never catches "a_R_arrow". */
+function svgPartsFor(id) {
+  const gid = CSS.escape('t_' + id);
+  return svgEl.querySelectorAll(`[id="${gid}"], [id^="${gid}__"]`);
+}
+
 function reconcilePreviews() {
   if (!renderedSpec || !svgEl) return;
+
+  // Deleted since this SVG was rendered: hide it now, the real render drops
+  // it. Also un-hides it again if an undo brings it back before that lands.
+  // (A dense curve's rasterized pixels carry no gid, so those alone wait
+  // for the real render.)
+  const live = new Set(allElements(spec).map((e) => e.id));
+  for (const el of allElements(renderedSpec)) {
+    const gone = !live.has(el.id);
+    svgPartsFor(el.id).forEach((g) => { g.style.display = gone ? 'none' : ''; });
+  }
 
   for (const el of allElements(spec)) {
     if (el.kind === 'legend') continue;  // handled separately below
@@ -640,6 +734,7 @@ function refreshInspector() {
   $('insp-kind').textContent = kinds.length === 1
     ? KIND_LABEL[kinds[0]] : 'mixed';
   $('insp-id').textContent = multi ? `${sel.length} selected` : sel[0].id;
+  $('btn-delete').hidden = !sel.some((s) => DELETABLE.has(s.kind));
 
   const allPanels = sel.every((s) => s.kind === 'panel'
     || s.kind === 'xticks' || s.kind === 'yticks');
@@ -691,7 +786,60 @@ function refreshInspector() {
     const boxed = common((s) => !!s.obj.bbox);
     $('f-box').indeterminate = boxed === undefined;
     $('f-box').checked = boxed === true;
+    // Box settings apply to whichever selected labels have a box, so a
+    // mixed selection ("All labels") can still tighten every box at once.
+    const withBox = sel.filter((s) => s.obj.bbox);
+    $('box-colors').hidden = !withBox.length;
+    if (withBox.length) {
+      const same = (get) => {
+        const vals = withBox.map(get);
+        return vals.every((v) => v === vals[0]) ? vals[0] : undefined;
+      };
+      showBoxColor('f-box-fc', same((s) => boxColorName(s.obj.bbox.fc)));
+      showBoxColor('f-box-ec', same((s) => boxColorName(s.obj.bbox.ec)));
+      const pad = same((s) => boxPad(s.obj.bbox));
+      $('f-box-pad').value = pad ?? '';
+      $('f-box-pad').placeholder = pad === undefined ? 'mixed' : '';
+    }
   }
+}
+
+/* Box fill/border offer only white and black for now. Labels built with
+ * another color (the orange-bordered β boxes) keep it until changed; the
+ * select then shows that color, or "mixed", as a placeholder. */
+/* Padding lives inside matplotlib's boxstyle string ("round,pad=0.25"),
+ * in units of the label's font size. */
+const DEFAULT_BOX_PAD = 0.1;
+
+function boxPad(bbox) {
+  const m = String(bbox?.boxstyle ?? '').match(/pad=([\d.]+)/);
+  return m ? parseFloat(m[1]) : 0.3;  // 0.3 is matplotlib's own default
+}
+
+function withPad(boxstyle, pad) {
+  const style = String(boxstyle ?? 'round');
+  return /pad=/.test(style)
+    ? style.replace(/pad=[\d.]+/, `pad=${pad}`)
+    : `${style},pad=${pad}`;
+}
+
+const BOX_COLORS = { white: ['white', '#fff', '#ffffff'], black: ['black', '#000', '#000000'] };
+
+function boxColorName(c) {
+  const v = String(c ?? '').toLowerCase();
+  return Object.keys(BOX_COLORS).find((k) => BOX_COLORS[k].includes(v)) ?? v;
+}
+
+function showBoxColor(fid, value) {
+  const sel = $(fid);
+  sel.querySelector('option.placeholder')?.remove();
+  if (value in BOX_COLORS) { sel.value = value; return; }
+  const o = document.createElement('option');
+  o.className = 'placeholder';
+  o.disabled = true;
+  o.textContent = value === undefined ? 'mixed' : value;
+  sel.prepend(o);
+  sel.selectedIndex = 0;
 }
 
 /** Axis limits/scale/aspect for one or more selected panels. Bulk edits set
@@ -860,7 +1008,8 @@ const stripMath = (s) => (s || '').replace(/\$/g, '').replace(/\\[a-zA-Z]+/g, ''
 function edit(fn, { immediate = true } = {}) {
   const sel = selected();
   if (!sel.length) return;
-  pushHistory();
+  // Continuous edits (typing, spinning a number) collapse into one step.
+  pushHistory(immediate ? null : 'edit:' + selection.join(','));
   for (const s of sel) fn(s.obj, s);
   reconcilePreviews();
   scheduleSave(immediate ? 0 : 350);
@@ -1310,13 +1459,15 @@ document.addEventListener('keydown', (evt) => {
 
   const typing = ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName);
 
-  if ((evt.ctrlKey || evt.metaKey) && evt.key.toLowerCase() === 'z') {
-    // While typing (e.g. retyping a label's text), Ctrl+Z should undo the
-    // last keystroke in that field via the browser's own native text undo,
-    // not jump out and revert the whole app-level history stack.
+  // Ctrl+Z undo; Ctrl+Y or Ctrl+Shift+Z redo.
+  const k = evt.key.toLowerCase();
+  if ((evt.ctrlKey || evt.metaKey) && (k === 'z' || k === 'y')) {
+    // While typing (e.g. retyping a label's text), these should undo/redo
+    // keystrokes in that field via the browser's own native text undo,
+    // not jump out and move the whole app-level history stack.
     if (typing) return;
     evt.preventDefault();
-    undo();
+    if (k === 'y' || evt.shiftKey) redo(); else undo();
     return;
   }
 
@@ -1324,6 +1475,12 @@ document.addEventListener('keydown', (evt) => {
   // focused text field always gets the browser's native select-all / cut /
   // copy / paste -- nothing to wire up for those.
   if (typing || !selection.length) return;
+
+  if (evt.key === 'Delete' || evt.key === 'Backspace') {
+    evt.preventDefault();
+    deleteSelection();
+    return;
+  }
 
   // PowerPoint's Ctrl+Shift+> / Ctrl+Shift+< grow/shrink the selected text.
   // evt.key is already the shifted character ('>'/'<') on a standard layout,
@@ -1455,10 +1612,34 @@ $('f-va').addEventListener('change', (e) => edit((o) => { o.va = e.target.value;
 $('f-box').addEventListener('change', (e) => {
   const on = e.target.checked;
   edit((o) => {
-    if (on) o.bbox = { boxstyle: 'round,pad=0.25', fc: 'white', ec: '#999999', lw: 0.8 };
+    // Only labels without a box get the default; existing boxes keep theirs.
+    if (on) o.bbox ??= { boxstyle: `round,pad=${DEFAULT_BOX_PAD}`, fc: 'white', ec: 'black', lw: 0.8 };
     else delete o.bbox;
   });
+  refreshInspector();
 });
+
+// No instant preview: a new padding changes the box's size, which only the
+// real render knows -- it lands a moment later.
+$('f-box-pad').addEventListener('change', (e) => {
+  const v = parseFloat(e.target.value);
+  if (!Number.isFinite(v) || v < 0) return;
+  edit((o) => { if (o.bbox) o.bbox.boxstyle = withPad(o.bbox.boxstyle, v); });
+});
+
+// matplotlib draws the box as a "patch" group inside the label's own group;
+// recolor its path now so the change shows before the real render lands.
+for (const [fid, key, css] of [['f-box-fc', 'fc', 'fill'], ['f-box-ec', 'ec', 'stroke']]) {
+  $(fid).addEventListener('change', (e) => {
+    const color = e.target.value;
+    edit((o) => { if (o.bbox) o.bbox[key] = color; });
+    for (const s of selected()) {
+      groupFor(s.id)?.querySelectorAll('g[id^="patch"] path')
+        .forEach((p) => { p.style[css] = color; });
+    }
+    refreshInspector();
+  });
+}
 
 for (const [fid, lim, idx] of [
   ['f-xmin', 'xlim', 0], ['f-xmax', 'xlim', 1],
@@ -1580,13 +1761,53 @@ $('f-arrow-scale').addEventListener('change', (e) => {
 
 function undo() {
   if (!history.length) return;
+  future.push(clone(spec));
   spec = history.pop();
-  $('btn-undo').disabled = !history.length;
-  setSelection(selection);
+  afterHistoryJump();
+}
+
+function redo() {
+  if (!future.length) return;
+  history.push(clone(spec));
+  spec = future.pop();
+  afterHistoryJump();
+}
+
+function afterHistoryJump() {
+  lastCoalesce = null;
+  refreshUndoButtons();
+  scheduleHistorySave();
+  buildList();               // a deleted element may be back, or gone again
+  setSelection(selection);   // drops ids that no longer exist
   reconcilePreviews();
   scheduleSave(0);
 }
+
 $('btn-undo').onclick = undo;
+$('btn-redo').onclick = redo;
+
+function deleteSelection() {
+  const sel = selected().filter((s) => DELETABLE.has(s.kind));
+  if (!sel.length) {
+    if (selection.length) setStatus('panels and tick labels can’t be deleted', 'err');
+    return;
+  }
+  pushHistory();
+  for (const s of sel) {
+    const p = s.panel ? panelById(s.panel) : null;
+    if (s.kind === 'text') p.texts = p.texts.filter((t) => t.id !== s.id);
+    else if (s.kind === 'arrow') p.arrows = p.arrows.filter((a) => a.id !== s.id);
+    else if (s.kind === 'series') p.series = p.series.filter((r) => r.id !== s.id);
+    else if (s.kind === 'legend') p.legend = null;
+    else s.obj.text = '';
+  }
+  buildList();
+  setSelection([]);
+  reconcilePreviews();
+  scheduleSave(0);
+}
+
+$('btn-delete').onclick = deleteSelection;
 
 async function download(url, filename) {
   setStatus('preparing…', 'busy');
@@ -1627,8 +1848,9 @@ $('btn-rebuild').onclick = async () => {
     const r = await fetch(`/api/rebuild/${FIGURE}`, { method: 'POST' });
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || r.statusText);
-    history = [];
-    $('btn-undo').disabled = true;
+    history = [];  // the server already cleared history.json
+    future = [];
+    refreshUndoButtons();
     spec = data.spec;
     renderedSpec = clone(data.spec);
     geometry = data.geometry;
@@ -1657,19 +1879,119 @@ function fit() {
   applyZoom();
 }
 
+/* ----------------------------------------------------------- projects */
+
+function readLastProject() {
+  try { return localStorage.getItem(LAST_PROJECT_KEY); } catch { return null; }
+}
+
+function rememberProject(name) {
+  try { localStorage.setItem(LAST_PROJECT_KEY, name); } catch { /* private window */ }
+}
+
+function fillProjectSelect(names) {
+  const sel = $('project-select');
+  sel.innerHTML = names
+    .map((n) => `<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`)
+    .join('');
+  sel.value = FIGURE;
+}
+
+/** Switching is a full reload onto ?project=<name>: every piece of editor
+ *  state (selection, previews, caches, undo) starts clean for the new one. */
+async function openProject(name) {
+  setStatus('saving…', 'busy');
+  await flushPending();
+  rememberProject(name);
+  location.search = '?project=' + encodeURIComponent(name);
+}
+
+async function projectOp(op, name) {
+  await flushPending();
+  const r = await fetch(`/api/project/${op}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ from: FIGURE, name }),
+  });
+  const data = await r.json();
+  if (!r.ok) throw new Error(data.error || r.statusText);
+  return data.name;
+}
+
+function askName(message, initial) {
+  const name = (prompt(message, initial) || '').trim();
+  if (!name) return null;
+  if (!/^[A-Za-z0-9_-]+$/.test(name)) {
+    setStatus('names may use letters, digits, - and _ only', 'err');
+    return null;
+  }
+  return name;
+}
+
+$('project-select').onchange = (e) => {
+  if (e.target.value !== FIGURE) openProject(e.target.value);
+};
+
+$('btn-saveas').onclick = async () => {
+  const name = askName('Save a copy of this project as:', `${FIGURE}-copy`);
+  if (!name) return;
+  try {
+    openProject(await projectOp('duplicate', name));
+  } catch (e) { setStatus(e.message, 'err'); }
+};
+
+$('btn-rename').onclick = async () => {
+  const name = askName('Rename this project to:', FIGURE);
+  if (!name || name === FIGURE) return;
+  try {
+    openProject(await projectOp('rename', name));
+  } catch (e) { setStatus(e.message, 'err'); }
+};
+
+window.addEventListener('beforeunload', (e) => {
+  if (savePending || inFlight || needsSave || historyPending) {
+    saveHistoryNow();
+    e.preventDefault();
+    e.returnValue = '';
+  }
+});
+
 /* --------------------------------------------------------------- boot */
+
+async function pickProject() {
+  const r = await fetch('/api/figures');
+  const names = (await r.json()).figures || [];
+  if (!names.length) throw new Error('no projects found in figures/');
+  const wanted = [new URLSearchParams(location.search).get('project'), readLastProject()];
+  const name = wanted.find((n) => n && names.includes(n)) || names[0];
+  return { name, names };
+}
 
 (async function init() {
   setStatus('loading…', 'busy');
   try {
-    const r = await fetch(`/api/figure/${FIGURE}`);
+    const picked = await pickProject();
+    FIGURE = picked.name;
+    rememberProject(FIGURE);
+    fillProjectSelect(picked.names);
+    document.title = `FigForge — ${FIGURE}`;
+    // `history` in this file is the undo stack; the browser's is window.history.
+    window.history.replaceState(null, '', '?project=' + encodeURIComponent(FIGURE));
+
+    const [r, hr] = await Promise.all([
+      fetch(`/api/figure/${FIGURE}`),
+      fetch(`/api/history/${FIGURE}`),
+    ]);
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || r.statusText);
     spec = data.spec;
     renderedSpec = clone(data.spec);
     geometry = data.geometry;
     $('figname').textContent = `${FIGURE}/spec.json`;
-    $('btn-undo').disabled = true;
+    const saved = hr.ok ? await hr.json() : {};
+    history = saved.undo || [];
+    future = saved.redo || [];
+    refreshUndoButtons();
     applySvg(data.svg);
     buildList();
     fit();

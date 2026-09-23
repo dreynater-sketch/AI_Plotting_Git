@@ -3,18 +3,24 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>FigForge — qcircle</title>
+  <title>FigForge</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
 <header class="topbar">
   <div class="brand">FigForge <span class="sub">local</span></div>
+  <div class="project">
+    <select id="project-select" title="Open project"></select>
+    <button id="btn-saveas" title="Copy this project under a new name">Save as…</button>
+    <button id="btn-rename" title="Rename this project">Rename</button>
+  </div>
   <div class="figname" id="figname">—</div>
   <div class="spacer"></div>
   <div class="status" id="status">ready</div>
   <div class="tools">
     <button id="btn-undo" title="Undo (Ctrl+Z)">Undo</button>
+    <button id="btn-redo" title="Redo (Ctrl+Y or Ctrl+Shift+Z)">Redo</button>
     <button id="btn-py">figure.py</button>
     <button id="btn-png">PNG</button>
     <button id="btn-rebuild" class="danger" title="Discard all layout edits and regenerate from the raw CSV">Rebuild</button>
@@ -65,7 +71,7 @@
       for a <b>box select</b>, or pick a group above to grab every matching
       label at once. Drag to move (the whole selection moves together).
       Arrow keys nudge, Shift = ×10, <b>Ctrl+Shift+&gt;/&lt;</b> resizes text.
-      Esc deselects.
+      <b>Del</b> deletes. <b>Ctrl+Z</b> undo, <b>Ctrl+Y</b> redo. Esc deselects.
     </div>
   </section>
 
@@ -75,7 +81,7 @@
       <div class="empty" id="insp-empty">Nothing selected.<br><span>Click a label in the figure, or pick one from the list below.</span></div>
 
       <div id="insp-body" hidden>
-        <div class="elid"><span id="insp-kind">text</span><code id="insp-id"></code></div>
+        <div class="elid"><span id="insp-kind">text</span><code id="insp-id"></code><button id="btn-delete" class="danger small" title="Delete the selection (Del)">Delete</button></div>
 
         <div id="label-fields">
         <label class="field" id="text-field">
@@ -138,6 +144,25 @@
           <label class="check">
             <input type="checkbox" id="f-box"> boxed background
           </label>
+          <div id="box-colors">
+            <div class="row">
+              <label class="field">
+                <span>Box fill</span>
+                <select id="f-box-fc"><option value="white">White</option><option value="black">Black</option></select>
+              </label>
+              <label class="field">
+                <span>Box border</span>
+                <select id="f-box-ec"><option value="white">White</option><option value="black">Black</option></select>
+              </label>
+            </div>
+            <div class="row">
+              <label class="field">
+                <span>Box padding <em>(× font size)</em></span>
+                <input type="number" id="f-box-pad" min="0" max="2" step="0.05">
+              </label>
+              <label class="field"></label>
+            </div>
+          </div>
         </div>
         </div>
 
