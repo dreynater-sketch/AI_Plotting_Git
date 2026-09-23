@@ -1455,6 +1455,7 @@ function showXY() {
 /* ------------------------------------------------------ keyboard */
 
 document.addEventListener('keydown', (evt) => {
+  if (!spec) return;  // signed out / still loading: nothing to edit yet
   if (evt.key === 'Escape') { setSelection([]); return; }
 
   const typing = ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName);
@@ -1969,7 +1970,192 @@ async function pickProject() {
   return { name, names };
 }
 
-(async function init() {
+/* ----------------------------------------------------------- accounts
+ *
+ * Hosted only. The server keeps the session in HttpOnly cookies, so all
+ * this page ever does is ask /api/auth/me who's signed in and post forms.
+ * Email links (confirm sign-up, reset password) land here with Supabase's
+ * tokens in the URL fragment; they're handed to /api/auth/session and
+ * scrubbed from the address bar right away.
+ */
+
+async function authPost(op, body = {}) {
+  const r = await fetch(`/api/auth/${op}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.error || r.statusText);
+  return data;
+}
+
+function authMessage(msg, cls = '') {
+  const el = $('auth-msg');
+  el.textContent = msg;
+  el.className = 'auth-msg ' + cls;
+}
+
+function showAuth(view = 'login', msg = '', cls = '') {
+  $('auth-screen').hidden = false;
+  document.querySelectorAll('.auth-form').forEach((f) => { f.hidden = f.dataset.view !== view; });
+  $('auth-tabs').hidden = !['login', 'signup'].includes(view);
+  document.querySelectorAll('#auth-tabs button').forEach((b) => {
+    b.classList.toggle('on', b.dataset.view === view);
+  });
+  authMessage(msg, cls);
+  document.querySelector(`.auth-form[data-view="${view}"] input`)?.focus();
+}
+
+document.querySelectorAll('#auth-tabs button, .auth-form [data-goto]').forEach((b) => {
+  b.onclick = () => showAuth(b.dataset.view || b.dataset.goto);
+});
+
+function busy(form, on) {
+  form.querySelectorAll('button, input').forEach((el) => { el.disabled = on; });
+}
+
+document.querySelectorAll('.auth-form').forEach((form) => {
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const f = Object.fromEntries(new FormData(form));
+    const view = form.dataset.view;
+    busy(form, true);
+    authMessage('…');
+    try {
+      if (view === 'login') {
+        await authPost('login', f);
+        location.reload();
+      } else if (view === 'signup') {
+        const res = await authPost('signup', f);
+        if (res.confirm) {
+          form.reset();
+          showAuth('login', `Almost done: we sent a confirmation link to ${f.email}. ` +
+                            'Open it to activate your account.', 'ok');
+        } else {
+          location.reload();
+        }
+      } else if (view === 'forgot') {
+        await authPost('recover', f);
+        showAuth('login', `If ${f.email} has an account, a reset link is on its way.`, 'ok');
+      } else if (view === 'reset') {
+        if (f.password !== f.password2) throw new Error('the two passwords don’t match');
+        await authPost('password', { password: f.password });
+        location.replace(location.pathname);
+      }
+    } catch (err) {
+      authMessage(err.message, 'err');
+    } finally {
+      busy(form, false);
+    }
+  });
+});
+
+/** Tokens or an error that an email link put in the fragment, if any. */
+function takeAuthFragment() {
+  const h = new URLSearchParams(location.hash.slice(1));
+  if (!h.has('access_token') && !h.has('error_description')) return null;
+  window.history.replaceState(null, '', location.pathname + location.search);
+  return Object.fromEntries(h);
+}
+
+function showAccount(user) {
+  const name = user.display_name || user.email;
+  $('account').hidden = false;
+  $('account-name').textContent = name;
+  $('account-avatar').textContent = (name.trim()[0] || '?').toUpperCase();
+  $('profile-email').textContent = `Signed in as ${user.email}`;
+  $('profile-username').value = user.email;
+  $('profile-name').value = user.display_name || '';
+}
+
+function profileMessage(msg, cls = '') {
+  $('profile-msg').textContent = msg;
+  $('profile-msg').className = 'profile-msg ' + cls;
+}
+
+$('btn-account').onclick = () => {
+  $('profile-panel').hidden = !$('profile-panel').hidden;
+  profileMessage('');
+};
+document.addEventListener('pointerdown', (e) => {
+  if (!$('account').contains(e.target)) $('profile-panel').hidden = true;
+});
+
+$('btn-profile-save').onclick = async () => {
+  try {
+    const { user } = await authPost('profile', { display_name: $('profile-name').value });
+    showAccount(user);
+    profileMessage('Name saved.', 'ok');
+  } catch (err) { profileMessage(err.message, 'err'); }
+};
+
+$('profile-password-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const pw = $('profile-pw').value;
+  try {
+    if (pw !== $('profile-pw2').value) throw new Error('the two passwords don’t match');
+    await authPost('password', { password: pw });
+    e.target.reset();
+    profileMessage('Password updated.', 'ok');
+  } catch (err) { profileMessage(err.message, 'err'); }
+});
+
+$('btn-signout').onclick = async () => {
+  await flushPending();
+  await authPost('logout').catch(() => {});
+  location.reload();
+};
+
+// A session that ends mid-edit (expired, signed out elsewhere) turns every
+// API call into a 401: send the person to log in instead of failing quietly.
+const rawFetch = window.fetch.bind(window);
+window.fetch = async (...args) => {
+  const r = await rawFetch(...args);
+  const url = String(args[0]?.url ?? args[0]);
+  if (r.status === 401 && url.startsWith('/api/') && !url.startsWith('/api/auth/')) {
+    showAuth('login', 'Your session ended. Please log in again.', 'err');
+  }
+  return r;
+};
+
+/** Who's here, before anything else loads: local mode needs no account;
+ *  hosted mode shows the editor only to a signed-in user. */
+async function boot() {
+  const link = takeAuthFragment();
+  if (link?.error_description) {
+    showAuth('login', link.error_description.replace(/\+/g, ' '), 'err');
+    return;
+  }
+  if (link?.access_token) {
+    try {
+      await authPost('session', { access_token: link.access_token,
+                                  refresh_token: link.refresh_token });
+    } catch (err) {
+      showAuth('login', `That link didn’t work: ${err.message}`, 'err');
+      return;
+    }
+    if (link.type === 'recovery') { showAuth('reset'); return; }
+  }
+  const r = await fetch('/api/auth/me');
+  const me = await r.json().catch(() => ({ mode: 'local' }));
+  if (me.mode === 'online') {
+    if (!me.user) { showAuth('login'); return; }
+    showAccount(me.user);
+  }
+  startEditor();
+}
+
+// An email link opened in a tab that already shows FigForge only changes the
+// fragment -- no page load, so boot() wouldn't see it. Reload to run it.
+window.addEventListener('hashchange', () => {
+  const h = new URLSearchParams(location.hash.slice(1));
+  if (h.has('access_token') || h.has('error_description')) location.reload();
+});
+
+boot();
+
+async function startEditor() {
   setStatus('loading…', 'busy');
   try {
     const picked = await pickProject();
@@ -2004,4 +2190,4 @@ async function pickProject() {
       Could not load the figure: ${escapeHtml(e.message)}<br><br>
       Have you run <code>python build.py</code>?</div>`;
   }
-})();
+}

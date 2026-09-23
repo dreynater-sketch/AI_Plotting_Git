@@ -17,7 +17,8 @@ Where the folders live depends on where FigForge runs:
 
   * locally (the default): real folders under figures/, as above.
   * hosted (Vercel): a private Supabase Storage bucket, chosen whenever
-    SUPABASE_URL and SUPABASE_SECRET_KEY are set. A function's own disk
+    SUPABASE_URL and SUPABASE_SECRET_KEY are set. Each account's projects
+    live under "users/<user id>/" (see SupabaseStore.scoped and auth.py). A function's own disk
     doesn't survive between requests, so nothing else there would persist.
     The bucket is created and seeded from the figures/ folders bundled with
     the deployment the first time it's missing. figure.svg / figure.py
@@ -26,6 +27,7 @@ Where the folders live depends on where FigForge runs:
 """
 
 import contextlib
+import copy
 import io
 import json
 import os
@@ -78,6 +80,8 @@ class LocalStore:
 
     def copy_project(self, src, dst):
         shutil.copytree(self._path(src), self._path(dst))
+
+    cache_key = "local:"
 
     def rename_project(self, src, dst):
         os.rename(self._path(src), self._path(dst))
@@ -141,6 +145,17 @@ class SupabaseStore:
     # ---------------------------------------------------------------- files
     def _key(self, rel):
         return self.PREFIX + rel
+
+    @property
+    def cache_key(self):
+        return self.PREFIX
+
+    def scoped(self, user_id):
+        """The same bucket, seen as one account's own project space."""
+        self._ensure_bucket()
+        view = copy.copy(self)
+        view.PREFIX = f"users/{user_id}/"
+        return view
 
     def read(self, rel):
         self._ensure_bucket()
@@ -227,12 +242,21 @@ def _make_store():
 
 STORE = _make_store()
 
+# Accounts exist only alongside Supabase storage; the local editor has none.
+AUTH = None
+if isinstance(STORE, SupabaseStore):
+    from figforge.auth import SupabaseAuth
+    AUTH = SupabaseAuth(os.environ["SUPABASE_URL"],
+                        os.environ.get("SUPABASE_SECRET_KEY")
+                        or os.environ["SUPABASE_SERVICE_ROLE_KEY"])
+
 _ARRAY_CACHE = {}
 
 
 class Figure:
-    def __init__(self, name):
+    def __init__(self, name, store=None):
         self.name = name
+        self.store = store or STORE
         # Local paths: what build.py and a local figure.py work with.
         self.dir = os.path.join(FIGURES, name)
         self.spec_path = os.path.join(self.dir, "spec.json")
@@ -247,26 +271,26 @@ class Figure:
 
     # ---------------------------------------------------------------- spec
     def load_spec(self):
-        return json.loads(STORE.read(self._rel("spec.json")).decode("utf-8"))
+        return json.loads(self.store.read(self._rel("spec.json")).decode("utf-8"))
 
     def save_spec(self, spec):
-        STORE.write(self._rel("spec.json"),
+        self.store.write(self._rel("spec.json"),
                     json.dumps(spec, indent=2, ensure_ascii=False).encode("utf-8"))
 
     def write_outputs(self, svg, code):
         """figure.svg / figure.py next to the spec -- locally only. On Vercel
         the editor renders and generates these on demand instead."""
-        if not STORE.persistent_outputs:
+        if not self.store.persistent_outputs:
             return
-        STORE.write(self._rel("figure.svg"), svg.encode("utf-8"))
-        STORE.write(self._rel("figure.py"), code.encode("utf-8"))
+        self.store.write(self._rel("figure.svg"), svg.encode("utf-8"))
+        self.store.write(self._rel("figure.py"), code.encode("utf-8"))
 
     # ------------------------------------------------------------- history
     def load_history(self):
         """The editor's undo/redo stacks, so both survive closing the browser.
         A missing or unreadable file just means no history."""
         try:
-            h = json.loads(STORE.read(self._rel("history.json")) or b"null")
+            h = json.loads(self.store.read(self._rel("history.json")) or b"null")
         except ValueError:
             h = None
         if isinstance(h, list):  # the first format: an undo stack only
@@ -277,7 +301,7 @@ class Figure:
                 for k in ("undo", "redo")}
 
     def save_history(self, undo, redo):
-        STORE.write(self._rel("history.json"),
+        self.store.write(self._rel("history.json"),
                     json.dumps({"undo": undo, "redo": redo},
                                ensure_ascii=False).encode("utf-8"))
 
@@ -287,28 +311,29 @@ class Figure:
         change when the figure is rebuilt from raw data. Locally the cache
         is keyed on the npz's mtime; on Vercel, on the project name (a
         rebuild regenerates identical arrays from the same CSV anyway)."""
-        stamp = os.path.getmtime(self.npz_path) if STORE.persistent_outputs else 0
-        hit = _ARRAY_CACHE.get(self.name)
+        stamp = os.path.getmtime(self.npz_path) if self.store.persistent_outputs else 0
+        key = self.store.cache_key + self.name
+        hit = _ARRAY_CACHE.get(key)
         if hit and hit[0] == stamp:
             return hit[1]
-        with np.load(io.BytesIO(STORE.read(self._rel("data/curves.npz")))) as z:
+        with np.load(io.BytesIO(self.store.read(self._rel("data/curves.npz")))) as z:
             arrays = {k: z[k] for k in z.files}
-        _ARRAY_CACHE[self.name] = (stamp, arrays)
+        _ARRAY_CACHE[key] = (stamp, arrays)
         return arrays
 
     def save_arrays(self, arrays):
         buf = io.BytesIO()
         np.savez_compressed(buf, **arrays)
-        STORE.write(self._rel("data/curves.npz"), buf.getvalue())
-        _ARRAY_CACHE.pop(self.name, None)
+        self.store.write(self._rel("data/curves.npz"), buf.getvalue())
+        _ARRAY_CACHE.pop(self.store.cache_key + self.name, None)
 
     @contextlib.contextmanager
     def csv_file(self):
         """A real path to the raw CSV, for analyze() -- a temp copy on Vercel."""
-        if STORE.persistent_outputs:
+        if self.store.persistent_outputs:
             yield self.csv_path
             return
-        data = STORE.read(self._rel("data/vna_sweep.csv"))
+        data = self.store.read(self._rel("data/vna_sweep.csv"))
         with tempfile.TemporaryDirectory() as d:
             path = os.path.join(d, "vna_sweep.csv")
             with open(path, "wb") as f:
@@ -316,8 +341,8 @@ class Figure:
             yield path
 
     def exists(self):
-        return STORE.has(self._rel("spec.json"))
+        return self.store.has(self._rel("spec.json"))
 
 
-def list_figures():
-    return STORE.projects()
+def list_figures(store=None):
+    return (store or STORE).projects()

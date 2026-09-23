@@ -25,6 +25,28 @@
     <button id="btn-png">PNG</button>
     <button id="btn-rebuild" class="danger" title="Discard all layout edits and regenerate from the raw CSV">Rebuild</button>
   </div>
+  <div class="account" id="account" hidden>
+    <button id="btn-account" title="Your profile"><span class="avatar" id="account-avatar"></span><span id="account-name"></span></button>
+    <div class="profile-panel" id="profile-panel" hidden>
+      <div class="profile-email" id="profile-email"></div>
+      <label class="field">
+        <span>Display name</span>
+        <span class="inline">
+          <input type="text" id="profile-name" maxlength="60" autocomplete="nickname">
+          <button id="btn-profile-save">Save</button>
+        </span>
+      </label>
+      <form id="profile-password-form" class="field">
+        <span>Change password</span>
+        <input type="email" autocomplete="username" id="profile-username" hidden>
+        <input type="password" id="profile-pw" placeholder="New password (8+ characters)" autocomplete="new-password">
+        <input type="password" id="profile-pw2" placeholder="Repeat new password" autocomplete="new-password">
+        <button type="submit">Update password</button>
+      </form>
+      <p class="profile-msg" id="profile-msg"></p>
+      <button id="btn-signout" class="danger">Sign out</button>
+    </div>
+  </div>
 </header>
 
 <main>
@@ -343,6 +365,49 @@
     </div>
   </aside>
 </main>
+
+<!-- Hosted editor only: sign in / sign up. The local editor never shows it. -->
+<div class="auth-screen" id="auth-screen" hidden>
+  <div class="auth-card">
+    <div class="auth-brand">FigForge</div>
+    <p class="auth-sub">Reproducible scientific figures you can drag.</p>
+
+    <div class="auth-tabs" id="auth-tabs">
+      <button type="button" data-view="login" class="on">Log in</button>
+      <button type="button" data-view="signup">Sign up</button>
+    </div>
+
+    <form class="auth-form" data-view="login">
+      <label class="field"><span>Email</span><input type="email" name="email" autocomplete="username" required></label>
+      <label class="field"><span>Password</span><input type="password" name="password" autocomplete="current-password" required></label>
+      <button type="submit" class="primary">Log in</button>
+      <button type="button" class="link" data-goto="forgot">Forgot password?</button>
+    </form>
+
+    <form class="auth-form" data-view="signup" hidden>
+      <label class="field"><span>Display name</span><input type="text" name="display_name" maxlength="60" autocomplete="nickname" required></label>
+      <label class="field"><span>Email</span><input type="email" name="email" autocomplete="username" required></label>
+      <label class="field"><span>Password <em>(8+ characters)</em></span><input type="password" name="password" minlength="8" autocomplete="new-password" required></label>
+      <button type="submit" class="primary">Create account</button>
+    </form>
+
+    <form class="auth-form" data-view="forgot" hidden>
+      <p class="auth-note">Enter your account's email and we'll send a link to set a new password.</p>
+      <label class="field"><span>Email</span><input type="email" name="email" autocomplete="username" required></label>
+      <button type="submit" class="primary">Send reset link</button>
+      <button type="button" class="link" data-goto="login">Back to log in</button>
+    </form>
+
+    <form class="auth-form" data-view="reset" hidden>
+      <p class="auth-note">Choose a new password for your account.</p>
+      <label class="field"><span>New password <em>(8+ characters)</em></span><input type="password" name="password" minlength="8" autocomplete="new-password" required></label>
+      <label class="field"><span>Repeat it</span><input type="password" name="password2" minlength="8" autocomplete="new-password" required></label>
+      <button type="submit" class="primary">Set password</button>
+    </form>
+
+    <p class="auth-msg" id="auth-msg" role="status"></p>
+  </div>
+</div>
 
 <script src="app.js"></script>
 </body>

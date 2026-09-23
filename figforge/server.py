@@ -11,6 +11,18 @@
     POST /api/project/duplicate  {from, name} -> copy a project ("Save as")
     POST /api/project/rename     {from, name} -> rename a project folder
 
+Hosted only (accounts, see figforge/auth.py) -- every other /api/ route
+then requires a signed-in user and works in that user's own project space:
+
+    GET  /api/auth/me          {mode: "local"} | {mode: "online", user} | 401
+    POST /api/auth/signup      {email, password, display_name}
+    POST /api/auth/login       {email, password}
+    POST /api/auth/session     {access_token, refresh_token}  (from email links)
+    POST /api/auth/logout
+    POST /api/auth/recover     {email} -> password-reset email
+    POST /api/auth/profile     {display_name}
+    POST /api/auth/password    {password}
+
 Locally this binds 127.0.0.1 and talks to nothing external; there is no AI in
 this build. The same Handler also runs as FigForge's Vercel function
 (api/index.py), where projects live in a private Supabase Storage bucket
@@ -20,6 +32,7 @@ gzipped (X-Body-Encoding: gzip up, Content-Encoding: gzip down).
 """
 
 import gzip
+import http.cookies
 import io
 import json
 import mimetypes
@@ -30,11 +43,14 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import unquote, urlparse
 
 from figforge import codegen, render
-from figforge.project import ROOT, STORE, Figure, list_figures
+from figforge.auth import AuthError, public_user
+from figforge.project import AUTH, ROOT, STORE, Figure, list_figures
 
 WEB = os.path.join(ROOT, "web")
 NAME_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 HISTORY_MAX = 100  # per stack; matches the editor's HISTORY_MAX
+SESSION_MAX_AGE = 30 * 24 * 3600  # cookies; Supabase's refresh token outlives the 1 h access token
+EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -48,6 +64,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", ctype)
         for k, v in (extra or {}).items():
             self.send_header(k, v)
+        for c in getattr(self, "_cookies", []):
+            self.send_header("Set-Cookie", c)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
@@ -63,7 +81,7 @@ class Handler(BaseHTTPRequestHandler):
         """Resolve a figure name, refusing anything that isn't a plain name."""
         if not NAME_RE.match(name or ""):
             return None
-        fig = Figure(name)
+        fig = Figure(name, self.store)
         return fig if fig.exists() else None
 
     def log_message(self, fmt, *args):
@@ -73,9 +91,14 @@ class Handler(BaseHTTPRequestHandler):
     # ---------------------------------------------------------------- GET
     def do_GET(self):
         path = unquote(urlparse(self.path).path)
+        self._cookies = []
+        if path == "/api/auth/me":
+            return self._auth_me()
+        if path.startswith("/api/") and not self._authorize():
+            return
 
         if path == "/api/figures":
-            return self._json({"figures": list_figures(),
+            return self._json({"figures": list_figures(self.store),
                                "storage": "local" if STORE.persistent_outputs else "online"})
 
         if path.startswith("/api/figure/"):
@@ -145,6 +168,11 @@ class Handler(BaseHTTPRequestHandler):
     # --------------------------------------------------------------- POST
     def do_POST(self):
         path = unquote(urlparse(self.path).path)
+        self._cookies = []
+        if path.startswith("/api/auth/"):
+            return self._auth_api(path[len("/api/auth/"):])
+        if not self._authorize():
+            return
 
         if path.startswith("/api/rebuild/"):
             fig = self._figure(path[len("/api/rebuild/"):])
@@ -225,13 +253,150 @@ class Handler(BaseHTTPRequestHandler):
         name = body.get("name") or ""
         if not NAME_RE.match(name):
             return self._error(400, "names may use letters, digits, - and _ only")
-        if STORE.project_exists(name):
+        if self.store.project_exists(name):
             return self._error(409, f"a project named '{name}' already exists")
         if op == "duplicate":
-            STORE.copy_project(src.name, name)
+            self.store.copy_project(src.name, name)
         else:
-            STORE.rename_project(src.name, name)
-        return self._json({"name": name, "figures": list_figures()})
+            self.store.rename_project(src.name, name)
+        return self._json({"name": name, "figures": list_figures(self.store)})
+
+    # ------------------------------------------------------------ accounts
+    def _cookie(self, name):
+        jar = http.cookies.SimpleCookie(self.headers.get("Cookie", ""))
+        return jar[name].value if name in jar else None
+
+    def _secure(self):
+        host = self.headers.get("Host", "")
+        return not host.startswith(("127.0.0.1", "localhost"))
+
+    def _set_cookie(self, name, value, max_age):
+        flags = "; Secure" if self._secure() else ""
+        self._cookies.append(f"{name}={value}; Path=/; Max-Age={max_age}; "
+                             f"HttpOnly; SameSite=Lax{flags}")
+
+    def _set_session(self, sess):
+        self._set_cookie("ff_at", sess["access_token"], SESSION_MAX_AGE)
+        self._set_cookie("ff_rt", sess["refresh_token"], SESSION_MAX_AGE)
+
+    def _clear_session(self):
+        self._set_cookie("ff_at", "", 0)
+        self._set_cookie("ff_rt", "", 0)
+
+    def _site_url(self):
+        """Where Supabase's email links send people back to: this site."""
+        proto = self.headers.get("X-Forwarded-Proto") or ("https" if self._secure() else "http")
+        host = self.headers.get("X-Forwarded-Host") or self.headers.get("Host", "")
+        return f"{proto}://{host}/"
+
+    def _current_user(self):
+        """The signed-in user from the session cookies, refreshing an expired
+        access token when the refresh token still works. None if signed out."""
+        at, rt = self._cookie("ff_at"), self._cookie("ff_rt")
+        self._access_token = at
+        if at:
+            try:
+                return AUTH.user(at)
+            except AuthError as e:
+                if e.status >= 500:
+                    raise
+        if rt:
+            try:
+                sess = AUTH.refresh(rt)
+                self._set_session(sess)
+                self._access_token = sess["access_token"]
+                return sess["user"]
+            except AuthError as e:
+                if e.status >= 500:
+                    raise
+        return None
+
+    def _authorize(self):
+        """Pick the storage this request works in. Locally: the one local
+        store, no account needed. Hosted: the signed-in user's own space,
+        or a 401 that sends the page to its sign-in screen."""
+        self.user = None
+        self.store = STORE
+        if AUTH is None:
+            return True
+        self.user = self._current_user()
+        if not self.user:
+            if self._cookie("ff_at") or self._cookie("ff_rt"):
+                self._clear_session()
+            self._error(401, "sign in required")
+            return False
+        self.store = STORE.scoped(self.user["id"])
+        return True
+
+    def _auth_me(self):
+        if AUTH is None:
+            return self._json({"mode": "local"})
+        user = self._current_user()
+        if not user:
+            return self._json({"mode": "online", "user": None}, 401)
+        return self._json({"mode": "online", "user": public_user(user)})
+
+    def _auth_api(self, op):
+        if AUTH is None:
+            return self._error(404, "accounts are only available on the hosted editor")
+        body = self._body()
+        if not isinstance(body, dict):
+            return self._error(400, "bad request")
+
+        def text(k):
+            return str(body.get(k) or "").strip()
+
+        try:
+            if op in ("signup", "login", "recover"):
+                email = text("email").lower()
+                if not EMAIL_RE.match(email):
+                    return self._error(400, "enter a valid email address")
+            if op in ("signup", "password"):
+                if len(str(body.get("password") or "")) < 8:
+                    return self._error(400, "passwords need at least 8 characters")
+
+            if op == "signup":
+                sess = AUTH.signup(email, body["password"], text("display_name")[:60],
+                                   self._site_url())
+                if not sess:
+                    return self._json({"confirm": True})
+                self._set_session(sess)
+                return self._json({"user": public_user(sess["user"])})
+
+            if op == "login":
+                sess = AUTH.login(email, str(body.get("password") or ""))
+                self._set_session(sess)
+                return self._json({"user": public_user(sess["user"])})
+
+            if op == "session":  # tokens from an email confirm / reset link
+                at, rt = text("access_token"), text("refresh_token")
+                user = AUTH.user(at)  # verified by Supabase before it's trusted
+                self._set_session({"access_token": at, "refresh_token": rt})
+                return self._json({"user": public_user(user)})
+
+            if op == "recover":
+                AUTH.recover(email, self._site_url())
+                return self._json({"ok": True})
+
+            if op == "logout":
+                if self._cookie("ff_at"):
+                    AUTH.logout(self._cookie("ff_at"))
+                self._clear_session()
+                return self._json({"ok": True})
+
+            if op in ("profile", "password"):
+                if not self._current_user():
+                    return self._error(401, "sign in required")
+                if op == "profile":
+                    changes = {"data": {"display_name": text("display_name")[:60]}}
+                else:
+                    changes = {"password": body["password"]}
+                user = AUTH.update(self._access_token, changes)
+                return self._json({"user": public_user(user)})
+        except AuthError as e:
+            code = e.status if e.status in (400, 401, 422, 429) else (401 if e.status == 403 else 502)
+            return self._error(code, e.message)
+        return self._error(404, "unknown account action")
 
     # -------------------------------------------------------------- parts
     def _payload(self, fig, spec):
