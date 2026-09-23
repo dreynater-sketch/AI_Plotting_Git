@@ -12,3 +12,6 @@ figures/*/history.json
 .DS_Store
 Thumbs.db
 *.tmp
+
+# Local secrets (Supabase key). Never commit.
+.env
