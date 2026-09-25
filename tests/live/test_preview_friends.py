@@ -65,6 +65,9 @@ try:
         # invite by link against real Supabase: the temp user becomes admin
         # for a moment; the invited example.com address never gets an email
         admin("PUT", f"/users/{uid}", {"app_metadata": {"figforge_admin": True, "provider": "email", "providers": ["email"]}})
+        # a fresh session: the server caches who a token belongs to for a few minutes
+        ctx.request.post(H + "/api/auth/login", data=json.dumps({"email": U["email"], "password": U["password"]}),
+                         headers={"Content-Type": "application/json"})
         r = ctx.request.post(H + "/api/admin/invite-link", data=json.dumps({"email": "figforge-linkcheck@example.com"}),
                              headers={"Content-Type": "application/json"})
         link = r.json().get("link", "") if r.ok else ""
