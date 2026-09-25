@@ -62,6 +62,18 @@ try:
         check(pg.evaluate("spec.panels[0].series[0].label") == "counts", "deployed: New from CSV builds a figure")
         check(any(k.endswith("decay/data/source.csv") for k in store._walk(f"users/{uid}")), "deployed: source CSV stored in the user's space")
 
+        # invite by link against real Supabase: the temp user becomes admin
+        # for a moment; the invited example.com address never gets an email
+        admin("PUT", f"/users/{uid}", {"app_metadata": {"figforge_admin": True, "provider": "email", "providers": ["email"]}})
+        r = ctx.request.post(H + "/api/admin/invite-link", data=json.dumps({"email": "figforge-linkcheck@example.com"}),
+                             headers={"Content-Type": "application/json"})
+        link = r.json().get("link", "") if r.ok else ""
+        check(r.ok and ".supabase.co/auth/v1/verify" in link and "type=invite" in link,
+              f"deployed: Copy invite link returns a real Supabase invite link ({r.status})")
+        for u in admin("GET", "/users?per_page=200")["users"]:
+            if u.get("email") == "figforge-linkcheck@example.com":
+                admin("DELETE", f"/users/{u['id']}")
+
         tools = ctx.request.get(H + "/api/assistant/tools").json()
         check(tools["model"] == "claude-opus-5" and len(tools["tools"]) == 10, "deployed: assistant tool definitions served")
         r = ctx.request.post(H + "/api/ops/decay", data=json.dumps({"calls": [

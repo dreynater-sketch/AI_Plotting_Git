@@ -97,6 +97,29 @@ try:
         fpg.click('form[data-view="login"] button[type=submit]'); loaded(fpg)
         check(True, "friend logs back in with the password they chose")
 
+        # --- invite by link instead of email (no spam folder)
+        opg.reload(); loaded(opg); opg.click("#btn-account")
+        mails_before = len(get(M + "/_mailbox"))
+        opg.fill("#invite-email", "texted@figs.dev"); opg.click("#invite-link")
+        opg.wait_for_function("document.getElementById('profile-msg').textContent.includes('texted@figs.dev')")
+        link = opg.input_value("#invite-link-out")
+        check(link.startswith(B) and "type=invite" in link and len(get(M + "/_mailbox")) == mails_before,
+              "Copy invite link: a working link, and no email sent")
+        opg.wait_for_selector('#invite-list .relink[data-email="texted@figs.dev"]')
+        opg.click('#invite-list .relink[data-email="texted@figs.dev"]')
+        opg.wait_for_function(f"document.getElementById('invite-link-out').value !== {json.dumps(link)}")
+        link2 = opg.input_value("#invite-link-out")
+        check(link2 != link, "the list's 'Copy link' makes a fresh link for someone who hasn't joined yet")
+        tctx, tpg = page()
+        tpg.goto(link2); tpg.wait_for_selector('form[data-view="welcome"]:not([hidden])')
+        f = 'form[data-view="welcome"]'
+        tpg.fill(f + " [name=display_name]", "Texted"); tpg.fill(f + " [name=password]", "texted-pass-11")
+        tpg.click(f + " button[type=submit]"); loaded(tpg)
+        check(tpg.inner_text("#account-name") == "Texted", "the copied link works like the email: welcome form, then the editor")
+        opg.fill("#invite-email", "texted@figs.dev"); opg.click("#invite-link")
+        opg.wait_for_function("document.getElementById('profile-msg').textContent.includes('already accepted')")
+        check("Forgot password" in opg.inner_text("#profile-msg"), "no new link once they've joined (points to Forgot password)")
+
         opg.reload(); loaded(opg); opg.click("#btn-account")
         opg.wait_for_function("document.getElementById('invite-list').textContent.includes('active')")
         check("admin" in opg.inner_text("#invite-list") and "active" in opg.inner_text("#invite-list"),

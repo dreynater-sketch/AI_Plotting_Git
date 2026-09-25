@@ -133,6 +133,20 @@ class H(BaseHTTPRequestHandler):
             mailbox.append({"to": email, "type": "invite", "link": q["redirect_to"] + "#" + urlencode(
                 {"access_token": s["access_token"], "refresh_token": s["refresh_token"], "type": "invite"})})
             return self._out(200, user_json(users[email]))
+        if m == "POST" and p == "/admin/generate_link" and d.get("type") == "invite":
+            email = d["email"]
+            u = users.get(email)
+            if u and (u["confirmed"] or not u.get("invited_at")):
+                return self._out(422, {"code": 422, "error_code": "email_exists",
+                                       "msg": "A user with this email address has already been registered"})
+            if not u:
+                users[email] = u = {"id": str(uuid.uuid4()), "email": email, "password": secrets.token_hex(8),
+                                    "confirmed": False, "meta": {}, "invited_at": "2026-09-24T12:00:00Z"}
+            s = session_for(email)
+            u["pending"] = s["access_token"]
+            link = d["redirect_to"] + "#" + urlencode({"access_token": s["access_token"],
+                                                      "refresh_token": s["refresh_token"], "type": "invite"})
+            return self._out(200, {**user_json(u), "action_link": link})  # no email sent
         if m == "GET" and p == "/admin/users":
             return self._out(200, {"users": [user_json(u) for u in users.values()]})
         if m == "POST" and p == "/recover":

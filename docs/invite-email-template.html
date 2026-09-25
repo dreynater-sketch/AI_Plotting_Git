@@ -1,0 +1,31 @@
+<!--
+  FigForge invite email -- paste into Supabase:
+  Authentication -> Emails -> Templates -> "Invite user"
+
+  Subject:  DrDre invited you to FigForge
+
+  Why this helps with spam: a real subject naming the sender, plain sentences
+  saying what the site is and why the person is getting this, and the link
+  shown as text too, instead of a bare "You have been invited, click here".
+  It helps, but a first email from an unfamiliar sender can still land in
+  spam -- the "Copy invite link" button (send the link yourself) avoids email
+  altogether.
+-->
+<p>Hi,</p>
+
+<p>DrDre has invited you to <strong>FigForge</strong>, a small web app for making
+publication-quality scientific figures: upload a CSV, drag labels and legends
+into place, and download the figure or the matplotlib code that draws it.</p>
+
+<p>To set up your account, open this link and choose a name and a password:</p>
+
+<p><a href="{{ .ConfirmationURL }}">Accept the invite and set up your account</a></p>
+
+<p>If the button doesn't work, copy this address into your browser:<br>
+<span style="font-size:12px;color:#555;word-break:break-all;">{{ .ConfirmationURL }}</span></p>
+
+<p>The link works once. If it has expired, ask DrDre for a new one.</p>
+
+<p style="color:#777;font-size:12px;">You're getting this because DrDre entered
+{{ .Email }} on FigForge ({{ .SiteURL }}). If you weren't expecting it, you can
+ignore this email and no account will be used.</p>

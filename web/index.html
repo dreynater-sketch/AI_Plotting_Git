@@ -54,10 +54,12 @@
       <div class="admin-box" id="admin-box" hidden>
         <form id="invite-form" class="field">
           <span>Invite a friend</span>
+          <input type="email" id="invite-email" placeholder="friend@example.com" autocomplete="off">
           <span class="inline">
-            <input type="email" id="invite-email" placeholder="friend@example.com" autocomplete="off">
-            <button type="submit">Invite</button>
+            <button type="button" id="invite-link" title="Make the invite link and copy it -- send it to them yourself (text, DM). No email, so no spam folder.">Copy invite link</button>
+            <button type="submit" title="Supabase emails the invite (it may land in spam)">Email invite</button>
           </span>
+          <input type="text" id="invite-link-out" readonly hidden>
         </form>
         <ul class="invite-list" id="invite-list"></ul>
       </div>

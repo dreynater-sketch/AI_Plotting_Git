@@ -624,4 +624,7 @@ button.primary:hover:not(:disabled) { background: #1a5fcc; border-color: #1a5fcc
 .invite-list .who { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .invite-list .state { flex: none; color: var(--ink-soft); }
 .invite-list .state.invited { color: var(--accent-ink); }
+.invite-list .relink { font-size: 11px; padding: 1px 6px; margin-left: 6px; }
+#invite-form .inline button { flex: 1; }
+#invite-link-out { font-family: var(--mono); font-size: 11px; }
 .invite-only { text-align: center; }

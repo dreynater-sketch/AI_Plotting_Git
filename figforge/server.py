@@ -35,6 +35,7 @@ then requires a signed-in user and works in that user's own project space:
     POST /api/auth/password    {password}
     GET  /api/admin/users      (admins) everyone with an account or an invite
     POST /api/admin/invite     (admins) {email} -> Supabase emails an invite link
+    POST /api/admin/invite-link  (admins) {email} -> the invite link itself, no email sent
 
 Sign-up is invite-only unless FIGFORGE_OPEN_SIGNUP=1 is set.
 
@@ -223,6 +224,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._auth_api(path[len("/api/auth/"):])
         if path == "/api/admin/invite":
             return self._admin_invite()
+        if path == "/api/admin/invite-link":
+            return self._admin_invite(link=True)
         if not self._authorize():
             return
 
@@ -552,7 +555,7 @@ class Handler(BaseHTTPRequestHandler):
         rows.sort(key=lambda r: (r["status"] != "invited", (r["email"] or "").lower()))
         return self._json({"users": rows})
 
-    def _admin_invite(self):
+    def _admin_invite(self, link=False):
         self._cookies = []
         if not self._require_admin():
             return
@@ -561,10 +564,16 @@ class Handler(BaseHTTPRequestHandler):
         if not EMAIL_RE.match(email):
             return self._error(400, "enter a valid email address")
         try:
+            if link:
+                url = AUTH.invite_link(email, self._site_url())
+                if not url:
+                    return self._error(502, "Supabase didn't return a link")
+                return self._json({"ok": True, "email": email, "link": url})
             AUTH.invite(email, self._site_url())
         except AuthError as e:
             if "already" in e.message.lower() or e.status == 422:
-                return self._error(409, f"{email} already has an account")
+                return self._error(409, f"{email} has already accepted an invite -- they can use "
+                                        "'Forgot password' on the log-in page")
             code = 429 if e.status == 429 else 502
             return self._error(code, e.message)
         return self._json({"ok": True, "email": email})

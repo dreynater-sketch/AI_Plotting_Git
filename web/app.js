@@ -2266,9 +2266,42 @@ async function loadInvites() {
     const { users } = await r.json();
     $('invite-list').innerHTML = users.map((u) =>
       `<li><span class="who" title="${escapeHtml(u.email)}">${escapeHtml(u.display_name || u.email)}</span>` +
-      `<span class="state ${u.status}">${u.admin ? 'admin' : u.status}</span></li>`).join('');
+      `<span class="state ${u.status}">${u.admin ? 'admin' : u.status}` +
+      (u.status === 'invited'
+        ? `<button type="button" class="relink" data-email="${escapeHtml(u.email)}" title="A fresh invite link to send them yourself">Copy link</button>`
+        : '') + '</span></li>').join('');
   } catch { /* the list is a convenience */ }
 }
+
+/** Make an invite link (no email) and put it on the clipboard. */
+async function copyInviteLink(email) {
+  try {
+    const r = await fetch('/api/admin/invite-link', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email }),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || r.statusText);
+    const out = $('invite-link-out');
+    out.value = d.link;
+    out.hidden = false;
+    let copied = true;
+    try { await navigator.clipboard.writeText(d.link); } catch { copied = false; out.select(); }
+    profileMessage(`${copied ? 'Link copied' : 'Link ready — copy it from the box'} for ${d.email}. ` +
+                   'Send it to them yourself; it works once, so send it soon.', 'ok');
+    loadInvites();
+  } catch (err) { profileMessage(err.message, 'err'); }
+}
+
+$('invite-link').onclick = () => {
+  const email = $('invite-email').value.trim();
+  if (!email) { profileMessage('Type their email first.', 'err'); return; }
+  copyInviteLink(email).then(() => { $('invite-email').value = ''; });
+};
+$('invite-list').addEventListener('click', (e) => {
+  const b = e.target.closest('.relink');
+  if (b) copyInviteLink(b.dataset.email);
+});
 
 $('invite-form').addEventListener('submit', async (e) => {
   e.preventDefault();

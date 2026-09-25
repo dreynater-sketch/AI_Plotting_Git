@@ -119,6 +119,16 @@ class SupabaseAuth:
         with public sign-ups switched off -- which is the point."""
         return self._call("POST", "/invite", {"email": email}, query={"redirect_to": redirect_to})
 
+    def invite_link(self, email, redirect_to):
+        """The same invite, as a link and without any email: the admin sends
+        it themselves (a text or DM isn't filtered as spam the way a first
+        email from an unknown sender often is). Asking again for someone who
+        hasn't accepted yet makes a fresh link; once they have, Supabase
+        refuses (422) and they use "Forgot password" like anyone else."""
+        res = self._call("POST", "/admin/generate_link",
+                         {"type": "invite", "email": email, "redirect_to": redirect_to})
+        return res.get("action_link") or (res.get("properties") or {}).get("action_link")
+
     def list_users(self):
         res = self._call("GET", "/admin/users", query={"per_page": 200})
         return res.get("users", []) if isinstance(res, dict) else res
