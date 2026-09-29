@@ -36,6 +36,7 @@ then requires a signed-in user and works in that user's own project space:
     GET  /api/admin/users      (admins) everyone with an account or an invite
     POST /api/admin/invite     (admins) {email} -> Supabase emails an invite link
     POST /api/admin/invite-link  (admins) {email} -> the invite link itself, no email sent
+    GET  /api/admin/ai-ping    (admins) one tiny Claude request: is the key working?
 
 Sign-up is invite-only unless FIGFORGE_OPEN_SIGNUP=1 is set.
 
@@ -115,6 +116,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._auth_me()
         if path == "/api/admin/users":
             return self._admin_users()
+        if path == "/api/admin/ai-ping":
+            return self._admin_ai_ping()
         if path.startswith("/api/") and not self._authorize():
             return
 
@@ -554,6 +557,27 @@ class Handler(BaseHTTPRequestHandler):
                  "admin": is_admin(u)} for u in users]
         rows.sort(key=lambda r: (r["status"] != "invited", (r["email"] or "").lower()))
         return self._json({"users": rows})
+
+    def _admin_ai_ping(self):
+        # Admin-only: every call spends real (if tiny) money on the API key.
+        if not self._require_admin():
+            return
+        from figforge import assistant   # imported late: only this route needs it
+        import anthropic
+        if not assistant.configured():
+            return self._error(503, "ANTHROPIC_API_KEY is not set on this deployment")
+        try:
+            return self._json(assistant.ping())
+        except anthropic.AuthenticationError:
+            return self._error(502, "Claude rejected the API key (check ANTHROPIC_API_KEY)")
+        except anthropic.PermissionDeniedError as e:
+            return self._error(502, f"the API key isn't allowed to do this: {e.message}")
+        except anthropic.RateLimitError:
+            return self._error(502, "rate limited by Claude -- try again in a minute")
+        except anthropic.APIStatusError as e:
+            return self._error(502, f"Claude error {e.status_code}: {e.message}")
+        except anthropic.APIConnectionError:
+            return self._error(502, "couldn't reach Claude from the server")
 
     def _admin_invite(self, link=False):
         self._cookies = []
