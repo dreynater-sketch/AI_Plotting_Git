@@ -11,27 +11,26 @@
 <header class="topbar">
   <div class="brand">FigForge <span class="sub" id="storage-badge">local</span></div>
   <div class="project">
-    <select id="project-select" title="Open project"></select>
-    <button id="btn-new" title="Start a new figure from a CSV file">New from CSV…</button>
-    <button id="btn-saveas" title="Copy this project under a new name">Save as…</button>
-    <button id="btn-rename" title="Rename this project">Rename</button>
+    <select id="project-select" title="Open another figure"></select>
+    <button id="btn-new" title="Make a new figure from a spreadsheet (CSV) file">New from CSV…</button>
+    <button id="btn-saveas" title="Save a copy with a new name">Save a copy…</button>
+    <button id="btn-rename" title="Give this figure a new name">Rename</button>
   </div>
-  <div class="figname" id="figname">—</div>
   <div class="spacer"></div>
-  <div class="status" id="status">ready</div>
+  <div class="status" id="status" role="status"></div>
   <div class="tools">
     <button id="btn-undo" title="Undo (Ctrl+Z)">Undo</button>
     <button id="btn-redo" title="Redo (Ctrl+Y or Ctrl+Shift+Z)">Redo</button>
     <div class="menu-wrap">
-      <button id="btn-py" aria-haspopup="menu" title="View, edit or download the Python that draws this figure">figure.py ▾</button>
+      <button id="btn-py" aria-haspopup="menu" title="See or download the Python code that draws this figure">Code ▾</button>
       <div class="py-menu" id="py-menu" role="menu" hidden>
         <button role="menuitem" id="py-view"><b>View &amp; edit code</b><span>Opens a code editor in a new tab. Run it in your browser.</span></button>
         <button role="menuitem" id="py-download"><b>Download figure.py</b><span>Generated from the figure as it is now.</span></button>
         <button role="menuitem" id="py-download-edited" hidden><b>Download my edited version</b><span>The code you saved in the editor.</span></button>
       </div>
     </div>
-    <button id="btn-png">PNG</button>
-    <button id="btn-rebuild" class="danger" title="Discard all layout edits and regenerate from the raw CSV">Rebuild</button>
+    <button id="btn-png" title="Download the figure as a picture (PNG)">Download picture</button>
+    <button id="btn-rebuild" class="danger" title="Throw away every change and draw the figure fresh from your data">Start over</button>
   </div>
   <div class="account" id="account" hidden>
     <button id="btn-account" title="Your profile"><span class="avatar" id="account-avatar"></span><span id="account-name"></span></button>
@@ -72,29 +71,52 @@
 <main>
   <section class="stage" id="stage">
     <div class="zoombar">
-      <label>zoom</label>
+      <label for="zoom">Zoom</label>
       <input type="range" id="zoom" min="40" max="220" value="100" step="5">
       <span id="zoomval">100%</span>
-      <button id="btn-fit" class="link">fit</button>
+      <button id="btn-fit" class="link" title="Make the figure fit the window">Fit</button>
+      <span class="spacer"></span>
+      <div class="menu-wrap">
+        <button id="btn-help" aria-haspopup="dialog" aria-expanded="false" title="How to use the editor">? Help</button>
+        <div class="help-pop" id="help-pop" role="dialog" aria-label="How to use the editor" hidden>
+          <h3>How to use it</h3>
+          <ul>
+            <li><b>Click</b> anything to pick it. Change it on the right.</li>
+            <li><b>Drag</b> it to move it.</li>
+            <li><b>Double-click</b> words to type new ones.</li>
+            <li>Hold <kbd>Ctrl</kbd> and click to pick more than one.</li>
+            <li>Drag across an empty spot to pick everything inside.</li>
+          </ul>
+          <h3>Keys</h3>
+          <table>
+            <tr><td><kbd>←</kbd><kbd>↑</kbd><kbd>→</kbd><kbd>↓</kbd></td><td>Move a little (hold <kbd>Shift</kbd> for more)</td></tr>
+            <tr><td><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>&gt;</kbd> / <kbd>&lt;</kbd></td><td>Bigger / smaller words</td></tr>
+            <tr><td><kbd>Del</kbd></td><td>Delete it</td></tr>
+            <tr><td><kbd>Ctrl</kbd><kbd>Z</kbd></td><td>Undo</td></tr>
+            <tr><td><kbd>Ctrl</kbd><kbd>Y</kbd></td><td>Redo</td></tr>
+            <tr><td><kbd>Esc</kbd></td><td>Let go</td></tr>
+          </table>
+        </div>
+      </div>
     </div>
     <div class="canvas-wrap" id="canvas-wrap">
       <div class="canvas" id="canvas"></div>
     </div>
     <div class="peerbar" id="peerbar" hidden>
       <div class="peerrow">
-        <span class="peerlabel">Similar</span>
+        <span class="peerlabel">Pick all</span>
         <div class="chips" id="peer-groups"></div>
       </div>
       <div class="peerrow" id="peer-selected-row" hidden>
-        <span class="peerlabel">Selected</span>
+        <span class="peerlabel">Picked</span>
         <div class="chips" id="peer-selected"></div>
-        <button class="link" id="btn-clearsel">clear</button>
+        <button class="link" id="btn-clearsel">Clear</button>
       </div>
     </div>
 
     <div class="data-panel" id="data-panel" hidden>
       <div class="data-head">
-        <span class="data-title" id="data-title">curve</span>
+        <span class="data-title" id="data-title">line</span>
         <span class="data-count" id="data-count"></span>
         <span class="spacer"></span>
         <span class="data-status" id="data-status"></span>
@@ -107,38 +129,30 @@
       </div>
     </div>
 
-    <div class="hint">
-      Click a label or a panel's axes to select it. <b>Double-click</b> a
-      label to retype it. <b>Ctrl-click</b> to add more, drag an empty area
-      for a <b>box select</b>, or pick a group above to grab every matching
-      label at once. Drag to move (the whole selection moves together).
-      Arrow keys nudge, Shift = ×10, <b>Ctrl+Shift+&gt;/&lt;</b> resizes text.
-      <b>Del</b> deletes. <b>Ctrl+Z</b> undo, <b>Ctrl+Y</b> redo. Esc deselects.
-    </div>
   </section>
 
   <aside class="sidebar">
     <div class="panel" id="inspector">
-      <h2>Inspector</h2>
-      <div class="empty" id="insp-empty">Nothing selected.<br><span>Click a label in the figure, or pick one from the list below.</span></div>
+      <h2>Change it</h2>
+      <div class="empty" id="insp-empty">Nothing picked yet.<br><span>Click anything on the figure, or in the list below.</span></div>
 
       <div id="insp-body" hidden>
-        <div class="elid"><span id="insp-kind">text</span><code id="insp-id"></code><button id="btn-delete" class="danger small" title="Delete the selection (Del)">Delete</button></div>
+        <div class="elid"><b id="insp-kind">Label</b><span id="insp-where"></span><button id="btn-delete" class="danger small" title="Delete it (Del)">Delete</button></div>
 
         <div id="label-fields">
         <label class="field" id="text-field">
-          <span>Text</span>
+          <span>Words</span>
           <textarea id="f-text" rows="3" spellcheck="false"></textarea>
         </label>
         <div class="symbol-palette" id="symbol-palette">
           <div class="symbol-row"><button type="button" class="symbol-btn" data-ch="α">α</button><button type="button" class="symbol-btn" data-ch="β">β</button><button type="button" class="symbol-btn" data-ch="γ">γ</button><button type="button" class="symbol-btn" data-ch="δ">δ</button><button type="button" class="symbol-btn" data-ch="ε">ε</button><button type="button" class="symbol-btn" data-ch="ζ">ζ</button><button type="button" class="symbol-btn" data-ch="η">η</button><button type="button" class="symbol-btn" data-ch="θ">θ</button><button type="button" class="symbol-btn" data-ch="λ">λ</button><button type="button" class="symbol-btn" data-ch="μ">μ</button><button type="button" class="symbol-btn" data-ch="ν">ν</button><button type="button" class="symbol-btn" data-ch="ξ">ξ</button><button type="button" class="symbol-btn" data-ch="π">π</button><button type="button" class="symbol-btn" data-ch="ρ">ρ</button><button type="button" class="symbol-btn" data-ch="σ">σ</button><button type="button" class="symbol-btn" data-ch="τ">τ</button><button type="button" class="symbol-btn" data-ch="φ">φ</button><button type="button" class="symbol-btn" data-ch="χ">χ</button><button type="button" class="symbol-btn" data-ch="ψ">ψ</button><button type="button" class="symbol-btn" data-ch="ω">ω</button></div>
           <div class="symbol-row"><button type="button" class="symbol-btn" data-ch="Γ">Γ</button><button type="button" class="symbol-btn" data-ch="Δ">Δ</button><button type="button" class="symbol-btn" data-ch="Θ">Θ</button><button type="button" class="symbol-btn" data-ch="Λ">Λ</button><button type="button" class="symbol-btn" data-ch="Ξ">Ξ</button><button type="button" class="symbol-btn" data-ch="Π">Π</button><button type="button" class="symbol-btn" data-ch="Σ">Σ</button><button type="button" class="symbol-btn" data-ch="Φ">Φ</button><button type="button" class="symbol-btn" data-ch="Ψ">Ψ</button><button type="button" class="symbol-btn" data-ch="Ω">Ω</button><button type="button" class="symbol-btn" data-ch="±">±</button><button type="button" class="symbol-btn" data-ch="×">×</button><button type="button" class="symbol-btn" data-ch="°">°</button><button type="button" class="symbol-btn" data-ch="√">√</button><button type="button" class="symbol-btn" data-ch="≤">≤</button><button type="button" class="symbol-btn" data-ch="≥">≥</button><button type="button" class="symbol-btn" data-ch="≈">≈</button><button type="button" class="symbol-btn" data-ch="∞">∞</button></div>
         </div>
-        <p class="note" id="text-note">matplotlib mathtext: <code>$\beta_1$</code>, <code>$Q_L$</code>. Newlines allowed.</p>
+        <p class="note" id="text-note">Tip: <code>$\beta_1$</code> shows as β₁, <code>$Q_L$</code> as Q<sub>L</sub>. Press Enter for a new line.</p>
 
         <div class="row">
           <label class="field">
-            <span>Size (pt)</span>
+            <span>Size</span>
             <span class="sizewrap">
               <button id="f-size-down" title="Smaller">A&minus;</button>
               <input type="number" id="f-size" min="4" max="72" step="0.5">
@@ -157,11 +171,11 @@
         <div id="xy-group">
           <div class="row">
             <label class="field">
-              <span>x <em id="f-xunit"></em></span>
+              <span>Across <em id="f-xunit"></em></span>
               <input type="number" id="f-x" step="any">
             </label>
             <label class="field">
-              <span>y <em id="f-yunit"></em></span>
+              <span>Up <em id="f-yunit"></em></span>
               <input type="number" id="f-y" step="any">
             </label>
           </div>
@@ -170,21 +184,21 @@
         <div id="align-group">
           <div class="row">
             <label class="field">
-              <span>Align h</span>
+              <span>Line up ↔</span>
               <select id="f-ha">
-                <option>left</option><option>center</option><option>right</option>
+                <option value="left">Left</option><option value="center">Middle</option><option value="right">Right</option>
               </select>
             </label>
             <label class="field">
-              <span>Align v</span>
+              <span>Line up ↕</span>
               <select id="f-va">
-                <option>baseline</option><option>bottom</option>
-                <option>center</option><option>top</option>
+                <option value="baseline">Text line</option><option value="bottom">Bottom</option>
+                <option value="center">Middle</option><option value="top">Top</option>
               </select>
             </label>
           </div>
           <label class="check">
-            <input type="checkbox" id="f-box"> boxed background
+            <input type="checkbox" id="f-box"> Put a box behind it
           </label>
           <div id="box-colors">
             <div class="row">
@@ -199,7 +213,7 @@
             </div>
             <div class="row">
               <label class="field">
-                <span>Box padding <em>(× font size)</em></span>
+                <span>Space inside the box</span>
                 <input type="number" id="f-box-pad" min="0" max="2" step="0.05">
               </label>
               <label class="field"></label>
@@ -210,7 +224,7 @@
 
         <div id="axes-fields" hidden>
           <div id="axes-x-fields">
-            <div class="subhead">X axis</div>
+            <div class="subhead">Bottom axis (x)</div>
             <div class="row">
               <label class="field">
                 <span>min</span>
@@ -236,7 +250,7 @@
           </div>
 
           <div id="axes-y-fields">
-            <div class="subhead">Y axis</div>
+            <div class="subhead">Side axis (y)</div>
             <div class="row">
               <label class="field">
                 <span>min</span>
@@ -262,16 +276,16 @@
           </div>
 
           <div id="axes-panel-fields">
-            <div class="subhead">Panel</div>
+            <div class="subhead">Box</div>
             <div class="row">
               <label class="field">
-                <span>Aspect</span>
+                <span>Shape</span>
                 <select id="f-aspect">
-                  <option value="auto">auto</option><option value="equal">equal (1:1)</option>
+                  <option value="auto">Fill the space</option><option value="equal">Same scale both ways</option>
                 </select>
               </label>
               <label class="field">
-                <span>Frame width (pt)</span>
+                <span>Border thickness</span>
                 <input type="number" id="f-framewidth" min="0" max="8" step="0.1">
               </label>
             </div>
@@ -281,25 +295,23 @@
         </div>
 
         <div id="legend-fields" hidden>
-          <div class="subhead">Legend</div>
           <label class="field">
-            <span>Font size (pt)</span>
+            <span>Word size</span>
             <input type="number" id="f-legend-size" min="4" max="48" step="0.5">
           </label>
           <label class="check">
-            <input type="checkbox" id="f-legend-frame"> boxed frame
+            <input type="checkbox" id="f-legend-frame"> Draw a box around it
           </label>
           <p class="note">Drag it anywhere in the plot.
-            <button type="button" id="btn-legend-reset" class="link">Reset position</button>
-            to return it to its default corner.
+            <button type="button" id="btn-legend-reset" class="link">Put it back</button>
+            in its corner.
           </p>
         </div>
 
         <div id="series-fields" hidden>
-          <div class="subhead">Curve</div>
           <label class="field">
-            <span>Legend label</span>
-            <input type="text" id="f-series-label" spellcheck="false" placeholder="(none)">
+            <span>Name <em>(shown in the legend)</em></span>
+            <input type="text" id="f-series-label" spellcheck="false" placeholder="No name">
           </label>
           <div class="row">
             <label class="field">
@@ -310,41 +322,40 @@
               </span>
             </label>
             <label class="field">
-              <span>Marker</span>
+              <span>Dots</span>
               <select id="f-series-marker">
-                <option value="none">none</option>
-                <option value=".">. dot</option>
-                <option value="o">o circle</option>
-                <option value="s">s square</option>
-                <option value="^">^ triangle</option>
-                <option value="D">D diamond</option>
-                <option value="+">+ plus</option>
-                <option value="x">x cross</option>
+                <option value="none">None</option>
+                <option value=".">• Small dot</option>
+                <option value="o">● Circle</option>
+                <option value="s">■ Square</option>
+                <option value="^">▲ Triangle</option>
+                <option value="D">◆ Diamond</option>
+                <option value="+">+ Plus</option>
+                <option value="x">× Cross</option>
               </select>
             </label>
           </div>
           <div class="row">
             <label class="field">
-              <span>Line width</span>
+              <span>Line thickness</span>
               <input type="number" id="f-series-lw" min="0" max="10" step="0.1">
             </label>
             <label class="field">
-              <span>Marker size</span>
+              <span>Dot size</span>
               <input type="number" id="f-series-ms" min="0" max="30" step="0.5">
             </label>
           </div>
           <label class="field">
-            <span>Opacity</span>
+            <span>Opacity <em>(0 = see-through, 1 = solid)</em></span>
             <span class="opacitywrap">
               <input type="range" id="f-series-alpha" min="0" max="1" step="0.05">
               <input type="number" id="f-series-alpha-num" min="0" max="1" step="0.05">
             </span>
           </label>
-          <p class="note">Its data shows below the figure.</p>
+          <p class="note">Its numbers are listed under the figure.</p>
         </div>
 
         <div id="arrow-fields" hidden>
-          <div class="subhead">Arrow</div>
           <div class="row">
             <label class="field">
               <span>Color</span>
@@ -354,18 +365,18 @@
               </span>
             </label>
             <label class="field">
-              <span>Style</span>
+              <span>Heads</span>
               <select id="f-arrow-style">
-                <option value="<->">&lt;-&gt; both ends</option>
-                <option value="->">-&gt; one end</option>
-                <option value="<-">&lt;- other end</option>
-                <option value="-">- no heads</option>
+                <option value="<->">⟷ Both ends</option>
+                <option value="->">⟶ End only</option>
+                <option value="<-">⟵ Start only</option>
+                <option value="-">— No heads</option>
               </select>
             </label>
           </div>
           <div class="row">
             <label class="field">
-              <span>Line width</span>
+              <span>Line thickness</span>
               <input type="number" id="f-arrow-lw" min="0" max="10" step="0.1">
             </label>
             <label class="field">
@@ -373,14 +384,14 @@
               <input type="number" id="f-arrow-scale" min="4" max="40" step="1">
             </label>
           </div>
-          <p class="note">Drag its body to move it, or either end to resize and
-            rotate it.</p>
+          <p class="note">Drag the middle to move it. Drag an end to stretch or
+            turn it.</p>
         </div>
       </div>
     </div>
 
     <div class="panel">
-      <h2>Elements</h2>
+      <h2>Everything in the figure</h2>
       <div id="element-list" class="ellist"></div>
     </div>
   </aside>

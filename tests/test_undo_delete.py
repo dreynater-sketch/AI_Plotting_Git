@@ -36,7 +36,7 @@ with sync_playwright() as pw:
     errs = []
     pg.on("pageerror", lambda e: errs.append(str(e)))
     pg.goto(f"{B}/?project={P}")
-    pg.wait_for_function("document.getElementById('status').textContent.startsWith('rev')")
+    pg.wait_for_function("document.getElementById('status').dataset.ready === '1'")
     settle = lambda: pg.wait_for_function(
         "!savePending && !inFlight && !needsSave && !historyPending", timeout=20000)
     ev = pg.evaluate
@@ -120,7 +120,7 @@ with sync_playwright() as pw:
     settle()
     u, r = ev("history.length"), ev("future.length")
     pg.reload()
-    pg.wait_for_function("document.getElementById('status').textContent.startsWith('rev')")
+    pg.wait_for_function("document.getElementById('status').dataset.ready === '1'")
     check((ev("history.length"), ev("future.length")) == (u, r),
           f"undo/redo stacks survive reload ({u}/{r})")
     pg.keyboard.press("Control+y")

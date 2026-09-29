@@ -63,12 +63,6 @@ body {
   margin-left: 2px;
 }
 
-.figname {
-  font-family: var(--mono);
-  font-size: 12px;
-  color: var(--ink-soft);
-}
-
 .project { display: flex; align-items: center; gap: 6px; }
 .project button { white-space: nowrap; }
 .project select {
@@ -212,15 +206,30 @@ main {
 }
 .data-table tbody tr:nth-child(even) { background: var(--line-soft); }
 
-.hint {
-  flex: none;
-  padding: 7px 14px;
-  font-size: 11.5px;
-  color: var(--ink-soft);
-  border-top: 1px solid var(--line-soft);
-  background: var(--surface);
+/* ------------------------------------------------------ "? Help" popover */
+#btn-help { padding: 3px 10px; }
+.help-pop {
+  position: absolute; right: 0; top: calc(100% + 6px); z-index: 60;
+  width: 330px; padding: 12px 14px;
+  background: var(--surface); color: var(--ink);
+  border: 1px solid var(--line); border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  font-size: 12.5px;
 }
-.hint b { font-weight: 600; color: var(--ink); }
+.help-pop h3 { margin: 0 0 6px; font-size: 12.5px; font-weight: 650; }
+.help-pop h3 + ul, .help-pop h3 + table { margin-bottom: 12px; }
+.help-pop h3:not(:first-child) { margin-top: 4px; }
+.help-pop ul { margin: 0; padding-left: 18px; }
+.help-pop li { margin: 3px 0; }
+.help-pop table { border-collapse: collapse; }
+.help-pop td { padding: 3px 0; vertical-align: middle; }
+.help-pop td:first-child { white-space: nowrap; padding-right: 12px; }
+kbd {
+  display: inline-block; min-width: 18px; margin: 0 1px; padding: 0 4px;
+  font: 11px/17px var(--mono); text-align: center;
+  background: var(--bg); border: 1px solid var(--line); border-bottom-width: 2px;
+  border-radius: 4px; color: var(--ink);
+}
 
 /* --------------------------------------------------- peer group bar */
 .peerbar {
@@ -347,16 +356,8 @@ main {
   gap: 6px;
   margin-bottom: 12px;
 }
-.elid span {
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  background: var(--line-soft);
-  color: var(--ink-soft);
-  padding: 2px 6px;
-  border-radius: 4px;
-}
-.elid code { font-family: var(--mono); font-size: 11.5px; color: var(--ink-soft); }
+.elid b { font-size: 14px; font-weight: 650; }
+.elid span { font-size: 12px; color: var(--ink-soft); }
 .elid #btn-delete { margin-left: auto; font-size: 11.5px; padding: 2px 8px; }
 
 .field { display: block; margin-bottom: 10px; }
@@ -475,35 +476,40 @@ input:focus, textarea:focus, select:focus {
 .ellist { overflow-y: auto; min-height: 0; margin: -2px -4px; }
 
 .ellist .group {
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--ink-soft);
-  padding: 9px 4px 3px;
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--ink);
+  padding: 12px 8px 3px;
 }
+.ellist .group:first-child { padding-top: 4px; }
 
 .ellist button {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   width: 100%;
   text-align: left;
   border: none;
   background: none;
   padding: 4px 8px;
   border-radius: 5px;
-  font-size: 12px;
+  font-size: 12.5px;
   color: var(--ink);
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
+.ellist .txt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ellist .kind { flex: none; font-size: 11px; color: var(--ink-soft); font-weight: 400; }
+.ellist .ico {
+  flex: none; width: 22px; height: 14px;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--ink-soft);
+}
+.ellist .ico svg { width: 22px; height: 12px; overflow: visible; }
+.ico-words { font: 600 11px/1 Georgia, serif; }
+.ico-num { font: 600 9.5px/1 var(--mono); letter-spacing: -0.5px; }
+.noname { color: var(--ink-soft); }
 .ellist button:hover { background: var(--line-soft); }
 .ellist button.on { background: rgba(31, 111, 235, 0.1); color: var(--sel); font-weight: 550; }
-.ellist button .tag {
-  font-family: var(--mono);
-  font-size: 10px;
-  color: var(--ink-soft);
-  margin-right: 6px;
-}
 
 /* ---------------------------------------------------- accounts (hosted) */
 .account { position: relative; }
@@ -628,3 +634,13 @@ button.primary:hover:not(:disabled) { background: #1a5fcc; border-color: #1a5fcc
 #invite-form .inline button { flex: 1; }
 #invite-link-out { font-family: var(--mono); font-size: 11px; }
 .invite-only { text-align: center; }
+
+/* A color dot inside a "Pick all" chip ("Everything this color"). */
+.swatch {
+  display: inline-block; width: 10px; height: 10px; margin-right: 5px;
+  border-radius: 50%; vertical-align: -1px;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.2);
+}
+
+/* Readable math (mathHtml) inside lists and labels: keep rows the same height. */
+sub, sup { font-size: 0.75em; line-height: 0; }

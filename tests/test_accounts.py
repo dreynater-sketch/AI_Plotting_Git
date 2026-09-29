@@ -34,7 +34,7 @@ try:
         br = pw.chromium.launch(channel="msedge")
         ctx = br.new_context(viewport={"width": 1500, "height": 850})
         pg = ctx.new_page(); errs = []; pg.on("pageerror", lambda e: errs.append(str(e)))
-        loaded = lambda: pg.wait_for_function("document.getElementById('status').textContent.startsWith('rev')", timeout=30000)
+        loaded = lambda: pg.wait_for_function("document.getElementById('status').dataset.ready === '1'", timeout=30000)
         settle = lambda: pg.wait_for_function("!savePending && !inFlight && !needsSave && !historyPending", timeout=30000)
         msg = lambda: pg.inner_text("#auth-msg")
         def signup(name, email, pw_):
@@ -78,7 +78,7 @@ try:
         ada = [o for o in objects() if o.startswith("users/")]
         check(ada and all(o.split("/")[1] == ada[0].split("/")[1] for o in ada) and any(o.endswith("qcircle/spec.json") for o in ada),
               "Ada's projects seeded under users/<her id>/")
-        check(pg.inner_text("#storage-badge").lower() == "online", "badge says online")
+        check(pg.is_hidden("#storage-badge"), "no LOCAL badge online")
         cookies = {c["name"]: c for c in ctx.cookies()}
         check(cookies["ff_at"]["httpOnly"] and cookies["ff_rt"]["httpOnly"], "session cookies are HttpOnly")
         check(pg.evaluate("document.cookie").find("ff_") == -1, "page scripts can't read the session")

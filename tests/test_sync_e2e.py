@@ -29,7 +29,7 @@ with sync_playwright() as pw:
     main = ctx.new_page(); errs = []
     main.on("pageerror", lambda e: errs.append("main: " + str(e)))
     main.goto(f"{B}/?project={P}")
-    main.wait_for_function("document.getElementById('status').textContent.startsWith('rev')")
+    main.wait_for_function("document.getElementById('status').dataset.ready === '1'")
     rev0 = main.evaluate("spec.rev")
     main.click("#btn-py")
     with ctx.expect_page() as np_:
@@ -66,7 +66,7 @@ with sync_playwright() as pw:
           and any(t["text"] == "from code" for t in d["panels"][1]["texts"]), "figure on disk updated from the code")
 
     # the figure-editor tab picked it up live
-    main.wait_for_function("document.getElementById('status').textContent.includes('updated from your code')", timeout=15000)
+    main.wait_for_function("document.getElementById('status').textContent.includes('Updated from your code')", timeout=15000)
     check(main.evaluate("spec.panels[0].texts.find(t => t.id === 'a_R').text") == "$R=0.080$"
           and main.evaluate("spec.panels[2].xlim[0]") == -25, "figure editor tab refreshed live")
     check(main.evaluate("!!svgEl.querySelector('[id^=\"t_b_text\"]')"), "new label drawn and selectable in the figure editor")

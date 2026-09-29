@@ -121,7 +121,7 @@ async function doSave() {
   savePending = false;
   if (inFlight) { needsSave = true; return; }
   inFlight = true;
-  setStatus('rendering…', 'busy');
+  setStatus('Saving…', 'busy');
   try {
     const r = await fetch(`/api/figure/${FIGURE}`, {
       method: 'POST',
@@ -136,7 +136,7 @@ async function doSave() {
     renderedSpec = data.spec;
     geometry = data.geometry;
     applySvg(data.svg);
-    setStatus(`saved · rev ${spec.rev}`);
+    setStatus('Saved ✓');
   } catch (e) {
     setStatus(e.message, 'err');
     // The bad edit is still sitting in `spec`. Left there, every future save
@@ -252,12 +252,31 @@ function allElements(source = spec) {
   return out.filter(Boolean);
 }
 
+/* What each kind of element is called on screen. Plain words, no jargon:
+ * "side numbers", not "y-axis tick labels". */
 const KIND_LABEL = {
-  suptitle: 'figure title', title: 'panel title', panel: 'panel axes',
-  xlabel: 'x-axis label', ylabel: 'y-axis label', text: 'label',
-  xticks: 'x-axis ticks', yticks: 'y-axis ticks', legend: 'legend',
-  series: 'curve', arrow: 'arrow',
+  suptitle: 'figure title', title: 'title', panel: 'plot box',
+  xlabel: 'bottom label', ylabel: 'side label', text: 'label',
+  xticks: 'bottom numbers', yticks: 'side numbers', legend: 'legend',
+  series: 'line', arrow: 'arrow',
 };
+const KIND_PLURAL = {
+  suptitle: 'figure titles', title: 'titles', panel: 'plot boxes',
+  xlabel: 'bottom labels', ylabel: 'side labels', text: 'labels',
+  xticks: 'bottom numbers', yticks: 'side numbers', legend: 'legends',
+  series: 'lines', arrow: 'arrows',
+};
+
+const plotName = (pid) => `plot (${pid})`;
+
+/** KIND_LABEL, except a curve drawn only as markers is called "dots". */
+function kindLabel(kind, obj) {
+  if (kind === 'series' && obj && !seriesHasLine(obj.style)) return 'dots';
+  return KIND_LABEL[kind];
+}
+const seriesHasLine = (st = {}) =>
+  !['none', 'None', '', ' '].includes(st.ls ?? st.linestyle ?? '-');
+const capitalize = (s) => s.charAt(0).toUpperCase() + s.slice(1);
 
 /* Panels and tick labels are structure, not items -- deleting one would
  * mean re-laying-out the figure, so they're refused rather than guessed at.
@@ -731,9 +750,15 @@ function refreshInspector() {
 
   const multi = sel.length > 1;
   const kinds = [...new Set(sel.map((s) => s.kind))];
-  $('insp-kind').textContent = kinds.length === 1
-    ? KIND_LABEL[kinds[0]] : 'mixed';
-  $('insp-id').textContent = multi ? `${sel.length} selected` : sel[0].id;
+  if (multi) {
+    $('insp-kind').textContent = kinds.length === 1
+      ? `${sel.length} ${KIND_PLURAL[kinds[0]]}`
+      : `${sel.length} things`;
+    $('insp-where').textContent = 'picked';
+  } else {
+    $('insp-kind').textContent = capitalize(kindLabel(sel[0].kind, sel[0].obj));
+    $('insp-where').textContent = sel[0].panel ? `in ${plotName(sel[0].panel)}` : '';
+  }
   $('btn-delete').hidden = !sel.some((s) => DELETABLE.has(s.kind));
 
   const allPanels = sel.every((s) => s.kind === 'panel'
@@ -773,8 +798,8 @@ function refreshInspector() {
     const p = panelById(sel[0].panel);
     $('f-x').value = sel[0].obj.xy[0];
     $('f-y').value = sel[0].obj.xy[1];
-    $('f-xunit').textContent = `(${stripMath(p.xlabel?.text) || 'data'})`;
-    $('f-yunit').textContent = `(${stripMath(p.ylabel?.text) || 'data'})`;
+    $('f-xunit').innerHTML = p.xlabel?.text ? `(${mathHtml(p.xlabel.text)})` : '';
+    $('f-yunit').innerHTML = p.ylabel?.text ? `(${mathHtml(p.ylabel.text)})` : '';
   }
 
   // Alignment and the background box apply to any set of free labels.
@@ -897,7 +922,7 @@ function refreshLegendInspector() {
 function refreshSeriesInspector() {
   const label = common((s) => s.obj.label ?? '');
   $('f-series-label').value = label ?? '';
-  $('f-series-label').placeholder = label === undefined ? 'mixed' : '(none)';
+  $('f-series-label').placeholder = label === undefined ? 'mixed' : 'No name';
 
   const color = common((s) => normHex(s.obj.style?.color ?? '#000000'));
   $('f-series-color').value = color ?? '#000000';
@@ -956,11 +981,12 @@ function refreshDataPanel(sel) {
 
   const s = sel[0];
   const p = panelById(s.panel);
-  $('data-title').textContent = s.obj.label ? `${s.obj.label} (${s.id})` : s.id;
-  $('data-col-x').textContent = stripMath(p.xlabel?.text) || 'x';
-  $('data-col-y').textContent = stripMath(p.ylabel?.text) || 'y';
+  $('data-title').innerHTML = s.obj.label ? mathHtml(s.obj.label)
+    : `${capitalize(kindLabel('series', s.obj))} with no name`;
+  $('data-col-x').innerHTML = p.xlabel?.text ? mathHtml(p.xlabel.text) : 'Across (x)';
+  $('data-col-y').innerHTML = p.ylabel?.text ? mathHtml(p.ylabel.text) : 'Up (y)';
   $('data-count').textContent = '';
-  $('data-status').textContent = 'loading…';
+  $('data-status').textContent = 'Loading…';
   $('data-status').className = 'data-status';
   $('data-table-body').innerHTML = '';
 
@@ -971,7 +997,8 @@ function refreshDataPanel(sel) {
       if (token !== dataPanelToken) return;  // a newer selection fired since
       if (!ok) throw new Error(data.error || 'failed to load');
       $('data-status').textContent = '';
-      $('data-count').textContent = `${data.x.length} points`;
+      const n = data.x.length;
+      $('data-count').textContent = `${n.toLocaleString()} point${n === 1 ? '' : 's'}`;
       const rows = data.x.map((x, i) =>
         `<tr><td>${fmtNum(x)}</td><td>${fmtNum(data.y[i])}</td></tr>`);
       $('data-table-body').innerHTML = rows.join('');
@@ -1002,7 +1029,73 @@ function normHex(c) {
   return '#000000';
 }
 
-const stripMath = (s) => (s || '').replace(/\$/g, '').replace(/\\[a-zA-Z]+/g, '').trim();
+/* ------------------------------------------- mathtext, made readable
+ *
+ * Labels are stored as matplotlib mathtext ("Re $S_{11}$", "$\beta_1=0.53$").
+ * The figure renders it properly, but the editor's lists and field labels
+ * are plain HTML -- showing the raw source there is unreadable. mathHtml()
+ * turns it into escaped HTML with real Greek letters and <sub>/<sup>. It is
+ * display-only: the stored text is never touched.
+ */
+const MATH_SYMBOLS = {
+  alpha: 'α', beta: 'β', gamma: 'γ', delta: 'δ', epsilon: 'ε', varepsilon: 'ε',
+  zeta: 'ζ', eta: 'η', theta: 'θ', vartheta: 'ϑ', iota: 'ι', kappa: 'κ',
+  lambda: 'λ', mu: 'μ', nu: 'ν', xi: 'ξ', pi: 'π', rho: 'ρ', sigma: 'σ',
+  tau: 'τ', upsilon: 'υ', phi: 'φ', varphi: 'φ', chi: 'χ', psi: 'ψ', omega: 'ω',
+  Gamma: 'Γ', Delta: 'Δ', Theta: 'Θ', Lambda: 'Λ', Xi: 'Ξ', Pi: 'Π',
+  Sigma: 'Σ', Phi: 'Φ', Psi: 'Ψ', Omega: 'Ω',
+  pm: '±', mp: '∓', times: '×', cdot: '·', div: '÷', circ: '°', degree: '°',
+  infty: '∞', approx: '≈', sim: '~', simeq: '≃', neq: '≠', ne: '≠',
+  leq: '≤', le: '≤', geq: '≥', ge: '≥', ll: '≪', gg: '≫', propto: '∝',
+  partial: '∂', nabla: '∇', sqrt: '√', hbar: 'ħ', ell: 'ℓ', AA: 'Å',
+  to: '→', rightarrow: '→', leftarrow: '←', leftrightarrow: '↔',
+  langle: '⟨', rangle: '⟩', prime: '′', perp: '⊥', parallel: '∥',
+  ',': ' ', ';': ' ', ':': ' ', '!': '', quad: ' ', qquad: '  ', ' ': ' ',
+  '%': '%', '$': '$', '{': '{', '}': '}', '_': '_', '#': '#', '&': '&',
+};
+
+function mathHtml(s) {
+  const parts = String(s ?? '').replace(/\n/g, ' ').split('$');
+  // Even parts are plain text, odd parts are inside $...$ (an unmatched
+  // trailing $ leaves plain text, as matplotlib would show it).
+  if (parts.length % 2 === 0) parts[parts.length - 2] += '$' + parts.pop();
+  return parts.map((p, i) => (i % 2 ? mathPart(p) : escapeHtml(p))).join('');
+}
+
+function mathPart(src) {
+  let i = 0;
+  const group = () => {           // after '{': read to the matching '}'
+    let out = '';
+    while (i < src.length && src[i] !== '}') out += atom();
+    i++;
+    return out;
+  };
+  const arg = () => {             // what _ ^ and \cmd apply to
+    while (src[i] === ' ') i++;
+    if (src[i] === '{') { i++; return group(); }
+    return i < src.length ? atom() : '';
+  };
+  const atom = () => {
+    const c = src[i++];
+    if (c === '{') return group();
+    if (c === '_') return `<sub>${arg()}</sub>`;
+    if (c === '^') return `<sup>${arg()}</sup>`;
+    if (c === ' ') return '';     // mathtext ignores spaces
+    if (c !== '\\') return escapeHtml(c);
+    const name = /^[a-zA-Z]+/.exec(src.slice(i))?.[0] ?? src[i] ?? '';
+    i += name.length;
+    if (name in MATH_SYMBOLS) return MATH_SYMBOLS[name];
+    // Font switches and \frac-like wrappers: just show what's inside.
+    if (/^(math[a-z]+|text[a-z]*|rm|it|bf|operatorname|mathrm|boldsymbol|bar|hat|tilde|vec|dot|overline)$/.test(name)) {
+      return arg();
+    }
+    if (name === 'frac') { const a = arg(); return `${a}/${arg()}`; }
+    return escapeHtml(name);
+  };
+  let out = '';
+  while (i < src.length) out += atom();
+  return out;
+}
 
 /** Apply an edit to every selected element, preview it, then persist. */
 function edit(fn, { immediate = true } = {}) {
@@ -1033,13 +1126,13 @@ function peerGroups() {
   };
 
   if (primary.kind === 'panel') {
-    add('All panels', spec.panels.map((p) => resolve(`panel:${p.id}`)).filter(Boolean));
+    add('All plot boxes', spec.panels.map((p) => resolve(`panel:${p.id}`)).filter(Boolean));
     return groups;
   }
 
   if (primary.kind === 'xticks' || primary.kind === 'yticks') {
     const axis = primary.kind === 'xticks' ? 'x' : 'y';
-    add(`All ${axis}-axis ticks`, spec.panels
+    add(`All ${KIND_LABEL[primary.kind]}`, spec.panels
       .map((p) => resolve(`panel:${p.id}:${axis}ticks`)).filter(Boolean));
     return groups;
   }
@@ -1056,9 +1149,9 @@ function peerGroups() {
     // Dedicated early return, same reason as legend: a curve's size/color
     // live at different paths (no .size at all, .style.color not .color),
     // so the generic buckets below would compare the wrong thing.
-    add(`All curves in panel (${primary.panel})`,
+    add(`All lines in ${plotName(primary.panel)}`,
         all.filter((e) => e.kind === 'series' && e.panel === primary.panel));
-    add('All curves', all.filter((e) => e.kind === 'series'));
+    add('All lines', all.filter((e) => e.kind === 'series'));
     return groups;
   }
 
@@ -1066,27 +1159,29 @@ function peerGroups() {
     // Dedicated too: an arrow has no .size (it has mutation_scale/lw
     // instead), so the generic "Everything at Npt" bucket below would
     // compare against a field that doesn't exist.
-    add(`All arrows in panel (${primary.panel})`,
+    add(`All arrows in ${plotName(primary.panel)}`,
         all.filter((e) => e.kind === 'arrow' && e.panel === primary.panel));
     add('All arrows', all.filter((e) => e.kind === 'arrow'));
     return groups;
   }
 
   if (primary.kind === 'text') {
-    add(`All labels in panel (${primary.panel})`,
+    add(`All labels in ${plotName(primary.panel)}`,
         all.filter((e) => e.kind === 'text' && e.panel === primary.panel));
     add('All labels', all.filter((e) => e.kind === 'text'));
   } else if (primary.kind !== 'suptitle') {
-    add(`All ${KIND_LABEL[primary.kind]}s`,
+    add(`All ${KIND_PLURAL[primary.kind]}`,
         all.filter((e) => e.kind === primary.kind));
   }
 
   const size = primary.obj.size ?? 12;
-  add(`Everything at ${size}pt`, all.filter((e) => (e.obj.size ?? 12) === size));
+  add(`Everything this size (${size} pt)`, all.filter((e) => (e.obj.size ?? 12) === size));
 
   const color = normHex(primary.obj.color ?? '#000000');
   const sameColor = all.filter((e) => normHex(e.obj.color ?? '#000000') === color);
-  if (sameColor.length < all.length) add(`Everything in ${color}`, sameColor);
+  if (sameColor.length < all.length) {
+    add(`<i class="swatch" style="background:${color}"></i>Everything this color`, sameColor);
+  }
 
   return groups;
 }
@@ -1105,14 +1200,14 @@ function refreshPeerBar() {
   for (const g of peerGroups()) {
     const b = document.createElement('button');
     b.className = 'chip' + (sameSet(g.ids, selection) ? ' on' : '');
-    b.innerHTML = `${escapeHtml(g.label)}<span class="n">${g.ids.length}</span>`;
+    b.innerHTML = `${g.label}<span class="n">${g.ids.length}</span>`;
     b.title = 'Click to select this group · Ctrl-click to add it';
     b.onclick = (evt) => setSelection(
       isMulti(evt) ? [...selection, ...g.ids] : g.ids);
     groups.appendChild(b);
   }
   if (!groups.children.length) {
-    groups.innerHTML = '<span class="muted">no similar elements</span>';
+    groups.innerHTML = '<span class="muted">Nothing else like it</span>';
   }
 
   const row = $('peer-selected-row');
@@ -1123,8 +1218,8 @@ function refreshPeerBar() {
     for (const s of sel) {
       const b = document.createElement('button');
       b.className = 'chip small';
-      b.innerHTML = `${escapeHtml(chipLabel(s))}<span class="x">×</span>`;
-      b.title = `${s.id} — click to remove from the selection`;
+      b.innerHTML = `${chipLabel(s)}<span class="x">×</span>`;
+      b.title = 'Click to un-pick this one';
       b.onclick = () => toggleSelection(s.id);
       chips.appendChild(b);
     }
@@ -1138,11 +1233,13 @@ $('btn-clearsel').onclick = () => setSelection([]);
 function buildList() {
   const list = $('element-list');
   list.innerHTML = '';
-  const add = (label, id, tag) => {
+  // `html` is built here from escaped/mathHtml'd pieces, never raw user text.
+  const add = (html, id, kind, icon, obj = null) => {
     const b = document.createElement('button');
     b.dataset.eid = id;
-    b.innerHTML = `<span class="tag">${tag}</span>${escapeHtml(label)}`;
-    b.title = `${label}\n${id}  (Ctrl-click to add to the selection)`;
+    const tag = TAGGED_KINDS.has(kind) ? `<span class="kind">${kindLabel(kind, obj)}</span>` : '';
+    b.innerHTML = `<span class="ico">${icon}</span><span class="txt">${html}</span>${tag}`;
+    b.title = 'Click to pick it · Ctrl-click to pick more than one';
     b.onclick = (evt) => {
       if (isMulti(evt)) toggleSelection(id); else setSelection([id]);
     };
@@ -1155,41 +1252,87 @@ function buildList() {
     list.appendChild(d);
   };
 
-  group('panels');
-  for (const p of spec.panels) {
-    add(`panel (${p.id}) axes`, `panel:${p.id}`, '▭');
-    add(`panel (${p.id}) x ticks`, `panel:${p.id}:xticks`, 'xt');
-    add(`panel (${p.id}) y ticks`, `panel:${p.id}:yticks`, 'yt');
-    if (resolve(`${p.id}__legend`)) add(`panel (${p.id}) legend`, `${p.id}__legend`, 'lg');
+  if (spec.suptitle?.text) {
+    group('Whole figure');
+    add(mathHtml(spec.suptitle.text), 'suptitle', 'suptitle', ICON.words);
   }
 
-  group('figure');
-  if (spec.suptitle?.text) add(preview(spec.suptitle.text), 'suptitle', 'sup');
-
   for (const p of spec.panels) {
-    group(`panel (${p.id})`);
-    if (p.title?.text) add(preview(p.title.text), `${p.id}__title`, 'ttl');
-    if (p.xlabel?.text) add(preview(p.xlabel.text), `${p.id}__xlabel`, 'x');
-    if (p.ylabel?.text) add(preview(p.ylabel.text), `${p.id}__ylabel`, 'y');
-    for (const t of p.texts || []) add(preview(t.text), t.id, '¶');
-    for (const sr of p.series || []) add(sr.label || sr.id, sr.id, 'cv');
-    for (const ar of p.arrows || []) add(ar.id, ar.id, '↗');
+    group(capitalize(plotName(p.id)));
+    // What people came to change first: the words and the lines...
+    if (p.title?.text) add(mathHtml(p.title.text), `${p.id}__title`, 'title', ICON.words);
+    if (p.xlabel?.text) add(mathHtml(p.xlabel.text), `${p.id}__xlabel`, 'xlabel', ICON.words);
+    if (p.ylabel?.text) add(mathHtml(p.ylabel.text), `${p.id}__ylabel`, 'ylabel', ICON.words);
+    for (const t of p.texts || []) add(mathHtml(t.text), t.id, 'text', ICON.words);
+    for (const sr of p.series || []) add(seriesName(sr), sr.id, 'series', seriesIcon(sr.style), sr);
+    (p.arrows || []).forEach((ar, i) => add(
+      p.arrows.length > 1 ? `Arrow ${i + 1}` : 'Arrow', ar.id, 'arrow', ICON.arrow));
+    // ...then the frame around them.
+    add('Plot box', `panel:${p.id}`, 'panel', ICON.box);
+    add('Bottom numbers', `panel:${p.id}:xticks`, 'xticks', ICON.numbers);
+    add('Side numbers', `panel:${p.id}:yticks`, 'yticks', ICON.numbers);
+    if (resolve(`${p.id}__legend`)) add('Legend', `${p.id}__legend`, 'legend', ICON.legend);
   }
   markList();
 }
 
-function preview(s) {
-  return (s || '').replace(/\n/g, ' ⏎ ').slice(0, 44);
+/* Kinds whose row shows user text, so it needs a word saying what it is.
+ * Rows like "Plot box" already say it. */
+const TAGGED_KINDS = new Set(['suptitle', 'title', 'xlabel', 'ylabel', 'text', 'series']);
+
+const ICON = {
+  words: '<b class="ico-words">Aa</b>',
+  arrow: '<svg viewBox="0 0 22 12"><path d="M3 10 L18 2 M12 2 H18 V7" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>',
+  box: '<svg viewBox="0 0 22 12"><rect x="4" y="1" width="14" height="10" fill="none" stroke="currentColor" stroke-width="1.4"/></svg>',
+  numbers: '<b class="ico-num">12</b>',
+  legend: '<svg viewBox="0 0 22 12"><path d="M3 3 H9 M3 9 H9" stroke="currentColor" stroke-width="1.6"/><path d="M12 3 H19 M12 9 H19" stroke="currentColor" stroke-width="1" opacity=".5"/></svg>',
+};
+
+const DASHES = { '--': '4 2', 'dashed': '4 2', ':': '1 2', 'dotted': '1 2', '-.': '4 2 1 2', 'dashdot': '4 2 1 2' };
+
+/** A tiny picture of a line as it is drawn: its color, dash and marker. */
+function seriesIcon(st = {}) {
+  const c = cssColor(st.color);
+  const ls = st.ls ?? st.linestyle ?? '-';
+  const line = seriesHasLine(st)
+    ? `<path d="M1 6 H21" stroke="${c}" stroke-width="1.8" stroke-dasharray="${DASHES[ls] ?? ''}"/>` : '';
+  const m = st.marker && st.marker !== 'none' && st.marker !== 'None' ? st.marker : null;
+  const mk = {
+    '.': `<circle cx="11" cy="6" r="1.8" fill="${c}"/>`,
+    'o': `<circle cx="11" cy="6" r="3.2" fill="${c}"/>`,
+    's': `<rect x="8" y="3" width="6" height="6" fill="${c}"/>`,
+    '^': `<path d="M11 2.5 L14.5 9 H7.5 Z" fill="${c}"/>`,
+    'D': `<path d="M11 2 L15 6 L11 10 L7 6 Z" fill="${c}"/>`,
+    '+': `<path d="M11 1.5 V10.5 M6.5 6 H15.5" stroke="${c}" stroke-width="1.8"/>`,
+    'x': `<path d="M7.5 2.5 L14.5 9.5 M14.5 2.5 L7.5 9.5" stroke="${c}" stroke-width="1.8"/>`,
+  }[m] ?? (m ? `<circle cx="11" cy="6" r="2.6" fill="${c}"/>` : '');
+  return `<svg viewBox="0 0 22 12">${line}${mk}</svg>`;
 }
 
+/** A matplotlib color as CSS. normHex() maps anything it doesn't know to
+ *  black, but named colors like "red" are valid CSS as they are. */
+function cssColor(c) {
+  if (!c) return '#1f77b4';                 // matplotlib's first default color
+  const hex = normHex(c);
+  if (hex !== '#000000' || /^(k|black|#000(000)?)$/i.test(c)) return hex;
+  return escapeHtml(c);
+}
+
+/** A line's legend name, or a plain "no name" for helper lines. */
+function seriesName(sr) {
+  return sr.label ? mathHtml(sr.label) : '<em class="noname">no name</em>';
+}
+
+/** How a picked element is named in the "Picked" chips. Returns HTML. */
 function chipLabel(s) {
-  if (s.kind === 'panel') return `panel (${s.panel}) axes`;
-  if (s.kind === 'xticks') return `panel (${s.panel}) x ticks`;
-  if (s.kind === 'yticks') return `panel (${s.panel}) y ticks`;
-  if (s.kind === 'legend') return `panel (${s.panel}) legend`;
-  if (s.kind === 'series') return s.obj.label || s.id;
-  if (s.kind === 'arrow') return s.id;
-  return preview(s.obj.text);
+  const where = s.panel ? ` · ${s.panel}` : '';
+  if (s.kind === 'panel') return `Plot box${where}`;
+  if (s.kind === 'xticks') return `Bottom numbers${where}`;
+  if (s.kind === 'yticks') return `Side numbers${where}`;
+  if (s.kind === 'legend') return `Legend${where}`;
+  if (s.kind === 'series') return seriesName(s.obj);
+  if (s.kind === 'arrow') return `Arrow${where}`;
+  return mathHtml(s.obj.text);
 }
 
 function escapeHtml(s) {
@@ -1664,8 +1807,8 @@ function trySetScale(axis, value) {
       const note = $('axes-note');
       note.hidden = false;
       note.textContent =
-        `Can't use log scale on the ${axis}-axis: panel (${bad.panel})'s range ` +
-        `includes zero or a negative value.`;
+        `Log scale needs every number above zero, but ${plotName(bad.panel)} ` +
+        `goes down to zero or below.`;
       $(`f-${axis}scale`).value = 'linear';
       return;
     }
@@ -1798,7 +1941,7 @@ $('btn-redo').onclick = redo;
 function deleteSelection() {
   const sel = selected().filter((s) => DELETABLE.has(s.kind));
   if (!sel.length) {
-    if (selection.length) setStatus('panels and tick labels can’t be deleted', 'err');
+    if (selection.length) setStatus('The plot box and its numbers can’t be deleted', 'err');
     return;
   }
   pushHistory();
@@ -1819,7 +1962,7 @@ function deleteSelection() {
 $('btn-delete').onclick = deleteSelection;
 
 async function download(url, filename) {
-  setStatus('preparing…', 'busy');
+  setStatus('Getting it ready…', 'busy');
   try {
     const r = await fetch(url);
     if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
@@ -1829,7 +1972,7 @@ async function download(url, filename) {
     a.download = filename;
     a.click();
     URL.revokeObjectURL(a.href);
-    setStatus(`downloaded ${filename}`);
+    setStatus(`Downloaded ${filename} ✓`);
   } catch (e) {
     setStatus(e.message, 'err');
   }
@@ -1859,9 +2002,9 @@ if ('BroadcastChannel' in window) {
       applySvg(data.svg);
       buildList();
       setSelection(selection);
-      setStatus(`updated from your code · rev ${spec.rev} · Ctrl+Z to undo`);
+      setStatus('Updated from your code ✓ (Ctrl+Z to undo)');
     } catch (err) {
-      setStatus(`couldn't load the change from your code: ${err.message}`, 'err');
+      setStatus(`Couldn't use the change from your code: ${err.message}`, 'err');
     }
   };
 }
@@ -1879,7 +2022,18 @@ $('btn-py').onclick = async () => {
   } catch { /* the menu still works without the edited-version entry */ }
 };
 document.addEventListener('pointerdown', (e) => {
-  if (!e.target.closest('.menu-wrap')) $('py-menu').hidden = true;
+  if (!$('btn-py').parentElement.contains(e.target)) $('py-menu').hidden = true;
+  if (!$('btn-help').parentElement.contains(e.target)) showHelp(false);
+});
+
+/* "? Help": the how-to and the keyboard keys, out of the way until asked. */
+function showHelp(on) {
+  $('help-pop').hidden = !on;
+  $('btn-help').setAttribute('aria-expanded', String(on));
+}
+$('btn-help').onclick = () => showHelp($('help-pop').hidden);
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') showHelp(false);
 });
 $('py-view').onclick = async () => {
   $('py-menu').hidden = true;
@@ -1902,15 +2056,15 @@ $('btn-rebuild').onclick = async () => {
   const btn = $('btn-rebuild');
   if (!rebuildArmed) {
     rebuildArmed = true;
-    btn.textContent = 'Discard edits?';
+    btn.textContent = 'Sure? Click again';
     setTimeout(() => {
-      if (rebuildArmed) { rebuildArmed = false; btn.textContent = 'Rebuild'; }
+      if (rebuildArmed) { rebuildArmed = false; btn.textContent = 'Start over'; }
     }, 4000);
     return;
   }
   rebuildArmed = false;
-  btn.textContent = 'Rebuild';
-  setStatus('rebuilding from CSV…', 'busy');
+  btn.textContent = 'Start over';
+  setStatus('Starting over…', 'busy');
   try {
     const r = await fetch(`/api/rebuild/${FIGURE}`, { method: 'POST' });
     const data = await r.json();
@@ -1924,7 +2078,7 @@ $('btn-rebuild').onclick = async () => {
     setSelection([]);
     applySvg(data.svg);
     buildList();
-    setStatus(`rebuilt · rev ${spec.rev}`);
+    setStatus('Started over from your data ✓');
   } catch (e) {
     setStatus(e.message, 'err');
   }
@@ -1967,7 +2121,7 @@ function fillProjectSelect(names) {
 /** Switching is a full reload onto ?project=<name>: every piece of editor
  *  state (selection, previews, caches, undo) starts clean for the new one. */
 async function openProject(name) {
-  setStatus('saving…', 'busy');
+  setStatus('Saving…', 'busy');
   await flushPending();
   rememberProject(name);
   location.search = '?project=' + encodeURIComponent(name);
@@ -1989,7 +2143,7 @@ function askName(message, initial) {
   const name = (prompt(message, initial) || '').trim();
   if (!name) return null;
   if (!/^[A-Za-z0-9_-]+$/.test(name)) {
-    setStatus('names may use letters, digits, - and _ only', 'err');
+    setStatus('Names can only use letters, numbers, - and _', 'err');
     return null;
   }
   return name;
@@ -2154,7 +2308,8 @@ async function pickProject() {
   const r = await fetch('/api/figures');
   const listing = await r.json();
   const names = listing.figures || [];
-  $('storage-badge').textContent = listing.storage || 'local';
+  // Only worth a badge when running on this computer; online is the norm.
+  $('storage-badge').hidden = (listing.storage || 'local') !== 'local';
   if (!names.length) throw new Error('no projects found in figures/');
   const wanted = [new URLSearchParams(location.search).get('project'), readLastProject()];
   const name = wanted.find((n) => n && names.includes(n)) || names[0];
@@ -2421,7 +2576,7 @@ window.addEventListener('hashchange', () => {
 boot();
 
 async function startEditor() {
-  setStatus('loading…', 'busy');
+  setStatus('Opening…', 'busy');
   try {
     const picked = await pickProject();
     FIGURE = picked.name;
@@ -2440,7 +2595,6 @@ async function startEditor() {
     spec = data.spec;
     renderedSpec = clone(data.spec);
     geometry = data.geometry;
-    $('figname').textContent = `${FIGURE}/spec.json`;
     const saved = hr.ok ? await hr.json() : {};
     history = saved.undo || [];
     future = saved.redo || [];
@@ -2448,11 +2602,12 @@ async function startEditor() {
     applySvg(data.svg);
     buildList();
     fit();
-    setStatus(`rev ${spec.rev}`);
+    setStatus('');
+    $('status').dataset.ready = '1';  // "the figure is on screen" (tests wait on it)
   } catch (e) {
     setStatus(e.message, 'err');
     canvas.innerHTML = `<div style="padding:40px;font:14px sans-serif;color:#b4392b">
-      Could not load the figure: ${escapeHtml(e.message)}<br><br>
-      Have you run <code>python build.py</code>?</div>`;
+      Couldn't open this figure: ${escapeHtml(e.message)}<br><br>
+      Try reloading the page.</div>`;
   }
 }

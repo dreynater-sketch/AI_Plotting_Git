@@ -22,7 +22,7 @@ with sync_playwright() as pw:
     br=pw.chromium.launch(channel="msedge"); pg=br.new_page(viewport={"width":1500,"height":800})
     errs=[]; pg.on("pageerror", lambda e: errs.append(str(e)))
     pg.goto(f"{B}/?project={P}")
-    pg.wait_for_function("document.getElementById('status').textContent.startsWith('rev')")
+    pg.wait_for_function("document.getElementById('status').dataset.ready === '1'")
     settle=lambda: pg.wait_for_function("!savePending && !inFlight && !needsSave",timeout=20000)
     ev=pg.evaluate; vis=lambda: ev("!document.getElementById('box-colors').hidden")
 

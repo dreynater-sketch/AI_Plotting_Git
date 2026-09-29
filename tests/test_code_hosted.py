@@ -42,7 +42,7 @@ try:
             pg.fill(f + " [name=display_name]", name); pg.fill(f + " [name=email]", email); pg.fill(f + " [name=password]", "long-enough-1")
             pg.click(f + " button[type=submit]"); pg.wait_for_function("document.getElementById('auth-msg').textContent.length > 2")
             link = [m for m in get(M + "/_mailbox") if m["to"] == email][-1]["link"]
-            pg.goto(link); pg.wait_for_function("document.getElementById('status').textContent.startsWith('rev')")
+            pg.goto(link); pg.wait_for_function("document.getElementById('status').dataset.ready === '1'")
             pg.goto(B + "/code.html?project=qcircle")
             pg.wait_for_function("typeof cm !== 'undefined' && cm.getValue().includes('import matplotlib')")
             return ctx, pg

@@ -30,7 +30,7 @@ with sync_playwright() as pw:
     ctx = br.new_context(viewport={"width": 1500, "height": 900}, accept_downloads=True)
     pg = ctx.new_page(); errs = []; pg.on("pageerror", lambda e: errs.append(str(e)))
     pg.goto(f"{B}/?project=qcircle")
-    pg.wait_for_function("document.getElementById('status').textContent.startsWith('rev')")
+    pg.wait_for_function("document.getElementById('status').dataset.ready === '1'")
 
     pg.click("#btn-new")
     check(pg.is_visible("#csv-modal"), "New from CSV opens the dialog")
@@ -48,7 +48,7 @@ with sync_playwright() as pw:
     pg.screenshot(path=S + "/csv_dialog.png")
     pg.click("#csv-create")
     pg.wait_for_url(f"**/?project={NAME}", timeout=30000)
-    pg.wait_for_function("document.getElementById('status').textContent.startsWith('rev')")
+    pg.wait_for_function("document.getElementById('status').dataset.ready === '1'")
     p = pg.evaluate("spec.panels[0]")
     check([s["label"] for s in p["series"]] == ["OD600 wt", "OD600 mutant"] and p["xlabel"]["text"] == "time (h)",
           "figure built: two curves, axis named after the x column")
@@ -69,7 +69,7 @@ with sync_playwright() as pw:
 
     # rebuild from the CSV
     pg.click("#btn-rebuild"); pg.click("#btn-rebuild")
-    pg.wait_for_function("document.getElementById('status').textContent.startsWith('rebuilt')", timeout=30000)
+    pg.wait_for_function("document.getElementById('status').textContent.startsWith('Started over')", timeout=30000)
     check(disk()["panels"][0]["xlabel"]["text"] == "time (h)", "Rebuild regenerates from the saved CSV + column picks")
 
     # code editor + sync on a one-panel figure

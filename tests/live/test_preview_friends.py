@@ -47,7 +47,7 @@ try:
         f = 'form[data-view="login"]'
         pg.fill(f + " [name=email]", U["email"]); pg.fill(f + " [name=password]", U["password"])
         pg.click(f + " button[type=submit]")
-        pg.wait_for_function("document.getElementById('status').textContent.startsWith('rev')", timeout=90000)
+        pg.wait_for_function("document.getElementById('status').dataset.ready === '1'", timeout=90000)
         pg.click("#btn-account")
         check(pg.is_hidden("#admin-box"), "deployed: a regular member has no invite box")
         check(ctx.request.get(H + "/api/admin/users").status == 403, "deployed: members can't list users")
@@ -58,7 +58,7 @@ try:
         pg.wait_for_selector("#csv-pick:not([hidden])", timeout=30000)
         pg.click("#csv-create")
         pg.wait_for_url("**/?project=decay", timeout=60000)
-        pg.wait_for_function("document.getElementById('status').textContent.startsWith('rev')", timeout=60000)
+        pg.wait_for_function("document.getElementById('status').dataset.ready === '1'", timeout=60000)
         check(pg.evaluate("spec.panels[0].series[0].label") == "counts", "deployed: New from CSV builds a figure")
         check(any(k.endswith("decay/data/source.csv") for k in store._walk(f"users/{uid}")), "deployed: source CSV stored in the user's space")
 

@@ -35,7 +35,7 @@ try:
             ctx = br.new_context(viewport={"width": 1400, "height": 850})
             pg = ctx.new_page(); pg.on("pageerror", lambda e: errs.append(str(e)))
             return ctx, pg
-        loaded = lambda pg: pg.wait_for_function("document.getElementById('status').textContent.startsWith('rev')", timeout=30000)
+        loaded = lambda pg: pg.wait_for_function("document.getElementById('status').dataset.ready === '1'", timeout=30000)
 
         # --- a stranger
         ctx, pg = page()

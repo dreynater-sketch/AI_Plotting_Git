@@ -26,7 +26,7 @@ with sync_playwright() as pw:
     main = ctx.new_page(); errs = []
     main.on("pageerror", lambda e: errs.append("main: " + str(e)))
     main.goto(f"{B}/?project={P}")
-    main.wait_for_function("document.getElementById('status').textContent.startsWith('rev')")
+    main.wait_for_function("document.getElementById('status').dataset.ready === '1'")
 
     # --- the figure.py menu
     main.click("#btn-py")

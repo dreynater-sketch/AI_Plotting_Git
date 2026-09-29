@@ -40,7 +40,7 @@ try:
         f = 'form[data-view="login"]'
         pg.fill(f + " [name=email]", U["email"]); pg.fill(f + " [name=password]", U["password"])
         pg.click(f + " button[type=submit]")
-        pg.wait_for_function("document.getElementById('status').textContent.startsWith('rev')", timeout=90000)
+        pg.wait_for_function("document.getElementById('status').dataset.ready === '1'", timeout=90000)
         pg.click("#btn-py")
         with ctx.expect_page() as newp:
             pg.click("#py-view")
@@ -53,7 +53,7 @@ try:
         code.keyboard.press("Control+s")
         code.wait_for_function("!document.getElementById('tab').classList.contains('dirty')", timeout=30000)
         code.wait_for_function("document.getElementById('panel-state').textContent.startsWith('Synced')", timeout=30000)
-        pg.wait_for_function("document.getElementById('status').textContent.includes('updated from your code')", timeout=20000)
+        pg.wait_for_function("document.getElementById('status').textContent.includes('Updated from your code')", timeout=20000)
         check(pg.evaluate("spec.panels[2].xlim") == [-22, 22], "deployed: saving code updates the figure editor live")
         check(any(k.endswith("qcircle/custom_figure.json") for k in store._walk(f"users/{uid}")), "deployed: Save stores the edited copy in the user's space")
         n = code.evaluate("runsFinished"); t = time.time(); code.keyboard.press("Control+b")

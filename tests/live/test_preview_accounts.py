@@ -45,7 +45,7 @@ try:
         f = 'form[data-view="login"]'
         pg.fill(f + " [name=email]", U["email"]); pg.fill(f + " [name=password]", U["password"])
         t = time.time(); pg.click(f + " button[type=submit]")
-        pg.wait_for_function("document.getElementById('status').textContent.startsWith('rev')", timeout=90000)
+        pg.wait_for_function("document.getElementById('status').dataset.ready === '1'", timeout=90000)
         check(pg.inner_text("#account-name") == "Preview Tester", f"preview: log-in works ({time.time()-t:.1f}s incl. first-time setup)")
         c = {x["name"]: x for x in ctx.cookies()}
         check(c["ff_at"]["secure"] and c["ff_at"]["httpOnly"], "preview: session cookie is Secure + HttpOnly")
