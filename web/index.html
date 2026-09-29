@@ -102,30 +102,44 @@
     <div class="canvas-wrap" id="canvas-wrap">
       <div class="canvas" id="canvas"></div>
     </div>
-    <div class="peerbar" id="peerbar" hidden>
-      <div class="peerrow">
-        <span class="peerlabel">Pick all</span>
-        <div class="chips" id="peer-groups"></div>
+    <!-- The bottom bar: every part of the figure, and the numbers behind a
+         picked line. Drag its top edge to make it taller or shorter. -->
+    <div class="dock" id="dock">
+      <div class="dock-handle" id="dock-handle" title="Drag to make this bigger or smaller"></div>
+      <div class="peerbar" id="peerbar" hidden>
+        <div class="peerrow">
+          <span class="peerlabel">Pick all</span>
+          <div class="chips" id="peer-groups"></div>
+        </div>
+        <div class="peerrow" id="peer-selected-row" hidden>
+          <span class="peerlabel">Picked</span>
+          <div class="chips" id="peer-selected"></div>
+          <button class="link" id="btn-clearsel">Clear</button>
+        </div>
       </div>
-      <div class="peerrow" id="peer-selected-row" hidden>
-        <span class="peerlabel">Picked</span>
-        <div class="chips" id="peer-selected"></div>
-        <button class="link" id="btn-clearsel">Clear</button>
-      </div>
-    </div>
+      <div class="dock-body">
+        <div class="dock-list">
+          <div class="dock-head">
+            <h2>Everything in the figure</h2>
+            <span class="muted">Click one to change it</span>
+          </div>
+          <div id="element-list" class="ellist"></div>
+        </div>
 
-    <div class="data-panel" id="data-panel" hidden>
-      <div class="data-head">
-        <span class="data-title" id="data-title">line</span>
-        <span class="data-count" id="data-count"></span>
-        <span class="spacer"></span>
-        <span class="data-status" id="data-status"></span>
-      </div>
-      <div class="data-table-wrap" id="data-table-wrap">
-        <table class="data-table">
-          <thead><tr><th id="data-col-x">x</th><th id="data-col-y">y</th></tr></thead>
-          <tbody id="data-table-body"></tbody>
-        </table>
+        <div class="data-panel" id="data-panel" hidden>
+          <div class="data-head">
+            <span class="data-title" id="data-title">line</span>
+            <span class="data-count" id="data-count"></span>
+            <span class="spacer"></span>
+            <span class="data-status" id="data-status"></span>
+          </div>
+          <div class="data-table-wrap" id="data-table-wrap">
+            <table class="data-table">
+              <thead><tr><th id="data-col-x">x</th><th id="data-col-y">y</th></tr></thead>
+              <tbody id="data-table-body"></tbody>
+            </table>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -134,10 +148,10 @@
   <aside class="sidebar">
     <div class="panel" id="inspector">
       <h2>Change it</h2>
-      <div class="empty" id="insp-empty">Nothing picked yet.<br><span>Click anything on the figure, or in the list below.</span></div>
+      <div class="empty" id="insp-empty">Nothing picked yet.<br><span>Click anything on the figure, or in the list under it.</span></div>
 
       <div id="insp-body" hidden>
-        <div class="elid"><b id="insp-kind">Label</b><span id="insp-where"></span><button id="btn-delete" class="danger small" title="Delete it (Del)">Delete</button></div>
+        <div class="elid"><b id="insp-kind">Label</b><span id="insp-where"></span><button id="btn-delete" class="danger small" title="Delete it (Del)">Delete</button><button id="btn-done" class="small" title="Let go of it (Esc)">Done</button></div>
 
         <div id="label-fields">
         <label class="field" id="text-field">
@@ -352,7 +366,7 @@
               <input type="number" id="f-series-alpha-num" min="0" max="1" step="0.05">
             </span>
           </label>
-          <p class="note">Its numbers are listed under the figure.</p>
+          <p class="note">Its numbers are listed under the figure, on the right.</p>
         </div>
 
         <div id="arrow-fields" hidden>
@@ -390,10 +404,6 @@
       </div>
     </div>
 
-    <div class="panel">
-      <h2>Everything in the figure</h2>
-      <div id="element-list" class="ellist"></div>
-    </div>
   </aside>
 </main>
 

@@ -136,6 +136,7 @@ async function doSave() {
     renderedSpec = data.spec;
     geometry = data.geometry;
     applySvg(data.svg);
+    buildList();
     setStatus('Saved ✓');
   } catch (e) {
     setStatus(e.message, 'err');
@@ -1227,6 +1228,7 @@ function refreshPeerBar() {
 }
 
 $('btn-clearsel').onclick = () => setSelection([]);
+$('btn-done').onclick = () => setSelection([]);
 
 /* --------------------------------------------------------- element list */
 
@@ -1234,36 +1236,41 @@ function buildList() {
   const list = $('element-list');
   list.innerHTML = '';
   // `html` is built here from escaped/mathHtml'd pieces, never raw user text.
+  let col = null;  // the current plot's column
   const add = (html, id, kind, icon, obj = null) => {
     const b = document.createElement('button');
     b.dataset.eid = id;
     const tag = TAGGED_KINDS.has(kind) ? `<span class="kind">${kindLabel(kind, obj)}</span>` : '';
-    b.innerHTML = `<span class="ico">${icon}</span><span class="txt">${html}</span>${tag}`;
+    b.innerHTML = `<span class="ico">${icon}</span><span class="txt">${html}</span>` +
+      `${obj && 'text' in obj ? wordsDetail(obj) : ''}${tag}`;
     b.title = 'Click to pick it · Ctrl-click to pick more than one';
     b.onclick = (evt) => {
       if (isMulti(evt)) toggleSelection(id); else setSelection([id]);
     };
-    list.appendChild(b);
+    col.appendChild(b);
   };
   const group = (name) => {
+    col = document.createElement('div');
+    col.className = 'col';
     const d = document.createElement('div');
     d.className = 'group';
     d.textContent = name;
-    list.appendChild(d);
+    col.appendChild(d);
+    list.appendChild(col);
   };
 
   if (spec.suptitle?.text) {
     group('Whole figure');
-    add(mathHtml(spec.suptitle.text), 'suptitle', 'suptitle', ICON.words);
+    add(mathHtml(spec.suptitle.text), 'suptitle', 'suptitle', ICON.words, spec.suptitle);
   }
 
   for (const p of spec.panels) {
     group(capitalize(plotName(p.id)));
     // What people came to change first: the words and the lines...
-    if (p.title?.text) add(mathHtml(p.title.text), `${p.id}__title`, 'title', ICON.words);
-    if (p.xlabel?.text) add(mathHtml(p.xlabel.text), `${p.id}__xlabel`, 'xlabel', ICON.words);
-    if (p.ylabel?.text) add(mathHtml(p.ylabel.text), `${p.id}__ylabel`, 'ylabel', ICON.words);
-    for (const t of p.texts || []) add(mathHtml(t.text), t.id, 'text', ICON.words);
+    if (p.title?.text) add(mathHtml(p.title.text), `${p.id}__title`, 'title', ICON.words, p.title);
+    if (p.xlabel?.text) add(mathHtml(p.xlabel.text), `${p.id}__xlabel`, 'xlabel', ICON.words, p.xlabel);
+    if (p.ylabel?.text) add(mathHtml(p.ylabel.text), `${p.id}__ylabel`, 'ylabel', ICON.words, p.ylabel);
+    for (const t of p.texts || []) add(mathHtml(t.text), t.id, 'text', ICON.words, t);
     for (const sr of p.series || []) add(seriesName(sr), sr.id, 'series', seriesIcon(sr.style), sr);
     (p.arrows || []).forEach((ar, i) => add(
       p.arrows.length > 1 ? `Arrow ${i + 1}` : 'Arrow', ar.id, 'arrow', ICON.arrow));
@@ -1316,6 +1323,12 @@ function cssColor(c) {
   const hex = normHex(c);
   if (hex !== '#000000' || /^(k|black|#000(000)?)$/i.test(c)) return hex;
   return escapeHtml(c);
+}
+
+/** "● 10 pt": a text element's color and size, at a glance. */
+function wordsDetail(o) {
+  return `<span class="det"><i class="swatch" style="background:${cssColor(o.color ?? '#000000')}"></i>` +
+    `${o.size ?? 12} pt</span>`;
 }
 
 /** A line's legend name, or a plain "no name" for helper lines. */
@@ -2094,11 +2107,40 @@ $('btn-fit').onclick = fit;
 
 function fit() {
   const w = $('canvas-wrap').clientWidth - 40;
-  zoom = Math.max(40, Math.min(220, Math.round(w / geometry.width * 100)));
+  const h = $('canvas-wrap').clientHeight - 40;
+  const scale = Math.min(w / geometry.width, h / geometry.height);
+  zoom = Math.max(40, Math.min(220, Math.round(scale * 100)));
   $('zoom').value = zoom;
   $('zoomval').textContent = zoom + '%';
   applyZoom();
 }
+
+/* The bottom bar's height: drag its top edge. Remembered per browser. */
+const DOCK_KEY = 'figforge.dockHeight';
+function setDockHeight(px) {
+  const max = $('stage').clientHeight - 160;   // always leave room for the figure
+  $('dock').style.height = Math.max(90, Math.min(max, px)) + 'px';
+}
+try {
+  const saved = Number(localStorage.getItem(DOCK_KEY));
+  if (saved) setDockHeight(saved);
+} catch { /* storage blocked: keep the default height */ }
+
+$('dock-handle').addEventListener('pointerdown', (e) => {
+  e.preventDefault();
+  const handle = e.currentTarget;
+  handle.setPointerCapture(e.pointerId);
+  const startY = e.clientY, startH = $('dock').offsetHeight;
+  const move = (ev) => setDockHeight(startH + startY - ev.clientY);
+  const up = () => {
+    handle.removeEventListener('pointermove', move);
+    handle.removeEventListener('pointerup', up);
+    try { localStorage.setItem(DOCK_KEY, String($('dock').offsetHeight)); } catch { /* fine */ }
+    if (geometry) fit();
+  };
+  handle.addEventListener('pointermove', move);
+  handle.addEventListener('pointerup', up);
+});
 
 /* ----------------------------------------------------------- projects */
 
