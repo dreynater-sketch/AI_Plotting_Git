@@ -204,6 +204,24 @@ function resolve(id, source = spec) {
     return { id, kind: 'legend', obj: p.legend, draggable: true,
              panel: p.id, coords: 'axes' };
   }
+  // The grey lines through zero: one element per panel, drawn as two
+  // paths ("__zero__h" / "__zero__v" in the SVG).
+  const zeroMatch = id.match(/^(.+)__zero(?:__[hv])?$/);
+  if (zeroMatch) {
+    const p = source.panels.find((q) => q.id === zeroMatch[1]);
+    if (!p?.zero_lines) return null;
+    return { id: `${p.id}__zero`, kind: 'zero', obj: p, draggable: false, panel: p.id };
+  }
+  // Guide lines (axhline/axvline) have no stored id, so they're named by
+  // their place in the panel's hlines/vlines list.
+  const guideMatch = id.match(/^(.+)__(h|v)line_(\d+)$/);
+  if (guideMatch) {
+    const [, pid, hv, i] = guideMatch;
+    const line = source.panels.find((q) => q.id === pid)?.[`${hv}lines`]?.[+i];
+    if (!line) return null;
+    return { id, kind: 'guide', obj: line, draggable: false, panel: pid, axis: hv };
+  }
+
   // An endpoint handle's raw gid resolves straight to its OWN arrow (the
   // same id, same object) rather than a separate selectable thing -- the
   // arrow is what's selected either way, an endpoint click just carries a
@@ -249,6 +267,10 @@ function allElements(source = spec) {
     for (const t of p.texts || []) out.push(resolve(t.id, source));
     for (const sr of p.series || []) out.push(resolve(sr.id, source));
     for (const a of p.arrows || []) out.push(resolve(a.id, source));
+    for (const hv of ['h', 'v']) {
+      (p[`${hv}lines`] || []).forEach((_, i) => out.push(resolve(`${p.id}__${hv}line_${i}`, source)));
+    }
+    out.push(resolve(`${p.id}__zero`, source));
   }
   return out.filter(Boolean);
 }
@@ -259,13 +281,13 @@ const KIND_LABEL = {
   suptitle: 'figure title', title: 'title', panel: 'plot box',
   xlabel: 'bottom label', ylabel: 'side label', text: 'label',
   xticks: 'bottom numbers', yticks: 'side numbers', legend: 'legend',
-  series: 'line', arrow: 'arrow',
+  series: 'line', arrow: 'arrow', guide: 'guide line', zero: 'zero lines',
 };
 const KIND_PLURAL = {
   suptitle: 'figure titles', title: 'titles', panel: 'plot boxes',
   xlabel: 'bottom labels', ylabel: 'side labels', text: 'labels',
   xticks: 'bottom numbers', yticks: 'side numbers', legend: 'legends',
-  series: 'lines', arrow: 'arrows',
+  series: 'lines', arrow: 'arrows', guide: 'guide lines', zero: 'zero lines',
 };
 
 const plotName = (pid) => `plot (${pid})`;
@@ -283,7 +305,7 @@ const capitalize = (s) => s.charAt(0).toUpperCase() + s.slice(1);
  * mean re-laying-out the figure, so they're refused rather than guessed at.
  * Titles and axis labels are blanked, not removed, so their size/color
  * survive if the text is ever typed back. */
-const DELETABLE = new Set(['text', 'arrow', 'series', 'legend',
+const DELETABLE = new Set(['text', 'arrow', 'series', 'legend', 'guide', 'zero',
                            'title', 'xlabel', 'ylabel', 'suptitle']);
 
 /* ------------------------------------------- coordinate transformations */
@@ -375,7 +397,7 @@ function applySvg(svgText) {
     // reasoning for an arrow: a diagonal one's bbox covers a rectangle well
     // beyond its actual line, and the server already drew appropriately
     // narrow/small hit targets along its body and at each endpoint.
-    if (r.kind !== 'series' && r.kind !== 'arrow') addHitTarget(g);
+    if (!['series', 'arrow', 'guide', 'zero'].includes(r.kind)) addHitTarget(g);
   }
   reconcilePreviews();
   drawOutlines();
@@ -496,7 +518,14 @@ function drawOutlines() {
       return;
     }
     const g = groupFor(id);
-    if (!g) return;
+    if (!g) {
+      svgPartsFor(id).forEach((part) => {
+        let pb;
+        try { pb = part.getBBox(); } catch { return; }
+        svgEl.appendChild(mkOutlineRect(pb.x - 3, pb.y - 3, pb.width + 6, pb.height + 6, i === 0));
+      });
+      return;
+    }
     let bb;
     try { bb = g.getBBox(); } catch { return; }
     const pad = 3;
@@ -767,7 +796,12 @@ function refreshInspector() {
   const allLegends = sel.every((s) => s.kind === 'legend');
   const allSeries = sel.every((s) => s.kind === 'series');
   const allArrows = sel.every((s) => s.kind === 'arrow');
-  $('label-fields').hidden = allPanels || allLegends || allSeries || allArrows;
+  const allGuides = sel.every((s) => s.kind === 'guide');
+  const allZero = sel.every((s) => s.kind === 'zero');
+  $('label-fields').hidden = allPanels || allLegends || allSeries || allArrows
+    || allGuides || allZero;
+  $('guide-fields').hidden = !allGuides;
+  $('zero-fields').hidden = !allZero;
   $('axes-fields').hidden = !allPanels;
   $('legend-fields').hidden = !allLegends;
   $('series-fields').hidden = !allSeries;
@@ -776,6 +810,8 @@ function refreshInspector() {
   if (allLegends) { refreshLegendInspector(); return; }
   if (allSeries) { refreshSeriesInspector(); return; }
   if (allArrows) { refreshArrowInspector(); return; }
+  if (allGuides) { refreshGuideInspector(); return; }
+  if (allZero) return;
 
   // Retyping many labels at once is meaningless; offer it only for one.
   $('text-field').hidden = multi;
@@ -901,6 +937,9 @@ function refreshAxesInspector() {
   setNum('f-yticksize', (s) => s.obj.ytick_size ?? 11);
   $('f-aspect').value = common((s) => s.obj.aspect ?? 'auto') ?? 'auto';
   setNum('f-framewidth', (s) => s.obj.frame_lw ?? 0.8);
+  const zero = common((s) => !!s.obj.zero_lines);
+  $('f-zero').indeterminate = zero === undefined;
+  $('f-zero').checked = zero === true;
   $('axes-note').hidden = true;
 }
 
@@ -950,6 +989,28 @@ function refreshSeriesInspector() {
 /** Unlike a curve, an arrow's own color/lw/arrowstyle/mutation_scale live
  *  directly on the object -- that's how the SPEC already stores them, no
  *  nested style dict to reach into. */
+function refreshGuideInspector() {
+  const color = common((s) => normHex(s.obj.color ?? '0.8'));
+  $('f-guide-color').value = color ?? '#cccccc';
+  $('f-guide-color-hex').value = color ?? '';
+  $('f-guide-color-hex').placeholder = color === undefined ? 'mixed' : '';
+  $('f-guide-ls').value = common((s) => s.obj.ls ?? '-') ?? '-';
+  const lw = common((s) => s.obj.lw ?? 1.0);
+  $('f-guide-lw').value = lw ?? '';
+  $('f-guide-lw').placeholder = lw === undefined ? 'mixed' : '';
+
+  // Where it sits only makes sense for one line.
+  const one = selected().length === 1 ? selected()[0] : null;
+  $('guide-pos-field').hidden = !one;
+  if (one) {
+    const p = panelById(one.panel);
+    const label = one.axis === 'v' ? p.xlabel?.text : p.ylabel?.text;
+    $('f-guide-pos-name').textContent = one.axis === 'v' ? 'Across at' : 'Up at';
+    $('f-guide-pos-unit').innerHTML = label ? `(${mathHtml(label)})` : '';
+    $('f-guide-pos').value = one.obj[one.axis === 'v' ? 'x' : 'y'];
+  }
+}
+
 function refreshArrowInspector() {
   const color = common((s) => normHex(s.obj.color ?? '#000000'));
   $('f-arrow-color').value = color ?? '#000000';
@@ -1156,6 +1217,17 @@ function peerGroups() {
     return groups;
   }
 
+  if (primary.kind === 'guide') {
+    add(`All guide lines in ${plotName(primary.panel)}`,
+        all.filter((e) => e.kind === 'guide' && e.panel === primary.panel));
+    add('All guide lines', all.filter((e) => e.kind === 'guide'));
+    return groups;
+  }
+  if (primary.kind === 'zero') {
+    add('All zero lines', all.filter((e) => e.kind === 'zero'));
+    return groups;
+  }
+
   if (primary.kind === 'arrow') {
     // Dedicated too: an arrow has no .size (it has mutation_scale/lw
     // instead), so the generic "Everything at Npt" bucket below would
@@ -1274,6 +1346,11 @@ function buildList() {
     for (const sr of p.series || []) add(seriesName(sr), sr.id, 'series', seriesIcon(sr.style), sr);
     (p.arrows || []).forEach((ar, i) => add(
       p.arrows.length > 1 ? `Arrow ${i + 1}` : 'Arrow', ar.id, 'arrow', ICON.arrow));
+    for (const hv of ['v', 'h']) {
+      (p[`${hv}lines`] || []).forEach((l, i) => add(guideName(hv, l), `${p.id}__${hv}line_${i}`,
+        'guide', seriesIcon({ color: l.color ?? '0.8', ls: l.ls ?? '-' })));
+    }
+    if (p.zero_lines) add('Lines through zero', `${p.id}__zero`, 'zero', ICON.zero);
     // ...then the frame around them.
     add('Plot box', `panel:${p.id}`, 'panel', ICON.box);
     add('Bottom numbers', `panel:${p.id}:xticks`, 'xticks', ICON.numbers);
@@ -1285,13 +1362,14 @@ function buildList() {
 
 /* Kinds whose row shows user text, so it needs a word saying what it is.
  * Rows like "Plot box" already say it. */
-const TAGGED_KINDS = new Set(['suptitle', 'title', 'xlabel', 'ylabel', 'text', 'series']);
+const TAGGED_KINDS = new Set(['suptitle', 'title', 'xlabel', 'ylabel', 'text', 'series', 'guide']);
 
 const ICON = {
   words: '<b class="ico-words">Aa</b>',
   arrow: '<svg viewBox="0 0 22 12"><path d="M3 10 L18 2 M12 2 H18 V7" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>',
   box: '<svg viewBox="0 0 22 12"><rect x="4" y="1" width="14" height="10" fill="none" stroke="currentColor" stroke-width="1.4"/></svg>',
   numbers: '<b class="ico-num">12</b>',
+  zero: '<svg viewBox="0 0 22 12"><path d="M1 6 H21 M11 0 V12" stroke="#c4c8cd" stroke-width="1.4"/></svg>',
   legend: '<svg viewBox="0 0 22 12"><path d="M3 3 H9 M3 9 H9" stroke="currentColor" stroke-width="1.6"/><path d="M12 3 H19 M12 9 H19" stroke="currentColor" stroke-width="1" opacity=".5"/></svg>',
 };
 
@@ -1331,6 +1409,12 @@ function wordsDetail(o) {
     `${o.size ?? 12} pt</span>`;
 }
 
+/** "Up-down line at x = 0.5": where a guide line sits, in plain words. */
+function guideName(hv, l) {
+  const at = Number((hv === 'v' ? l.x : l.y).toPrecision(3)).toString().replace('-', '−');
+  return hv === 'v' ? `Up-down line at x = ${at}` : `Side-to-side line at y = ${at}`;
+}
+
 /** A line's legend name, or a plain "no name" for helper lines. */
 function seriesName(sr) {
   return sr.label ? mathHtml(sr.label) : '<em class="noname">no name</em>';
@@ -1345,6 +1429,8 @@ function chipLabel(s) {
   if (s.kind === 'legend') return `Legend${where}`;
   if (s.kind === 'series') return seriesName(s.obj);
   if (s.kind === 'arrow') return `Arrow${where}`;
+  if (s.kind === 'guide') return guideName(s.axis, s.obj);
+  if (s.kind === 'zero') return `Lines through zero${where}`;
   return mathHtml(s.obj.text);
 }
 
@@ -1893,6 +1979,27 @@ $('f-series-alpha-num').addEventListener('change', (e) => {
   }
 });
 
+$('f-guide-color').addEventListener('input', (e) => {
+  $('f-guide-color-hex').value = e.target.value;
+  edit((o) => { o.color = e.target.value; }, { immediate: false });
+});
+$('f-guide-color-hex').addEventListener('change', (e) => {
+  const v = e.target.value.trim();
+  if (!/^#[0-9a-f]{6}$/i.test(v)) { e.target.value = $('f-guide-color').value; return; }
+  $('f-guide-color').value = v;
+  edit((o) => { o.color = v; });
+});
+$('f-guide-ls').addEventListener('change', (e) => edit((o) => { o.ls = e.target.value; }));
+$('f-guide-lw').addEventListener('change', (e) => {
+  const v = parseFloat(e.target.value);
+  if (Number.isFinite(v) && v >= 0) edit((o) => { o.lw = v; });
+});
+$('f-guide-pos').addEventListener('change', (e) => {
+  const v = parseFloat(e.target.value);
+  if (Number.isFinite(v)) edit((o, s) => { o[s.axis === 'v' ? 'x' : 'y'] = v; });
+});
+$('f-zero').addEventListener('change', (e) => edit((o) => { o.zero_lines = e.target.checked; }));
+
 $('f-arrow-color').addEventListener('input', (e) => {
   $('f-arrow-color-hex').value = e.target.value;
   edit((o) => { o.color = e.target.value; }, { immediate: false });
@@ -1964,6 +2071,8 @@ function deleteSelection() {
     else if (s.kind === 'arrow') p.arrows = p.arrows.filter((a) => a.id !== s.id);
     else if (s.kind === 'series') p.series = p.series.filter((r) => r.id !== s.id);
     else if (s.kind === 'legend') p.legend = null;
+    else if (s.kind === 'guide') p[`${s.axis}lines`] = p[`${s.axis}lines`].filter((l) => l !== s.obj);
+    else if (s.kind === 'zero') p.zero_lines = false;
     else s.obj.text = '';
   }
   buildList();

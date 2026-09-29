@@ -166,16 +166,36 @@ def _draw_arrow_hit_targets(ax, a):
     p1h.set_gid("t_" + a["id"] + "__p1")
 
 
+GUIDE_HIT_ZORDER = 1.5   # under curves (2) and text (3): those win a shared click
+
+
+def _guide_hit(draw, pos, gid):
+    """An invisible, wide click target along a guide line (axhline/axvline),
+    same stroke-opacity-0 technique as a curve's hit path. Drawn below
+    everything else, so it only catches clicks nothing else wanted."""
+    hit = draw(pos, alpha=0, lw=HIT_STROKE_WIDTH, zorder=GUIDE_HIT_ZORDER)
+    hit.set_gid(gid)
+
+
 def _draw_panel(ax, p, arrays, preview=False):
-    for h in p.get("hlines", []):
+    pid = p["id"]
+    for i, h in enumerate(p.get("hlines", [])):
         ax.axhline(h["y"], color=h.get("color", "0.8"), ls=h.get("ls", "-"),
                    lw=h.get("lw", 1.0))
-    for v in p.get("vlines", []):
+        if preview:
+            _guide_hit(ax.axhline, h["y"], f"t_{pid}__hline_{i}")
+    for i, v in enumerate(p.get("vlines", [])):
         ax.axvline(v["x"], color=v.get("color", "0.8"), ls=v.get("ls", "-"),
                    lw=v.get("lw", 1.0))
+        if preview:
+            _guide_hit(ax.axvline, v["x"], f"t_{pid}__vline_{i}")
     if p.get("zero_lines"):
         ax.axhline(0, color="0.88", lw=0.7)
         ax.axvline(0, color="0.88", lw=0.7)
+        if preview:
+            # Two paths, one element: "<pid>__zero" with __h / __v parts.
+            _guide_hit(ax.axhline, 0, f"t_{pid}__zero__h")
+            _guide_hit(ax.axvline, 0, f"t_{pid}__zero__v")
 
     for s in p.get("series", []):
         xs = _resolve(s["x"], arrays)

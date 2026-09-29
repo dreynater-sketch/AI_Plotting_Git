@@ -303,6 +303,9 @@
                 <input type="number" id="f-framewidth" min="0" max="8" step="0.1">
               </label>
             </div>
+            <label class="check">
+              <input type="checkbox" id="f-zero"> Lines through zero
+            </label>
           </div>
 
           <p class="note" id="axes-note" hidden></p>
@@ -367,6 +370,44 @@
             </span>
           </label>
           <p class="note">Its numbers are listed under the figure, on the right.</p>
+        </div>
+
+        <div id="guide-fields" hidden>
+          <div class="row">
+            <label class="field">
+              <span>Color</span>
+              <span class="colorwrap">
+                <input type="color" id="f-guide-color">
+                <input type="text" id="f-guide-color-hex" spellcheck="false">
+              </span>
+            </label>
+            <label class="field">
+              <span>Look</span>
+              <select id="f-guide-ls">
+                <option value="-">── Solid</option>
+                <option value="--">- - Dashed</option>
+                <option value=":">····· Dotted</option>
+                <option value="-.">-·- Dash-dot</option>
+              </select>
+            </label>
+          </div>
+          <div class="row">
+            <label class="field">
+              <span>Line thickness</span>
+              <input type="number" id="f-guide-lw" min="0" max="10" step="0.1">
+            </label>
+            <label class="field" id="guide-pos-field">
+              <span><span id="f-guide-pos-name">Across at</span> <em id="f-guide-pos-unit"></em></span>
+              <input type="number" id="f-guide-pos" step="any">
+            </label>
+          </div>
+          <p class="note">A straight line across the plot, to guide the eye.</p>
+        </div>
+
+        <div id="zero-fields" hidden>
+          <p class="note">Thin grey lines through zero, across and up the plot.
+            <b>Delete</b> hides them. Bring them back from the plot box
+            (“Lines through zero”).</p>
         </div>
 
         <div id="arrow-fields" hidden>
