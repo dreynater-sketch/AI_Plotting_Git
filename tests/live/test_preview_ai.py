@@ -39,10 +39,16 @@ try:
         check(ctx.get(H + "/api/admin/ai-ping").status == 401, "signed out: ai-ping refused")
         check(login().ok, "temp user logs in")
         check(ctx.get(H + "/api/admin/ai-ping").status == 403, "regular member: ai-ping refused")
+        check(ctx.get(H + "/api/auth/me").json().get("assistant") is False, "regular member: no AI box")
+        r = ctx.post(H + "/api/assistant/start", headers={"Content-Type": "application/json"},
+                     data=json.dumps({"name": "zz_ai", "csv": "x,y\n1,2\n2,3\n", "idea": "plot it"}))
+        check(r.status == 403, f"regular member: can't start an AI figure ({r.status})")
+        check(ctx.post(H + "/api/assistant/step/zz_ai").status == 403, "regular member: can't run a step")
 
         admin("PUT", f"/users/{uid}", {"app_metadata": {"figforge_admin": True,
                                                         "provider": "email", "providers": ["email"]}})
         login()   # the server caches users per token for 5 min -- a fresh login sees the admin flag
+        check(ctx.get(H + "/api/auth/me").json().get("assistant") is True, "admin: AI box offered")
         r = ctx.get(H + "/api/admin/ai-ping", timeout=90000)
         body = r.json() if r.headers.get("content-type", "").startswith("application/json") else {}
         check(r.ok and body.get("ok"), f"admin: Claude answered ({r.status})")
