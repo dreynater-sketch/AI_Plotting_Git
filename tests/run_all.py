@@ -33,6 +33,7 @@ SUITES = [
     # (file, needs the local server)
     ("test_codesync.py", False),
     ("test_ops.py", False),
+    ("test_assistant.py", False),
     ("test_undo_delete.py", True),
     ("test_box.py", True),
     ("test_guides.py", True),

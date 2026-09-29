@@ -37,11 +37,14 @@ then requires a signed-in user and works in that user's own project space:
     POST /api/admin/invite     (admins) {email} -> Supabase emails an invite link
     POST /api/admin/invite-link  (admins) {email} -> the invite link itself, no email sent
     GET  /api/admin/ai-ping    (admins) one tiny Claude request: is the key working?
+    POST /api/assistant/start  (admins) {name, csv, filename, idea} -> a new AI session
+    POST /api/assistant/step/<name>  (admins) one Claude round -> {done, events, reply, cost_usd}
 
 Sign-up is invite-only unless FIGFORGE_OPEN_SIGNUP=1 is set.
 
-Locally this binds 127.0.0.1 and talks to nothing external; there is no AI in
-this build. The same Handler also runs as FigForge's Vercel function
+Locally this binds 127.0.0.1 and talks to nothing external, except the AI
+assistant (assistant.py) when ANTHROPIC_API_KEY is set: then /api/assistant/*
+calls Claude. Hosted, only admins may use it. The same Handler also runs as FigForge's Vercel function
 (api/index.py), where projects live in a private Supabase Storage bucket
 instead of figures/ -- see figforge/project.py. Vercel caps request and response bodies
 at 4.5 MB and a full undo history can approach that, so /api/history travels
@@ -264,6 +267,11 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/project/from-csv":
             return self._project_from_csv()
 
+        if path == "/api/assistant/start":
+            return self._assistant_start()
+        if path.startswith("/api/assistant/step/"):
+            return self._assistant_step(path[len("/api/assistant/step/"):])
+
         if path.startswith("/api/ops/"):
             fig = self._figure(path[len("/api/ops/"):])
             if not fig:
@@ -350,6 +358,15 @@ class Handler(BaseHTTPRequestHandler):
                 return self._error(404, "this project's source CSV is missing")
             spec, arrays = csvimport.build(fig.name, text, source["x"], source["ys"],
                                            source.get("plot", "line"), source.get("filename", ""))
+            fig.save_arrays(arrays)
+            return self._finish_rebuild(fig, spec)
+        if source.get("kind") == "csv-panels":   # made by the assistant
+            text = fig.load_source_csv()
+            if text is None:
+                return self._error(404, "this project's source CSV is missing")
+            spec, arrays = csvimport.build_panels(fig.name, text, source["panels"],
+                                                  source.get("filename", ""),
+                                                  source.get("figure_title", ""))
             fig.save_arrays(arrays)
             return self._finish_rebuild(fig, spec)
         from figforge import analyze, spec_builder
@@ -522,12 +539,14 @@ class Handler(BaseHTTPRequestHandler):
         return True
 
     def _auth_me(self):
+        from figforge import assistant
         if AUTH is None:
-            return self._json({"mode": "local"})
+            return self._json({"mode": "local", "assistant": assistant.configured()})
         user = self._current_user()
         if not user:
             return self._json({"mode": "online", "user": None, "invite_only": not OPEN_SIGNUP}, 401)
-        return self._json({"mode": "online", "user": public_user(user), "invite_only": not OPEN_SIGNUP})
+        return self._json({"mode": "online", "user": public_user(user), "invite_only": not OPEN_SIGNUP,
+                           "assistant": assistant.configured() and is_admin(user)})
 
     def _require_admin(self):
         if AUTH is None:
@@ -557,6 +576,80 @@ class Handler(BaseHTTPRequestHandler):
                  "admin": is_admin(u)} for u in users]
         rows.sort(key=lambda r: (r["status"] != "invited", (r["email"] or "").lower()))
         return self._json({"users": rows})
+
+    # ------------------------------------------------------------ assistant
+    def _assistant_allowed(self):
+        """Every call spends real money on the API key: admins only when
+        hosted; locally it's the computer's owner."""
+        from figforge import assistant
+        if not assistant.configured():
+            self._error(503, "the AI assistant isn't set up (ANTHROPIC_API_KEY is missing)")
+            return False
+        if AUTH is None:
+            return True
+        return bool(self._require_admin())
+
+    def _assistant_start(self):
+        if not self._assistant_allowed():
+            return
+        from figforge import assistant
+        body = self._body()
+        if not isinstance(body, dict) or not isinstance(body.get("csv"), str):
+            return self._error(400, "expected {name, csv, filename, idea}")
+        name = str(body.get("name") or "")
+        idea = str(body.get("idea") or "").strip()
+        if not NAME_RE.match(name):
+            return self._error(400, "names may use letters, digits, - and _ only")
+        if self.store.project_exists(name):
+            return self._error(409, f"a project named '{name}' already exists")
+        if not idea:
+            return self._error(400, "describe the figure you want")
+        if len(idea) > 2000:
+            return self._error(400, "please keep the description under 2000 characters")
+        try:
+            state = assistant.start(body["csv"], str(body.get("filename") or ""), idea)
+        except csvimport.CSVError as e:
+            return self._error(400, str(e))
+        # Until the first figure is drawn the project has no spec.json, so
+        # it stays out of the project list.
+        fig = Figure(name, self.store)
+        fig.save_source_csv(body["csv"])
+        fig.save_assistant(state)
+        return self._json({"name": name})
+
+    def _assistant_step(self, name):
+        if not self._assistant_allowed():
+            return
+        from figforge import assistant
+        import anthropic
+        if not NAME_RE.match(name or ""):
+            return self._error(404, "unknown figure")
+        fig = Figure(name, self.store)
+        state = fig.load_assistant()
+        csv_text = fig.load_source_csv()
+        if state is None or csv_text is None:
+            return self._error(404, "no AI session for that project")
+        try:
+            state, spec, events = assistant.step(state, fig, csv_text)
+        except anthropic.AuthenticationError:
+            return self._error(502, "Claude rejected the API key (check ANTHROPIC_API_KEY)")
+        except anthropic.RateLimitError:
+            return self._error(503, "Claude is busy (rate limited) - try again in a minute")
+        except anthropic.APITimeoutError:
+            return self._error(504, "Claude took too long on this step - try again")
+        except anthropic.APIStatusError as e:
+            return self._error(502, f"Claude error {e.status_code}: {e.message}")
+        except anthropic.APIConnectionError:
+            return self._error(502, "couldn't reach Claude from the server")
+        if spec is not None:
+            spec["rev"] = int(spec.get("rev", 0)) + 1
+            payload = self._payload(fig, spec)
+            fig.save_spec(spec)
+            fig.write_outputs(payload["svg"], codegen.generate(spec))
+        fig.save_assistant(state)
+        return self._json({"done": state["done"], "events": events, "reply": state["reply"],
+                           "created": state["created"], "steps": state["steps"],
+                           "cost_usd": state["cost_usd"]})
 
     def _admin_ai_ping(self):
         # Admin-only: every call spends real (if tiny) money on the API key.

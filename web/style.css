@@ -666,6 +666,26 @@ button.primary:hover:not(:disabled) { background: #1a5fcc; border-color: #1a5fcc
 .csv-cols td:nth-child(2) { color: var(--ink-soft); font-family: var(--mono); font-size: 11.5px; }
 .csv-cols th:nth-child(n+3), .csv-cols td:nth-child(n+3) { text-align: center; width: 36px; }
 .csv-cols tr.muted td { color: #a4a9ae; }
+/* AI assistant inside the new-figure dialog */
+.ai-box {
+  margin: 4px 0 14px; padding: 10px 12px;
+  border: 1px solid #e3d3f5; border-radius: var(--radius); background: #faf6ff;
+}
+.ai-box textarea {
+  width: 100%; resize: vertical; font: inherit; font-size: 13px;
+  padding: 6px 8px; border: 1px solid var(--line); border-radius: 5px;
+}
+.ai-actions { display: flex; align-items: center; gap: 10px; }
+.ai-actions .muted { font-size: 12px; color: var(--ink-soft); }
+.ai-run { margin-top: 10px; }
+.ai-log { margin: 0; padding-left: 20px; font-size: 12.5px; color: var(--ink-soft); }
+.ai-log li { margin: 2px 0; }
+.ai-log li.now { color: var(--accent-ink); }
+.ai-reply {
+  margin: 10px 0 0; padding: 10px 12px; font-size: 13px; line-height: 1.5;
+  background: var(--bg); border-radius: var(--radius);
+}
+.ai-reply small { display: block; margin-top: 6px; color: var(--ink-soft); font-size: 11.5px; }
 .csv-msg { min-height: 1.2em; margin: 8px 0 0; font-size: 12.5px; color: var(--ink-soft); }
 .csv-msg.err { color: var(--danger); }
 .modal-foot { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }

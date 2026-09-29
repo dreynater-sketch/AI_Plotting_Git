@@ -336,6 +336,18 @@ class Figure:
     def clear_script(self):
         self.store.delete(self._rel("custom_figure.json"))
 
+    def load_assistant(self):
+        """The assistant's conversation for this figure (assistant.py), if any."""
+        raw = self.store.read(self._rel("assistant.json"))
+        try:
+            return json.loads(raw) if raw else None
+        except ValueError:
+            return None
+
+    def save_assistant(self, state):
+        self.store.write(self._rel("assistant.json"),
+                         json.dumps(state, ensure_ascii=False).encode("utf-8"))
+
     def save_source_csv(self, text):
         """The CSV a general project was made from, kept for Rebuild."""
         self.store.write(self._rel("data/source.csv"), text.encode("utf-8"))

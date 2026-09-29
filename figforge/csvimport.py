@@ -110,6 +110,12 @@ def inspect(text):
 
 def _limits(arrays, log=False):
     vals = np.concatenate([a[~np.isnan(a)] for a in arrays])
+    if log:
+        vals = vals[vals > 0]
+        if not vals.size:
+            raise CSVError("log scale needs values above zero")
+        lo, hi = float(vals.min()), float(vals.max())
+        return [lo / 1.3, hi * 1.3]
     lo, hi = float(vals.min()), float(vals.max())
     if lo == hi:
         pad = abs(lo) * 0.1 or 1.0
@@ -118,62 +124,103 @@ def _limits(arrays, log=False):
     return [round(lo - pad, 12), round(hi + pad, 12)]
 
 
+MAX_PANELS = 4
+SCALES = ("linear", "log")
+
+
 def build(project, text, x, ys, kind="line", filename=""):
-    """-> (spec, arrays). x: a column index; ys: column indices to plot."""
+    """-> (spec, arrays). x: a column index; ys: column indices to plot.
+    The one-panel figure the New-from-CSV dialog makes."""
+    spec, arrays = build_panels(project, text, [{"x": x, "ys": ys, "kind": kind}], filename)
+    # Rebuild reads x / ys / plot for a dialog-made figure.
+    spec["source"] = {"kind": "csv", "file": "data/source.csv", "x": x,
+                      "ys": spec["source"]["panels"][0]["ys"], "plot": kind, "filename": filename}
+    return spec, arrays
+
+
+def build_panels(project, text, panels, filename="", figure_title=""):
+    """-> (spec, arrays) for 1-4 panels side by side. Each panel is a dict:
+    x, ys (column indices), and optionally kind, title, xlabel, ylabel,
+    xscale, yscale -- None or missing picks the default (column names as
+    labels, the file name as the first panel's title)."""
     names, cols, _ = parse(text)
-    if kind not in PLOT_KINDS:
-        raise CSVError("unknown plot type")
-    if not isinstance(x, int) or not 0 <= x < len(cols) or cols[x] is None:
-        raise CSVError("pick a numeric column for x")
-    ys = [y for y in ys if isinstance(y, int) and 0 <= y < len(cols) and y != x]
-    if not ys:
-        raise CSVError("pick at least one numeric column to plot")
-    if any(cols[y] is None for y in ys):
-        raise CSVError("only numeric columns can be plotted")
-
-    arrays = {"x": cols[x]}
-    series = []
-    for n, y in enumerate(ys):
-        key = f"y{n}"
-        arrays[key] = cols[y]
-        colour = PALETTE[n % len(PALETTE)]
-        style = {"color": colour}
-        if kind == "line":
-            style.update(lw=1.6)
-        elif kind == "scatter":
-            style.update(ls="none", marker="o", ms=4)
-        else:
-            style.update(lw=1.4, marker="o", ms=3.5)
-        series.append({"id": f"a_s{n}", "x": "x", "y": key, "label": _plain(names[y]), "style": style})
-
+    if not isinstance(panels, list) or not 1 <= len(panels) <= MAX_PANELS:
+        raise CSVError(f"a figure has 1 to {MAX_PANELS} panels")
     stem = re.sub(r"\.[A-Za-z0-9]+$", "", filename or project)
-    panel = {
-        "id": "a",
-        "title": {"text": _plain(stem), "loc": "left", "size": 14, "color": "#000000"},
-        "xlabel": {"text": _plain(names[x]), "size": 13, "color": "#000000"},
-        "ylabel": {"text": _plain(names[ys[0]]) if len(ys) == 1 else "value", "size": 13, "color": "#000000"},
-        "xlim": _limits([cols[x]]),
-        "ylim": _limits([cols[y] for y in ys]),
-        "xscale": "linear", "yscale": "linear", "aspect": "auto",
-        "xtick_size": 11, "ytick_size": 11, "frame_lw": 0.8,
-        "legend": {"loc": "best", "frameon": False, "size": 10, "xy": None} if len(ys) > 1 else None,
-        "series": series,
-        "arrows": [],
-        "texts": [],
-    }
+    arrays, out, source = {}, [], []
+    colour = 0
+    for i, pn in enumerate(panels):
+        pid = "abcd"[i]
+        x, kind = pn.get("x"), pn.get("kind") or "line"
+        where = f"panel ({pid}): " if len(panels) > 1 else ""
+        if kind not in PLOT_KINDS:
+            raise CSVError(f"{where}unknown plot type '{kind}'")
+        if not isinstance(x, int) or not 0 <= x < len(cols) or cols[x] is None:
+            raise CSVError(f"{where}pick a numeric column for x")
+        ys = [y for y in pn.get("ys") or [] if isinstance(y, int) and 0 <= y < len(cols) and y != x]
+        if not ys:
+            raise CSVError(f"{where}pick at least one numeric column to plot")
+        if any(cols[y] is None for y in ys):
+            raise CSVError(f"{where}only numeric columns can be plotted")
+        xscale, yscale = pn.get("xscale") or "linear", pn.get("yscale") or "linear"
+        if xscale not in SCALES or yscale not in SCALES:
+            raise CSVError(f"{where}scale must be linear or log")
+
+        # Panel (a) keeps the plain "x" / "y0" names older projects use.
+        pre = "" if i == 0 else f"{pid}_"
+        arrays[pre + "x"] = cols[x]
+        series = []
+        for n, y in enumerate(ys):
+            key = f"{pre}y{n}"
+            arrays[key] = cols[y]
+            style = {"color": PALETTE[colour % len(PALETTE)]}
+            colour += 1
+            if kind == "line":
+                style.update(lw=1.6)
+            elif kind == "scatter":
+                style.update(ls="none", marker="o", ms=4)
+            else:
+                style.update(lw=1.4, marker="o", ms=3.5)
+            series.append({"id": f"{pid}_s{n}", "x": pre + "x", "y": key,
+                           "label": _plain(names[y]), "style": style})
+
+        def text_or(value, default):
+            return default if value is None else str(value)
+
+        title = text_or(pn.get("title"), _plain(stem) if i == 0 else "")
+        ylabel = text_or(pn.get("ylabel"), _plain(names[ys[0]]) if len(ys) == 1 else "value")
+        out.append({
+            "id": pid,
+            "title": {"text": title, "loc": "left", "size": 14, "color": "#000000"},
+            "xlabel": {"text": text_or(pn.get("xlabel"), _plain(names[x])), "size": 13, "color": "#000000"},
+            "ylabel": {"text": ylabel, "size": 13, "color": "#000000"},
+            "xlim": _limits([cols[x]], xscale == "log"),
+            "ylim": _limits([cols[y] for y in ys], yscale == "log"),
+            "xscale": xscale, "yscale": yscale, "aspect": "auto",
+            "xtick_size": 11, "ytick_size": 11, "frame_lw": 0.8,
+            "legend": {"loc": "best", "frameon": False, "size": 10, "xy": None} if len(ys) > 1 else None,
+            "series": series,
+            "arrows": [],
+            "texts": [],
+        })
+        source.append({"x": x, "ys": ys, "kind": kind, "title": pn.get("title"),
+                       "xlabel": pn.get("xlabel"), "ylabel": pn.get("ylabel"),
+                       "xscale": xscale, "yscale": yscale})
+
+    n = len(out)
     spec = {
         "figure_id": project,
         "rev": 1,
-        "size_in": [8.0, 5.0],
+        "size_in": [8.0, 5.0] if n == 1 else [min(4.6 * n, 18.0), 4.6],
         "dpi": 200,
         "data_ref": "data/curves.npz",
-        # How to rebuild this figure from its raw data (Rebuild button).
-        "source": {"kind": "csv", "file": "data/source.csv", "x": x, "ys": ys,
-                   "plot": kind, "filename": filename},
-        "suptitle": {"text": "", "size": 16, "y": 0.98, "color": "#000000"},
+        # How to rebuild this figure from its raw data (Start over button).
+        "source": {"kind": "csv-panels", "file": "data/source.csv", "panels": source,
+                   "filename": filename, "figure_title": figure_title or ""},
+        "suptitle": {"text": figure_title or "", "size": 16, "y": 0.98, "color": "#000000"},
         "layout": {"tight": True, "rect": [0, 0, 1, 1]},
         "rcparams": {"font.size": 12},
         "derived": {},
-        "panels": [panel],
+        "panels": out,
     }
     return spec, arrays

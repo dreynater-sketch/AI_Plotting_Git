@@ -2309,6 +2309,8 @@ $('project-select').onchange = (e) => {
  * parses), lists its columns, and builds the figure from the picks. */
 
 let csvText = null, csvFilename = '';
+let assistantOn = false;   // /api/auth/me: the AI assistant is set up and you may use it
+let aiRunning = false;
 
 function csvMessage(msg, cls = '') {
   $('csv-msg').textContent = msg;
@@ -2323,6 +2325,10 @@ function openCsvDialog() {
   $('csv-drop-text').innerHTML = '<b>Choose a CSV file</b> or drop it here<br>' +
     '<em>comma, semicolon, tab or space separated · up to 4 MB</em>';
   csvMessage('');
+  $('ai-idea').value = '';
+  $('ai-run').hidden = true;
+  $('csv-create').textContent = 'Create figure';   // an AI run turns it into "Open the figure"
+  $('csv-create').onclick = createFromCsv;
   $('csv-modal').hidden = false;
 }
 
@@ -2367,6 +2373,7 @@ async function loadCsvFile(file) {
     }).join('');
     $('csv-name').value = projectNameFrom(file.name);
     $('csv-pick').hidden = false;
+    $('ai-box').hidden = !assistantOn;
     csvMessage(numeric.length < 2 ? 'Only one column holds numbers, so there is nothing to plot against it.' : '',
                numeric.length < 2 ? 'err' : '');
     refreshCsvCreate();
@@ -2385,8 +2392,77 @@ function csvChoice() {
 
 function refreshCsvCreate() {
   const { x, ys } = csvChoice();
-  $('csv-create').disabled = !(csvText && x !== null && ys.length && /^[A-Za-z0-9_-]+$/.test($('csv-name').value));
+  const nameOk = /^[A-Za-z0-9_-]+$/.test($('csv-name').value);
+  $('csv-create').disabled = aiRunning || !(csvText && x !== null && ys.length && nameOk);
+  $('ai-make').disabled = aiRunning || !(csvText && nameOk && $('ai-idea').value.trim());
 }
+$('ai-idea').addEventListener('input', refreshCsvCreate);
+
+/* ✨ Make it with AI: start a session, then ask the server for one Claude
+ * round at a time until it's done, listing what happened after each. */
+$('ai-make').onclick = async () => {
+  const name = $('csv-name').value.trim();
+  const log = $('ai-log');
+  const line = (text, cls = '') => {
+    log.querySelector('li.now')?.remove();
+    const li = document.createElement('li');
+    li.textContent = text;
+    li.className = cls;
+    log.appendChild(li);
+    return li;
+  };
+  const post = async (url, body) => {
+    const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                 body: JSON.stringify(body ?? {}) });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw Object.assign(new Error(d.error || r.statusText), { status: r.status });
+    return d;
+  };
+  aiRunning = true;
+  refreshCsvCreate();
+  log.innerHTML = '';
+  $('ai-reply').hidden = true;
+  $('ai-run').hidden = false;
+  csvMessage('');
+  try {
+    await post('/api/assistant/start', { name, csv: csvText, filename: csvFilename,
+                                         idea: $('ai-idea').value });
+    let d = null, retries = 0;
+    while (!d?.done) {
+      line('Claude is thinking…', 'now');
+      try {
+        d = await post(`/api/assistant/step/${encodeURIComponent(name)}`);
+      } catch (e) {
+        // A slow or busy step saved nothing, so it can simply run again.
+        if ([503, 504].includes(e.status) && retries++ < 2) continue;
+        throw e;
+      }
+      for (const ev of d.events) line(ev);
+    }
+    log.querySelector('li.now')?.remove();
+    const reply = $('ai-reply');
+    reply.textContent = d.reply;
+    const cost = document.createElement('small');
+    cost.textContent = `${d.steps} step${d.steps === 1 ? '' : 's'} · cost $${d.cost_usd.toFixed(3)}`;
+    reply.appendChild(cost);
+    reply.hidden = false;
+    if (d.created) {
+      csvMessage('');
+      $('csv-create').textContent = 'Open the figure';
+      $('csv-create').disabled = false;
+      $('csv-create').onclick = () => openProject(name);
+    } else {
+      csvMessage('No figure was made.', 'err');
+    }
+  } catch (e) {
+    log.querySelector('li.now')?.remove();
+    csvMessage(`The AI couldn't finish: ${e.message}`, 'err');
+  } finally {
+    aiRunning = false;
+    if ($('csv-create').textContent !== 'Open the figure') refreshCsvCreate();
+    else $('ai-make').disabled = true;
+  }
+};
 
 $('btn-new').onclick = openCsvDialog;
 $('csv-close').onclick = closeCsvDialog;
@@ -2410,7 +2486,7 @@ const drop = $('csv-drop');
 ['dragleave', 'drop'].forEach((t) => drop.addEventListener(t, (e) => { e.preventDefault(); drop.classList.remove('over'); }));
 drop.addEventListener('drop', (e) => loadCsvFile(e.dataTransfer.files[0]));
 
-$('csv-create').onclick = async () => {
+async function createFromCsv() {
   const { x, ys } = csvChoice();
   const name = $('csv-name').value.trim();
   $('csv-create').disabled = true;
@@ -2427,7 +2503,8 @@ $('csv-create').onclick = async () => {
     csvMessage(e.message, 'err');
     refreshCsvCreate();
   }
-};
+}
+$('csv-create').onclick = createFromCsv;
 
 $('btn-saveas').onclick = async () => {
   const name = askName('Save a copy of this project as:', `${FIGURE}-copy`);
@@ -2708,6 +2785,7 @@ async function boot() {
   const r = await fetch('/api/auth/me');
   const me = await r.json().catch(() => ({ mode: 'local' }));
   inviteOnly = me.invite_only !== false;
+  assistantOn = !!me.assistant;
   if (link?.type === 'recovery') { showAuth('reset'); return; }
   if (link?.type === 'invite') { showAuth('welcome'); return; }
   if (me.mode === 'online') {

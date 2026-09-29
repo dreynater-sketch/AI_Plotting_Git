@@ -7,6 +7,7 @@
 import argparse
 import webbrowser
 
+from figforge.assistant import load_key_from_dotenv
 from figforge.server import serve
 
 
@@ -17,6 +18,7 @@ def main():
     ap.add_argument("--no-browser", action="store_true")
     args = ap.parse_args()
 
+    load_key_from_dotenv()   # the AI assistant's key, if .env has one
     if not args.no_browser:
         webbrowser.open(f"http://{args.host}:{args.port}/")
     serve(args.host, args.port)

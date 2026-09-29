@@ -461,6 +461,18 @@
     </label>
     <div id="csv-pick" hidden>
       <p class="csv-summary" id="csv-summary"></p>
+      <!-- AI assistant: only shown when it's set up and you may use it. -->
+      <div class="ai-box" id="ai-box" hidden>
+        <label class="field">
+          <span>✨ Describe the figure you want</span>
+          <textarea id="ai-idea" rows="3" spellcheck="true"
+            placeholder="e.g. Show how the signal decays over time for both samples, log scale on the side axis"></textarea>
+        </label>
+        <div class="ai-actions">
+          <button type="button" class="primary" id="ai-make" disabled>✨ Make it with AI</button>
+          <span class="muted">Or pick the columns yourself below.</span>
+        </div>
+      </div>
       <table class="csv-cols">
         <thead><tr><th>Column</th><th>Range</th><th title="Horizontal axis">x</th><th title="Plot these">y</th></tr></thead>
         <tbody id="csv-cols"></tbody>
@@ -479,6 +491,10 @@
           <input type="text" id="csv-name" spellcheck="false">
         </label>
       </div>
+    </div>
+    <div class="ai-run" id="ai-run" hidden>
+      <ol class="ai-log" id="ai-log"></ol>
+      <p class="ai-reply" id="ai-reply" hidden></p>
     </div>
     <p class="csv-msg" id="csv-msg" role="status"></p>
     <div class="modal-foot">

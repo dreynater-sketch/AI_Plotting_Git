@@ -44,6 +44,23 @@ def _obj(props, description=None):
 _ID = {"type": "string", "description": "An element id from describe_figure."}
 _PANEL = {"type": "string", "description": "A panel id from describe_figure, e.g. \"a\"."}
 _COLOR = {"type": "string", "description": "A matplotlib colour: \"#1f77b4\", \"black\", \"0.5\" (grey)."}
+# Strict mode allows at most 16 nullable (union-typed) parameters across all
+# tools, so optional *strings* say "unchanged" with a value instead of null:
+# "" for a colour, "keep" in an enum. Numbers stay nullable.
+_KEEP_COLOR = {"type": "string",
+               "description": "A matplotlib colour (\"#1f77b4\", \"black\", \"0.5\"), or \"\" to leave it unchanged."}
+
+
+def _keep_enum(values):
+    return {"type": "string", "enum": ["keep"] + list(values),
+            "description": "\"keep\" leaves it unchanged."}
+
+
+def _given(v):
+    """A value that means "change it": not null, "" or "keep"."""
+    return v is not None and v != "" and v != "keep"
+
+
 _COORDS = {"type": "string", "enum": ["data", "axes"],
            "description": "\"data\": x/y in the panel's data units. \"axes\": 0-1 across the panel box."}
 
@@ -69,7 +86,7 @@ TOOLS = [
                        "labels, the figure title. Pass null to leave a property unchanged.",
         "input_schema": _obj({"element_id": _ID,
                               "size": _nullable({"type": "number"}),
-                              "color": _nullable(_COLOR)}),
+                              "color": _KEEP_COLOR}),
     },
     {
         "name": "move_element",
@@ -83,7 +100,7 @@ TOOLS = [
         "description": "Add a new free text label to a panel. Returns the new label's id.",
         "input_schema": _obj({"panel_id": _PANEL, "text": {"type": "string"},
                               "x": {"type": "number"}, "y": {"type": "number"}, "coords": _COORDS,
-                              "size": _nullable({"type": "number"}), "color": _nullable(_COLOR)}),
+                              "size": _nullable({"type": "number"}), "color": _KEEP_COLOR}),
     },
     {
         "name": "delete_element",
@@ -97,7 +114,7 @@ TOOLS = [
                        "Pass null for anything to leave unchanged. Log scale needs positive limits.",
         "input_schema": _obj({"panel_id": _PANEL, "axis": {"type": "string", "enum": ["x", "y"]},
                               "min": _nullable({"type": "number"}), "max": _nullable({"type": "number"}),
-                              "scale": _nullable({"type": "string", "enum": ["linear", "log"]}),
+                              "scale": _keep_enum(["linear", "log"]),
                               "tick_size": _nullable({"type": "number"})}),
     },
     {
@@ -106,11 +123,10 @@ TOOLS = [
                        "draws markers only; marker \"none\" draws the line only; opacity is 0-1.",
         "input_schema": _obj({
             "series_id": _ID,
-            "color": _nullable(_COLOR),
+            "color": _KEEP_COLOR,
             "line_width": _nullable({"type": "number"}),
-            "line_style": _nullable({"type": "string", "enum": ["-", "--", ":", "-.", "none"]}),
-            "marker": _nullable({"type": "string",
-                                 "enum": ["none", "o", ".", "s", "^", "v", "D", "x", "+", "*"]}),
+            "line_style": _keep_enum(["-", "--", ":", "-.", "none"]),
+            "marker": _keep_enum(["none", "o", ".", "s", "^", "v", "D", "x", "+", "*"]),
             "marker_size": _nullable({"type": "number"}),
             "opacity": _nullable({"type": "number"}),
         }),
@@ -122,9 +138,9 @@ TOOLS = [
         "input_schema": _obj({
             "panel_id": _PANEL,
             "visible": {"type": "boolean"},
-            "location": _nullable({"type": "string", "enum": [
+            "location": _keep_enum([
                 "best", "upper right", "upper left", "lower left", "lower right", "right",
-                "center left", "center right", "lower center", "upper center", "center"]}),
+                "center left", "center right", "lower center", "upper center", "center"]),
             "font_size": _nullable({"type": "number"}),
             "frame": _nullable({"type": "boolean"}),
         }),
@@ -249,7 +265,7 @@ def _style_text(spec, a):
         raise OpError(f"'{a['element_id']}' isn't a text element")
     if a["size"] is not None:
         obj["size"] = _num(a["size"], "size", 4, 72)
-    if a["color"] is not None:
+    if _given(a["color"]):
         obj["color"] = _color(a["color"])
     return f"{a['element_id']} restyled"
 
@@ -280,7 +296,7 @@ def _add_label(spec, a):
     new = {"id": f"{p['id']}_label{n}", "text": _mathtext_ok(a["text"]),
            "xy": [_num(a["x"], "x"), _num(a["y"], "y")], "coords": a["coords"],
            "size": _num(a["size"], "size", 4, 72) if a["size"] is not None else 12,
-           "color": _color(a["color"]) if a["color"] is not None else "#000000",
+           "color": _color(a["color"]) if _given(a["color"]) else "#000000",
            "ha": "left", "va": "baseline"}
     p.setdefault("texts", []).append(new)
     return f"added label {new['id']}"
@@ -308,7 +324,7 @@ def _set_axis(spec, a):
         lim[1] = _num(a["max"], "max")
     if lim[0] == lim[1]:
         raise OpError("min and max can't be equal")
-    scale = a["scale"] or p.get(f"{ax}scale", "linear")
+    scale = a["scale"] if _given(a["scale"]) else p.get(f"{ax}scale", "linear")
     if scale == "log" and (lim[0] <= 0 or lim[1] <= 0):
         raise OpError("log scale needs both limits above zero")
     p[f"{ax}lim"], p[f"{ax}scale"] = lim, scale
@@ -322,13 +338,13 @@ def _style_series(spec, a):
     if kind != "series":
         raise OpError(f"'{a['series_id']}' isn't a curve")
     st = dict(s.get("style") or {})
-    if a["color"] is not None:
+    if _given(a["color"]):
         st["color"] = _color(a["color"])
     if a["line_width"] is not None:
         st["lw"] = _num(a["line_width"], "line_width", 0, 20)
-    if a["line_style"] is not None:
+    if _given(a["line_style"]):
         st["ls"] = a["line_style"]
-    if a["marker"] is not None:
+    if _given(a["marker"]):
         st["marker"] = "" if a["marker"] == "none" else a["marker"]
     if a["marker_size"] is not None:
         st["ms"] = _num(a["marker_size"], "marker_size", 0, 40)
@@ -344,7 +360,7 @@ def _set_legend(spec, a):
         p["legend"] = None
         return f"legend of panel {p['id']} hidden"
     lg = dict(p.get("legend") or {"loc": "best", "frameon": False, "size": 10, "xy": None})
-    if a["location"] is not None:
+    if _given(a["location"]):
         lg["loc"], lg["xy"] = a["location"], None
     if a["font_size"] is not None:
         lg["size"] = _num(a["font_size"], "font_size", 4, 48)
@@ -375,7 +391,8 @@ def _check_input(name, args):
     extra = set(args) - set(schema["properties"])
     missing = set(schema["properties"]) - set(args)
     if extra or missing:
-        raise OpError(f"unexpected {sorted(extra)} / missing {sorted(missing)} (pass null for 'unchanged')")
+        raise OpError(f"unexpected {sorted(extra)} / missing {sorted(missing)} "
+                      "(pass null, \"\" or \"keep\" for 'unchanged')")
 
 
 def describe(spec, arrays):
