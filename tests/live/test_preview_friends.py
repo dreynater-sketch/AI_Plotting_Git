@@ -78,7 +78,9 @@ try:
                 admin("DELETE", f"/users/{u['id']}")
 
         tools = ctx.request.get(H + "/api/assistant/tools").json()
-        check(tools["model"] == "claude-opus-5" and len(tools["tools"]) == 10, "deployed: assistant tool definitions served")
+        from figforge import ops
+        check(tools["model"] == "claude-opus-5" and [t["name"] for t in tools["tools"]] == [t["name"] for t in ops.TOOLS],
+              "deployed: assistant tool definitions served")
         r = ctx.request.post(H + "/api/ops/decay", data=json.dumps({"calls": [
             {"name": "set_axis", "input": {"panel_id": "a", "axis": "y", "min": 1, "max": 2000, "scale": "log", "tick_size": None}},
             {"name": "set_text", "input": {"element_id": "a__title", "text": "Decay (log scale)"}}]}),
