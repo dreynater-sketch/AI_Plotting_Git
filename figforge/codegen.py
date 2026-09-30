@@ -171,6 +171,18 @@ def _panel(p, i):
     L.append(f'ax.tick_params(axis="x", labelsize={p.get("xtick_size", 11)})')
     L.append(f'ax.tick_params(axis="y", labelsize={p.get("ytick_size", 11)})')
     L.append(f"for _sp in ax.spines.values(): _sp.set_linewidth({p.get('frame_lw', 0.8)})")
+    for key, side, xy, var in (("top_axis", "top", "x", "_top"), ("right_axis", "right", "y", "_right")):
+        sa = p.get(key)
+        if not sa:
+            continue
+        a, b = sa["scale"], sa["offset"]
+        L.append(f"# second scale on the {side}: {side} = {a!r} * {'bottom' if xy == 'x' else 'left'} + {b!r}")
+        L.append(f"{var} = ax.secondary_{xy}axis({_s(side)}, functions=(lambda v: {a!r} * v + {b!r}, "
+                 f"lambda v: (v - {b!r}) / {a!r}))")
+        L.append(f"{var}.tick_params(labelsize={p.get(f'{xy}tick_size', 11)})")
+        if sa.get("text"):
+            L.append(f"{var}.set_{xy}label({_s(sa['text'])}, fontsize={sa.get('size', 13)}, "
+                     f"color={_s(sa.get('color', 'black'))})")
 
     lg = p.get("legend")
     if lg and any(s.get("label") for s in p.get("series", [])):

@@ -348,6 +348,14 @@ class Figure:
         self.store.write(self._rel("assistant.json"),
                          json.dumps(state, ensure_ascii=False).encode("utf-8"))
 
+    def save_table(self, name, text):
+        """A table the assistant's sandbox produced (or an uploaded CSV)."""
+        self.store.write(self._rel(f"data/tables/{name}"), text.encode("utf-8"))
+
+    def load_table(self, name):
+        raw = self.store.read(self._rel(f"data/tables/{name}"))
+        return raw.decode("utf-8") if raw is not None else None
+
     def save_source_csv(self, text):
         """The CSV a general project was made from, kept for Rebuild."""
         self.store.write(self._rel("data/source.csv"), text.encode("utf-8"))

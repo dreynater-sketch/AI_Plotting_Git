@@ -26,6 +26,7 @@ nothing in it is executed.
 
 import ast
 import copy
+import math
 
 STYLE_KEYS = {"color", "lw", "linewidth", "ls", "linestyle", "marker", "ms",
               "markersize", "mew", "markeredgewidth", "mfc", "markerfacecolor",
@@ -168,6 +169,9 @@ def apply(code, spec, array_keys=()):
         for key, default in (("xscale", "linear"), ("yscale", "linear"), ("aspect", "auto")):
             if key not in pnl.saw:
                 pnl.p[key] = default
+        for key in ("top_axis", "right_axis"):
+            if key not in pnl.saw:
+                pnl.p.pop(key, None)
 
     for pnl in panels:
         for kind in ("texts", "series", "arrows"):
@@ -222,6 +226,9 @@ def _statement(node, new, panels, state, taken, array_keys):
         # _t = ax.text(...)
         if tname == "_t" and isinstance(node.value, ast.Call):
             return _call(node.value, new, state, taken, array_keys)
+        # _top = ax.secondary_xaxis('top', functions=(lambda v: a * v + b, ...))
+        if tname in _SECOND_VARS and isinstance(node.value, ast.Call):
+            return _second_axis(tname, node.value, state)
         raise Skip("variables aren't reflected in the figure")
     # for _sp in ax.spines.values(): _sp.set_linewidth(v)
     if isinstance(node, ast.For) and _name(node.iter.func if isinstance(node.iter, ast.Call) else node.iter) == "ax.spines.values" \
@@ -236,6 +243,87 @@ def _statement(node, new, panels, state, taken, array_keys):
     raise Skip({ast.For: "loops", ast.While: "loops", ast.If: "if-blocks",
                 ast.FunctionDef: "functions", ast.With: "with-blocks"}
                .get(type(node), "this kind of statement") + " aren't reflected in the figure")
+
+
+# variable -> (spec key, the axis method that makes it, its side, x or y)
+_SECOND_VARS = {"_top": ("top_axis", "ax.secondary_xaxis", "top", "x"),
+                "_right": ("right_axis", "ax.secondary_yaxis", "right", "y")}
+
+
+def _linear(lam, what):
+    """(scale, offset) of `lambda v: <linear expression in v>`, read from the
+    syntax tree -- only numbers, v, + - * / and unary minus; never executed."""
+    if not isinstance(lam, ast.Lambda) or len(lam.args.args) != 1:
+        raise Skip(f"{what}: expected `lambda v: a * v + b`")
+    var = lam.args.args[0].arg
+    ops = {ast.Add: lambda x, y: x + y, ast.Sub: lambda x, y: x - y,
+           ast.Mult: lambda x, y: x * y, ast.Div: lambda x, y: x / y}
+
+    def ev(n, v):
+        if isinstance(n, ast.Constant) and isinstance(n.value, (int, float)) \
+                and not isinstance(n.value, bool):
+            return float(n.value)
+        if isinstance(n, ast.Name) and n.id == var:
+            return v
+        if isinstance(n, ast.UnaryOp) and isinstance(n.op, (ast.USub, ast.UAdd)):
+            x = ev(n.operand, v)
+            return -x if isinstance(n.op, ast.USub) else x
+        if isinstance(n, ast.BinOp) and type(n.op) in ops:
+            return ops[type(n.op)](ev(n.left, v), ev(n.right, v))
+        raise Skip(f"{what}: only `a * v + b` style formulas are reflected in the figure")
+
+    try:
+        f0, f1, f2 = (ev(lam.body, v) for v in (0.0, 1.0, 2.0))
+    except ZeroDivisionError:
+        raise Skip(f"{what}: division by zero")
+    # 15 significant digits: drops float noise like 0.0020000000000000018.
+    scale, offset = float(f"{f1 - f0:.15g}"), float(f"{f0:.15g}")
+    if scale == 0 or abs(f2 - (2 * scale + offset)) > 1e-9 * max(1.0, abs(f2)):
+        raise Skip(f"{what}: the formula must be a straight line (a * v + b, a not 0)")
+    return scale, offset
+
+
+def _second_axis(var, call, state):
+    key, method, side, _ = _SECOND_VARS[var]
+    if _name(call.func) != method:
+        raise Skip(f"`{var} = ...` must be `{method}('{side}', functions=(...))`")
+    pnl = _panel(state)
+    if not call.args or _lit(call.args[0], "side") != side:
+        raise Skip(f"`{var}` goes on the {side}")
+    funcs = _kwargs(call).get("functions")
+    if not isinstance(funcs, ast.Tuple) or len(funcs.elts) != 2:
+        raise Skip("a second axis needs functions=(forward, inverse)")
+    scale, offset = _linear(funcs.elts[0], f"{side} axis")
+    old = pnl.old.get(key) or {}
+    sa = dict(old or {"text": "", "size": 13, "color": "#000000"})
+    sa.update(scale=scale, offset=offset, text="")
+    # Round-trip exactly: codegen wrote the stored floats; a*1 + b - b can
+    # differ from a in the last bit, so keep the stored value when it matches.
+    for k, v in (("scale", scale), ("offset", offset)):
+        if isinstance(old.get(k), (int, float)) and math.isclose(old[k], v, rel_tol=1e-12, abs_tol=1e-15):
+            sa[k] = old[k]
+    pnl.p[key] = sa
+    pnl.saw.add(key)
+    state.setdefault("second", {})[var] = (pnl, key)
+
+
+def _second_axis_call(var, call, state):
+    pnl, key = state.get("second", {}).get(var, (None, None))
+    if pnl is None:
+        raise Skip(f"`{var}` is used before `{var} = ax.secondary_...axis(...)`")
+    xy = _SECOND_VARS[var][3]
+    method = _name(call.func)[len(var) + 1:]
+    kw = _kwargs(call)
+    if method == "tick_params":
+        return   # follows the panel's own tick size
+    if method == f"set_{xy}label":
+        sa = pnl.p[key]
+        sa["text"] = _lit(call.args[0], "label text") if call.args else ""
+        for k, field, default in (("fontsize", "size", 13), ("color", "color", "black")):
+            if k in kw:
+                _put(sa, field, _lit(kw[k], k), default)
+        return
+    raise Skip(f"`{var}.{method}` isn't reflected in the figure")
 
 
 def _panel(state):
@@ -277,6 +365,8 @@ def _call(call, new, state, taken, array_keys):
         if "dpi" in kw:
             _put(new, "dpi", _num(_lit(kw["dpi"], "dpi"), "dpi"), 200)
         return
+    if name and name.split(".")[0] in _SECOND_VARS:
+        return _second_axis_call(name.split(".")[0], call, state)
     if name == "ax.add_patch":
         if len(args) != 1 or not isinstance(args[0], ast.Call) \
                 or _name(args[0].func) != "FancyArrowPatch":
@@ -484,7 +574,7 @@ def _diff(old, new, report):
                     report["removed"].append(f"({po['id']}) {kind[:-1]} “{_describe(before[i])}”")
         for key in ("title", "xlabel", "ylabel", "xlim", "ylim", "xscale", "yscale",
                     "aspect", "xtick_size", "ytick_size", "frame_lw", "legend",
-                    "hlines", "vlines", "zero_lines"):
+                    "hlines", "vlines", "zero_lines", "top_axis", "right_axis"):
             if po.get(key) != pn.get(key):
                 report["changed"].append(f"({po['id']}) {key.replace('_', ' ')}")
     for key in ("suptitle", "size_in", "rcparams", "layout", "dpi"):

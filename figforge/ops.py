@@ -146,6 +146,22 @@ TOOLS = [
         }),
     },
     {
+        "name": "set_second_axis",
+        "description": "A second scale on the top (for x) or right (for y) edge of a panel, for the "
+                       "same data in other units: second value = scale * main value + offset. E.g. "
+                       "channel along the bottom and energy on top with the detector calibration. "
+                       "show false removes it. Its label's id is \"<panel>__top_axis\" or "
+                       "\"<panel>__right_axis\" (set_text / style_text work on it).",
+        "input_schema": _obj({"panel_id": _PANEL, "side": {"type": "string", "enum": ["top", "right"]},
+                              "show": {"type": "boolean"}, "label": {"type": "string"},
+                              "scale": {"type": "number"}, "offset": {"type": "number"}}),
+    },
+    {
+        "name": "set_font",
+        "description": "The typeface for all text in the figure.",
+        "input_schema": _obj({"family": {"type": "string", "enum": ["sans-serif", "serif", "monospace"]}}),
+    },
+    {
         "name": "set_figure_size",
         "description": "The whole figure's size in inches (1-40 each way).",
         "input_schema": _obj({"width_in": {"type": "number"}, "height_in": {"type": "number"}}),
@@ -179,6 +195,10 @@ def _find(spec, eid):
         p = _panel(spec, pid)
         if part in ("title", "xlabel", "ylabel"):
             return part, p.setdefault(part, {}), p
+        if part in ("top_axis", "right_axis"):
+            if not p.get(part):
+                raise OpError(f"panel {pid} has no {part.replace('_', ' ')} -- add it with set_second_axis")
+            return part, p[part], p
         if part == "legend":
             return "legend", p.get("legend"), p
     for p in spec["panels"]:
@@ -211,6 +231,14 @@ def _mathtext_ok(text):
 
 # -------------------------------------------------------------- operations
 
+def _second_desc(p, key):
+    sa = p.get(key)
+    if not sa:
+        return None
+    return {"label_id": f"{p['id']}__{key}", "label": sa.get("text", ""),
+            "scale": sa["scale"], "offset": sa["offset"]}
+
+
 def _describe(spec, arrays):
     def rng(key):
         a = arrays.get(key) if isinstance(key, str) else None
@@ -220,6 +248,7 @@ def _describe(spec, arrays):
         return [round(float(good.min()), 6), round(float(good.max()), 6)] if good.size else None
 
     out = {"size_in": spec.get("size_in"),
+           "font": (spec.get("rcparams") or {}).get("font.family", "sans-serif"),
            "title": (spec.get("suptitle") or {}).get("text", ""),
            "panels": []}
     for p in spec["panels"]:
@@ -230,6 +259,8 @@ def _describe(spec, arrays):
                        "min": p["xlim"][0], "max": p["xlim"][1], "scale": p.get("xscale", "linear")},
             "y_axis": {"label_id": f"{p['id']}__ylabel", "label": (p.get("ylabel") or {}).get("text", ""),
                        "min": p["ylim"][0], "max": p["ylim"][1], "scale": p.get("yscale", "linear")},
+            "top_axis": _second_desc(p, "top_axis"),
+            "right_axis": _second_desc(p, "right_axis"),
             "legend": None if not p.get("legend") else {
                 "id": f"{p['id']}__legend", "location": p["legend"].get("xy") or p["legend"].get("loc", "best"),
                 "font_size": p["legend"].get("size", 10), "frame": p["legend"].get("frameon", False)},
@@ -247,12 +278,15 @@ def _describe(spec, arrays):
     return out
 
 
+_TEXT_KINDS = ("text", "title", "xlabel", "ylabel", "suptitle", "top_axis", "right_axis")
+
+
 def _set_text(spec, a):
     kind, obj, _ = _find(spec, a["element_id"])
     text = _mathtext_ok(a["text"])
     if kind == "series":
         obj["label"] = text
-    elif kind in ("text", "title", "xlabel", "ylabel", "suptitle"):
+    elif kind in _TEXT_KINDS:
         obj["text"] = text
     else:
         raise OpError(f"'{a['element_id']}' has no text to set")
@@ -261,7 +295,7 @@ def _set_text(spec, a):
 
 def _style_text(spec, a):
     kind, obj, _ = _find(spec, a["element_id"])
-    if kind not in ("text", "title", "xlabel", "ylabel", "suptitle"):
+    if kind not in _TEXT_KINDS:
         raise OpError(f"'{a['element_id']}' isn't a text element")
     if a["size"] is not None:
         obj["size"] = _num(a["size"], "size", 4, 72)
@@ -372,6 +406,36 @@ def _set_legend(spec, a):
     return f"legend of panel {p['id']} updated{note}"
 
 
+def _set_second_axis(spec, a):
+    p = _panel(spec, a["panel_id"])
+    key = "top_axis" if a["side"] == "top" else "right_axis"
+    if not a["show"]:
+        p.pop(key, None)
+        return f"panel {p['id']}: {a['side']} axis removed"
+    scale = _num(a["scale"], "scale")
+    if scale == 0:
+        raise OpError("scale can't be 0")
+    old = p.get(key) or {"size": 13, "color": "#000000"}
+    p[key] = {**old, "text": _mathtext_ok(a["label"]), "scale": scale,
+              "offset": _num(a["offset"], "offset")}
+    return f"panel {p['id']}: {a['side']} axis = {scale} * value + {p[key]['offset']} (label id {p['id']}__{key})"
+
+
+def _set_font(spec, a):
+    rc = dict(spec.get("rcparams") or {})
+    if a["family"] == "sans-serif":
+        rc.pop("font.family", None)
+    else:
+        rc["font.family"] = a["family"]
+    # Math ($...$) matches the text: Computer Modern-like for serif.
+    if a["family"] == "serif":
+        rc["mathtext.fontset"] = "dejavuserif"
+    else:
+        rc.pop("mathtext.fontset", None)
+    spec["rcparams"] = rc
+    return f"font is now {a['family']}"
+
+
 def _set_size(spec, a):
     spec["size_in"] = [_num(a["width_in"], "width_in", 1, 40), _num(a["height_in"], "height_in", 1, 40)]
     return f"figure is now {spec['size_in'][0]} x {spec['size_in'][1]} in"
@@ -379,7 +443,8 @@ def _set_size(spec, a):
 
 _HANDLERS = {"set_text": _set_text, "style_text": _style_text, "move_element": _move,
              "add_label": _add_label, "delete_element": _delete, "set_axis": _set_axis,
-             "style_series": _style_series, "set_legend": _set_legend, "set_figure_size": _set_size}
+             "style_series": _style_series, "set_legend": _set_legend, "set_figure_size": _set_size,
+             "set_second_axis": _set_second_axis, "set_font": _set_font}
 
 
 def _check_input(name, args):

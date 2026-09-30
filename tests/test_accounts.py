@@ -122,7 +122,10 @@ try:
         pg.click("#btn-saveas") if False else None
         r = ctx.request.post(B + "/api/project/duplicate", data=json.dumps({"from": "qcircle", "name": "bobs"}),
                              headers={"Content-Type": "application/json"})
-        check(r.ok and r.json()["figures"] == ["bobs", "qcircle"], "Bob's Save as lands in his space")
+        # A new account starts with every project in the local figures/ folder
+        # (the deployment's bundled ones), plus the copy just made.
+        seeded = sorted(n for n in os.listdir("figures") if os.path.exists(f"figures/{n}/spec.json"))
+        check(r.ok and r.json()["figures"] == sorted(seeded + ["bobs"]), "Bob's Save as lands in his space")
         ada_id = ada[0].split("/")[1]
         check(not any(o.startswith(f"users/{ada_id}/bobs") for o in objects()), "…not in Ada's")
 

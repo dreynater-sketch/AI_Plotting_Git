@@ -187,7 +187,7 @@ function resolve(id, source = spec) {
     if (!p) return null;
     return { id, kind: 'panel', obj: p, draggable: false, panel: pid };
   }
-  const m = id.match(/^(.+)__(title|xlabel|ylabel)$/);
+  const m = id.match(/^(.+)__(title|xlabel|ylabel|top_axis|right_axis)$/);
   if (m) {
     const p = source.panels.find((q) => q.id === m[1]);
     if (!p || !p[m[2]]) return null;
@@ -260,7 +260,7 @@ function allElements(source = spec) {
   const out = [];
   if (source.suptitle?.text) out.push(resolve('suptitle', source));
   for (const p of source.panels) {
-    for (const k of ['title', 'xlabel', 'ylabel']) {
+    for (const k of ['title', 'xlabel', 'ylabel', 'top_axis', 'right_axis']) {
       if (p[k]?.text) out.push(resolve(`${p.id}__${k}`, source));
     }
     out.push(resolve(`${p.id}__legend`, source));
@@ -280,12 +280,14 @@ function allElements(source = spec) {
 const KIND_LABEL = {
   suptitle: 'figure title', title: 'title', panel: 'plot box',
   xlabel: 'bottom label', ylabel: 'side label', text: 'label',
+  top_axis: 'top axis label', right_axis: 'right axis label',
   xticks: 'bottom numbers', yticks: 'side numbers', legend: 'legend',
   series: 'line', arrow: 'arrow', guide: 'guide line', zero: 'zero lines',
 };
 const KIND_PLURAL = {
   suptitle: 'figure titles', title: 'titles', panel: 'plot boxes',
   xlabel: 'bottom labels', ylabel: 'side labels', text: 'labels',
+  top_axis: 'top axis labels', right_axis: 'right axis labels',
   xticks: 'bottom numbers', yticks: 'side numbers', legend: 'legends',
   series: 'lines', arrow: 'arrows', guide: 'guide lines', zero: 'zero lines',
 };
@@ -305,7 +307,7 @@ const capitalize = (s) => s.charAt(0).toUpperCase() + s.slice(1);
  * mean re-laying-out the figure, so they're refused rather than guessed at.
  * Titles and axis labels are blanked, not removed, so their size/color
  * survive if the text is ever typed back. */
-const DELETABLE = new Set(['text', 'arrow', 'series', 'legend', 'guide', 'zero',
+const DELETABLE = new Set(['text', 'arrow', 'series', 'legend', 'guide', 'zero', 'top_axis', 'right_axis',
                            'title', 'xlabel', 'ylabel', 'suptitle']);
 
 /* ------------------------------------------- coordinate transformations */
@@ -1111,6 +1113,9 @@ const MATH_SYMBOLS = {
   leq: '≤', le: '≤', geq: '≥', ge: '≥', ll: '≪', gg: '≫', propto: '∝',
   partial: '∂', nabla: '∇', sqrt: '√', hbar: 'ħ', ell: 'ℓ', AA: 'Å',
   to: '→', rightarrow: '→', leftarrow: '←', leftrightarrow: '↔',
+  uparrow: '↑', downarrow: '↓', updownarrow: '↕', Rightarrow: '⇒', Leftarrow: '⇐',
+  Uparrow: '⇑', Downarrow: '⇓', nearrow: '↗', searrow: '↘', swarrow: '↙', nwarrow: '↖',
+  star: '⋆', bullet: '•', dagger: '†', checkmark: '✓', cdots: '⋯', ldots: '…', dots: '…',
   langle: '⟨', rangle: '⟩', prime: '′', perp: '⊥', parallel: '∥',
   ',': ' ', ';': ' ', ':': ' ', '!': '', quad: ' ', qquad: '  ', ' ': ' ',
   '%': '%', '$': '$', '{': '{', '}': '}', '_': '_', '#': '#', '&': '&',
@@ -1342,6 +1347,9 @@ function buildList() {
     if (p.title?.text) add(mathHtml(p.title.text), `${p.id}__title`, 'title', ICON.words, p.title);
     if (p.xlabel?.text) add(mathHtml(p.xlabel.text), `${p.id}__xlabel`, 'xlabel', ICON.words, p.xlabel);
     if (p.ylabel?.text) add(mathHtml(p.ylabel.text), `${p.id}__ylabel`, 'ylabel', ICON.words, p.ylabel);
+    for (const k of ['top_axis', 'right_axis']) {
+      if (p[k]?.text) add(mathHtml(p[k].text), `${p.id}__${k}`, k, ICON.words, p[k]);
+    }
     for (const t of p.texts || []) add(mathHtml(t.text), t.id, 'text', ICON.words, t);
     for (const sr of p.series || []) add(seriesName(sr), sr.id, 'series', seriesIcon(sr.style), sr);
     (p.arrows || []).forEach((ar, i) => add(
@@ -1362,7 +1370,8 @@ function buildList() {
 
 /* Kinds whose row shows user text, so it needs a word saying what it is.
  * Rows like "Plot box" already say it. */
-const TAGGED_KINDS = new Set(['suptitle', 'title', 'xlabel', 'ylabel', 'text', 'series', 'guide']);
+const TAGGED_KINDS = new Set(['suptitle', 'title', 'xlabel', 'ylabel', 'top_axis', 'right_axis',
+                              'text', 'series', 'guide']);
 
 const ICON = {
   words: '<b class="ico-words">Aa</b>',
@@ -1698,7 +1707,7 @@ function showXY() {
 
 document.addEventListener('keydown', (evt) => {
   if (!spec) return;  // signed out / still loading: nothing to edit yet
-  if (!$('csv-modal').hidden) return;  // the new-figure dialog has the keyboard
+  if (!$('csv-modal').hidden || !$('ai-modal').hidden) return;  // a dialog has the keyboard
   if (evt.key === 'Escape') { setSelection([]); return; }
 
   const typing = ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName);
@@ -2073,6 +2082,7 @@ function deleteSelection() {
     else if (s.kind === 'legend') p.legend = null;
     else if (s.kind === 'guide') p[`${s.axis}lines`] = p[`${s.axis}lines`].filter((l) => l !== s.obj);
     else if (s.kind === 'zero') p.zero_lines = false;
+    else if (s.kind === 'top_axis' || s.kind === 'right_axis') delete p[s.kind];  // the whole second scale
     else s.obj.text = '';
   }
   buildList();
@@ -2310,7 +2320,6 @@ $('project-select').onchange = (e) => {
 
 let csvText = null, csvFilename = '';
 let assistantOn = false;   // /api/auth/me: the AI assistant is set up and you may use it
-let aiRunning = false;
 
 function csvMessage(msg, cls = '') {
   $('csv-msg').textContent = msg;
@@ -2325,10 +2334,7 @@ function openCsvDialog() {
   $('csv-drop-text').innerHTML = '<b>Choose a CSV file</b> or drop it here<br>' +
     '<em>comma, semicolon, tab or space separated · up to 4 MB</em>';
   csvMessage('');
-  $('ai-idea').value = '';
-  $('ai-run').hidden = true;
-  $('csv-create').textContent = 'Create figure';   // an AI run turns it into "Open the figure"
-  $('csv-create').onclick = createFromCsv;
+
   $('csv-modal').hidden = false;
 }
 
@@ -2373,7 +2379,6 @@ async function loadCsvFile(file) {
     }).join('');
     $('csv-name').value = projectNameFrom(file.name);
     $('csv-pick').hidden = false;
-    $('ai-box').hidden = !assistantOn;
     csvMessage(numeric.length < 2 ? 'Only one column holds numbers, so there is nothing to plot against it.' : '',
                numeric.length < 2 ? 'err' : '');
     refreshCsvCreate();
@@ -2392,77 +2397,8 @@ function csvChoice() {
 
 function refreshCsvCreate() {
   const { x, ys } = csvChoice();
-  const nameOk = /^[A-Za-z0-9_-]+$/.test($('csv-name').value);
-  $('csv-create').disabled = aiRunning || !(csvText && x !== null && ys.length && nameOk);
-  $('ai-make').disabled = aiRunning || !(csvText && nameOk && $('ai-idea').value.trim());
+  $('csv-create').disabled = !(csvText && x !== null && ys.length && /^[A-Za-z0-9_-]+$/.test($('csv-name').value));
 }
-$('ai-idea').addEventListener('input', refreshCsvCreate);
-
-/* ✨ Make it with AI: start a session, then ask the server for one Claude
- * round at a time until it's done, listing what happened after each. */
-$('ai-make').onclick = async () => {
-  const name = $('csv-name').value.trim();
-  const log = $('ai-log');
-  const line = (text, cls = '') => {
-    log.querySelector('li.now')?.remove();
-    const li = document.createElement('li');
-    li.textContent = text;
-    li.className = cls;
-    log.appendChild(li);
-    return li;
-  };
-  const post = async (url, body) => {
-    const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' },
-                                 body: JSON.stringify(body ?? {}) });
-    const d = await r.json().catch(() => ({}));
-    if (!r.ok) throw Object.assign(new Error(d.error || r.statusText), { status: r.status });
-    return d;
-  };
-  aiRunning = true;
-  refreshCsvCreate();
-  log.innerHTML = '';
-  $('ai-reply').hidden = true;
-  $('ai-run').hidden = false;
-  csvMessage('');
-  try {
-    await post('/api/assistant/start', { name, csv: csvText, filename: csvFilename,
-                                         idea: $('ai-idea').value });
-    let d = null, retries = 0;
-    while (!d?.done) {
-      line('Claude is thinking…', 'now');
-      try {
-        d = await post(`/api/assistant/step/${encodeURIComponent(name)}`);
-      } catch (e) {
-        // A slow or busy step saved nothing, so it can simply run again.
-        if ([503, 504].includes(e.status) && retries++ < 2) continue;
-        throw e;
-      }
-      for (const ev of d.events) line(ev);
-    }
-    log.querySelector('li.now')?.remove();
-    const reply = $('ai-reply');
-    reply.textContent = d.reply;
-    const cost = document.createElement('small');
-    cost.textContent = `${d.steps} step${d.steps === 1 ? '' : 's'} · cost $${d.cost_usd.toFixed(3)}`;
-    reply.appendChild(cost);
-    reply.hidden = false;
-    if (d.created) {
-      csvMessage('');
-      $('csv-create').textContent = 'Open the figure';
-      $('csv-create').disabled = false;
-      $('csv-create').onclick = () => openProject(name);
-    } else {
-      csvMessage('No figure was made.', 'err');
-    }
-  } catch (e) {
-    log.querySelector('li.now')?.remove();
-    csvMessage(`The AI couldn't finish: ${e.message}`, 'err');
-  } finally {
-    aiRunning = false;
-    if ($('csv-create').textContent !== 'Open the figure') refreshCsvCreate();
-    else $('ai-make').disabled = true;
-  }
-};
 
 $('btn-new').onclick = openCsvDialog;
 $('csv-close').onclick = closeCsvDialog;
@@ -2505,6 +2441,259 @@ async function createFromCsv() {
   }
 }
 $('csv-create').onclick = createFromCsv;
+
+/* ------------------------------------------------- ✨ New with AI
+ * Any files go to Claude's sandbox on Anthropic's side. Zips are opened
+ * here, in the browser, so installers, slides and duplicate copies can be
+ * left out and the upload fits the server's 4.5 MB limit. */
+
+const AI_BUDGET = 3.8 * 1024 * 1024;   // bytes of file data per upload
+const AI_SKIP = [
+  [/\.(exe|msi|dll|bin|iso|dmg|app|so|dylib)$/i, 'program or installer'],
+  [/\.(pptx?|key|odp)$/i, 'slides'],
+  [/\.(docx?|odt|pages|rtf)$/i, 'document (not read yet)'],
+  [/\.(mp4|mov|avi|mkv|mp3|wav)$/i, 'video or audio'],
+  [/\.(zip|7z|rar|tar|gz|tgz)$/i, 'archive inside an archive'],
+  [/(^|\/)(__MACOSX\/|\.DS_Store$|Thumbs\.db$|desktop\.ini$)/i, 'system file'],
+  [/\.bak$/i, 'backup copy'],
+];
+const AI_BINARY_OK = /\.(xlsx|xls|png|jpe?g|gif|webp|npz|npy|h5|hdf5|mat|pdf)$/i;
+
+let aiFiles = [];        // [{name, bytes: Uint8Array}] to upload
+let aiSkipped = [];      // [{name, size, reason}]
+let aiRunning = false;
+
+/** Minimal .zip reader: stored and deflated entries, via the browser's own
+ *  DecompressionStream. Enough for zips made by Windows, macOS and Python. */
+async function unzip(buf) {
+  const dv = new DataView(buf);
+  let eocd = -1;
+  for (let i = buf.byteLength - 22; i >= Math.max(0, buf.byteLength - 65557); i--) {
+    if (dv.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+  }
+  if (eocd < 0) throw new Error('that .zip file looks damaged');
+  const count = dv.getUint16(eocd + 10, true);
+  let p = dv.getUint32(eocd + 16, true);
+  const out = [];
+  const dec = new TextDecoder();
+  for (let n = 0; n < count; n++) {
+    if (dv.getUint32(p, true) !== 0x02014b50) throw new Error('that .zip file looks damaged');
+    const method = dv.getUint16(p + 10, true);
+    const csize = dv.getUint32(p + 20, true), usize = dv.getUint32(p + 24, true);
+    const nlen = dv.getUint16(p + 28, true), xlen = dv.getUint16(p + 30, true), clen = dv.getUint16(p + 32, true);
+    const local = dv.getUint32(p + 42, true);
+    const name = dec.decode(new Uint8Array(buf, p + 46, nlen));
+    p += 46 + nlen + xlen + clen;
+    if (name.endsWith('/')) continue;                       // a folder
+    const start = local + 30 + dv.getUint16(local + 26, true) + dv.getUint16(local + 28, true);
+    out.push({ name, size: usize, method, raw: new Uint8Array(buf, start, csize) });
+  }
+  return out;
+}
+
+async function inflate(entry) {
+  if (entry.method === 0) return entry.raw;
+  if (entry.method !== 8) throw new Error(`${entry.name}: unsupported zip compression`);
+  const stream = new Blob([entry.raw]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+
+async function sha(bytes) {
+  const h = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
+  return [...h.slice(0, 12)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+function looksBinary(bytes) {
+  const n = Math.min(bytes.length, 4096);
+  for (let i = 0; i < n; i++) if (bytes[i] === 0) return true;
+  return false;
+}
+
+async function addAiFiles(list) {
+  $('ai-msg').textContent = 'Reading…';
+  const candidates = [];   // {name, size, get: () => Promise<Uint8Array>}
+  for (const file of list) {
+    if (/\.zip$/i.test(file.name)) {
+      try {
+        for (const e of await unzip(await file.arrayBuffer())) {
+          candidates.push({ name: e.name, size: e.size, get: () => inflate(e) });
+        }
+      } catch (err) {
+        aiMessage(`${file.name}: ${err.message}`, 'err');
+        return;
+      }
+    } else {
+      candidates.push({ name: file.name, size: file.size,
+                        get: async () => new Uint8Array(await file.arrayBuffer()) });
+    }
+  }
+  const seen = new Map(aiFiles.map((f) => [f.hash, f.name]));
+  let used = aiFiles.reduce((t, f) => t + f.cost, 0);
+  // Small files first, so one huge file can't crowd out the real data.
+  candidates.sort((a, b) => a.size - b.size);
+  for (const c of candidates) {
+    const rule = AI_SKIP.find(([re]) => re.test(c.name));
+    if (rule) { aiSkipped.push({ name: c.name, size: c.size, reason: rule[1] }); continue; }
+    const bytes = await c.get();
+    const binary = looksBinary(bytes);
+    if (binary && !AI_BINARY_OK.test(c.name)) {
+      aiSkipped.push({ name: c.name, size: c.size, reason: 'unknown binary file' });
+      continue;
+    }
+    const hash = await sha(bytes);
+    if (seen.has(hash)) {
+      aiSkipped.push({ name: c.name, size: c.size, reason: `same as ${seen.get(hash)}` });
+      continue;
+    }
+    const cost = binary ? Math.ceil(bytes.length * 4 / 3) : bytes.length;
+    if (used + cost > AI_BUDGET) {
+      aiSkipped.push({ name: c.name, size: c.size, reason: 'too much for one upload' });
+      continue;
+    }
+    seen.set(hash, c.name);
+    used += cost;
+    aiFiles.push({ name: c.name, bytes, binary, hash, cost });
+  }
+  showAiFiles();
+  if (!$('ai-name').value && aiFiles.length) {
+    const first = list[0]?.name || aiFiles[0].name;
+    $('ai-name').value = projectNameFrom(first.split('/').pop());
+  }
+  aiMessage('');
+  refreshAiMake();
+}
+
+function showAiFiles() {
+  const size = aiFiles.reduce((t, f) => t + f.bytes.length, 0);
+  const kb = (n) => n < 1048576 ? `${Math.round(n / 1024)} KB` : `${(n / 1048576).toFixed(1)} MB`;
+  $('ai-picked').hidden = !aiFiles.length && !aiSkipped.length;
+  $('ai-drop-text').innerHTML = aiFiles.length
+    ? `<b>${aiFiles.length} file${aiFiles.length === 1 ? '' : 's'} ready</b> · add more`
+    : '<b>Choose your data files</b> or drop them here<br><em>any files or a .zip · a picture of a figure you like helps too</em>';
+  $('ai-files-summary').textContent = `Sending ${aiFiles.length} file${aiFiles.length === 1 ? '' : 's'} ` +
+    `(${kb(size)}) to Claude.` + (aiSkipped.length ? ` Left out ${aiSkipped.length}.` : '');
+  $('ai-file-list').innerHTML =
+    aiFiles.map((f) => `<li>${escapeHtml(f.name)} · ${kb(f.bytes.length)}</li>`).join('') +
+    aiSkipped.map((f) => `<li class="skip">${escapeHtml(f.name)} — left out: ${escapeHtml(f.reason)}</li>`).join('');
+}
+
+function aiMessage(msg, cls = '') {
+  $('ai-msg').textContent = msg;
+  $('ai-msg').className = 'csv-msg ' + cls;
+}
+
+function refreshAiMake() {
+  if ($('ai-make').dataset.open) return;
+  $('ai-make').disabled = aiRunning || !(aiFiles.length && $('ai-idea').value.trim()
+    && /^[A-Za-z0-9_-]+$/.test($('ai-name').value));
+}
+
+function openAiDialog() {
+  aiFiles = []; aiSkipped = [];
+  $('ai-files').value = '';
+  $('ai-idea').value = '';
+  $('ai-name').value = '';
+  $('ai-run').hidden = true;
+  delete $('ai-make').dataset.open;
+  $('ai-make').textContent = '✨ Make it';
+  showAiFiles();
+  $('ai-picked').hidden = true;
+  aiMessage('');
+  refreshAiMake();
+  $('ai-modal').hidden = false;
+}
+
+function closeAiDialog() { $('ai-modal').hidden = true; }
+
+function bytesToBase64(bytes) {
+  let s = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(s);
+}
+
+async function runAi() {
+  const name = $('ai-name').value.trim();
+  const log = $('ai-log');
+  const line = (text, cls = '') => {
+    log.querySelector('li.now')?.remove();
+    const li = document.createElement('li');
+    li.textContent = text;
+    li.className = cls;
+    log.appendChild(li);
+  };
+  const post = async (url, body) => {
+    const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                 body: JSON.stringify(body ?? {}) });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw Object.assign(new Error(d.error || r.statusText), { status: r.status });
+    return d;
+  };
+  aiRunning = true;
+  refreshAiMake();
+  log.innerHTML = '';
+  $('ai-reply').hidden = true;
+  $('ai-run').hidden = false;
+  aiMessage('');
+  try {
+    line('Sending your files…', 'now');
+    const dec = new TextDecoder('utf-8', { fatal: true });
+    const files = aiFiles.map((f) => {
+      if (!f.binary) {
+        try { return { name: f.name, text: dec.decode(f.bytes) }; } catch { /* not UTF-8: send as bytes */ }
+      }
+      return { name: f.name, b64: bytesToBase64(f.bytes) };
+    });
+    await post('/api/assistant/start', { name, idea: $('ai-idea').value, files, skipped: aiSkipped });
+    line('Files sent');
+    let d = null, retries = 0;
+    while (!d?.done) {
+      line('Claude is working…', 'now');
+      try {
+        d = await post(`/api/assistant/step/${encodeURIComponent(name)}`);
+      } catch (e) {
+        // A slow or busy step saved nothing, so it can simply run again.
+        if ([503, 504].includes(e.status) && retries++ < 2) continue;
+        throw e;
+      }
+      for (const ev of d.events) line(ev);
+    }
+    log.querySelector('li.now')?.remove();
+    const reply = $('ai-reply');
+    reply.textContent = d.reply;
+    const cost = document.createElement('small');
+    cost.textContent = `${d.steps} step${d.steps === 1 ? '' : 's'} · about $${d.cost_usd.toFixed(2)}`;
+    reply.appendChild(cost);
+    reply.hidden = false;
+    if (d.created) {
+      $('ai-make').dataset.open = '1';
+      $('ai-make').textContent = 'Open the figure';
+      $('ai-make').disabled = false;
+    } else {
+      aiMessage('No figure was made.', 'err');
+    }
+  } catch (e) {
+    log.querySelector('li.now')?.remove();
+    aiMessage(`The AI couldn't finish: ${e.message}`, 'err');
+  } finally {
+    aiRunning = false;
+    refreshAiMake();
+  }
+}
+
+$('btn-ai').onclick = openAiDialog;
+$('ai-close').onclick = closeAiDialog;
+$('ai-cancel').onclick = closeAiDialog;
+$('ai-files').onchange = (e) => addAiFiles([...e.target.files]);
+$('ai-idea').addEventListener('input', refreshAiMake);
+$('ai-name').addEventListener('input', refreshAiMake);
+$('ai-make').onclick = () => ($('ai-make').dataset.open ? openProject($('ai-name').value.trim()) : runAi());
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !$('ai-modal').hidden && !aiRunning) closeAiDialog();
+});
+const aiDrop = $('ai-drop');
+['dragenter', 'dragover'].forEach((t) => aiDrop.addEventListener(t, (e) => { e.preventDefault(); aiDrop.classList.add('over'); }));
+['dragleave', 'drop'].forEach((t) => aiDrop.addEventListener(t, (e) => { e.preventDefault(); aiDrop.classList.remove('over'); }));
+aiDrop.addEventListener('drop', (e) => addAiFiles([...e.dataTransfer.files]));
 
 $('btn-saveas').onclick = async () => {
   const name = askName('Save a copy of this project as:', `${FIGURE}-copy`);
@@ -2786,6 +2975,7 @@ async function boot() {
   const me = await r.json().catch(() => ({ mode: 'local' }));
   inviteOnly = me.invite_only !== false;
   assistantOn = !!me.assistant;
+  $('btn-ai').hidden = !assistantOn;
   if (link?.type === 'recovery') { showAuth('reset'); return; }
   if (link?.type === 'invite') { showAuth('welcome'); return; }
   if (me.mode === 'online') {

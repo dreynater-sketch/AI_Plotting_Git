@@ -118,7 +118,7 @@ def _layout_key(spec):
         [[p.get("title"), p.get("xlabel"), p.get("ylabel"), p.get("xlim"),
           p.get("ylim"), p.get("xscale"), p.get("yscale"), p.get("aspect"),
           p.get("xtick_size"), p.get("ytick_size"),
-          p.get("legend")] for p in spec["panels"]],
+          p.get("legend"), p.get("top_axis"), p.get("right_axis")] for p in spec["panels"]],
     ], sort_keys=True, default=str)
 
 
@@ -175,6 +175,27 @@ def _guide_hit(draw, pos, gid):
     everything else, so it only catches clicks nothing else wanted."""
     hit = draw(pos, alpha=0, lw=HIT_STROKE_WIDTH, zorder=GUIDE_HIT_ZORDER)
     hit.set_gid(gid)
+
+
+SECOND_AXES = (("top_axis", "top", "x"), ("right_axis", "right", "y"))
+
+
+def _draw_second_axes(ax, p):
+    """A second scale for the same data along the top or right edge, e.g.
+    detector channel along the bottom and energy along the top:
+    top value = scale * bottom value + offset (always linear)."""
+    for key, side, xy in SECOND_AXES:
+        sa = p.get(key)
+        if not sa:
+            continue
+        a, b = float(sa["scale"]), float(sa["offset"])
+        funcs = (lambda v, a=a, b=b: a * v + b, lambda v, a=a, b=b: (v - b) / a)
+        sec = (ax.secondary_xaxis if xy == "x" else ax.secondary_yaxis)(side, functions=funcs)
+        sec.tick_params(labelsize=p.get(f"{xy}tick_size", 11))
+        if sa.get("text"):
+            set_label = sec.set_xlabel if xy == "x" else sec.set_ylabel
+            lbl = set_label(sa["text"], fontsize=sa.get("size", 13), color=sa.get("color", "black"))
+            lbl.set_gid(f"t_{p['id']}__{key}")
 
 
 def _draw_panel(ax, p, arrays, preview=False):
@@ -270,6 +291,7 @@ def _draw_panel(ax, p, arrays, preview=False):
     ax.tick_params(axis="y", labelsize=p.get("ytick_size", 11))
     for spine in ax.spines.values():
         spine.set_linewidth(p.get("frame_lw", 0.8))
+    _draw_second_axes(ax, p)
 
     # Individually gid-tagged so a click can be resolved to a specific
     # tick, but only to canonicalise it: the editor treats every tick on

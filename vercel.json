@@ -3,7 +3,7 @@
   "functions": {
     "api/index.py": {
       "includeFiles": "{figforge/**,web/**,figures/*/spec.json,figures/*/data/**}",
-      "maxDuration": 60
+      "maxDuration": 300
     }
   },
   "rewrites": [

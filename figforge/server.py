@@ -37,7 +37,7 @@ then requires a signed-in user and works in that user's own project space:
     POST /api/admin/invite     (admins) {email} -> Supabase emails an invite link
     POST /api/admin/invite-link  (admins) {email} -> the invite link itself, no email sent
     GET  /api/admin/ai-ping    (admins) one tiny Claude request: is the key working?
-    POST /api/assistant/start  (admins) {name, csv, filename, idea} -> a new AI session
+    POST /api/assistant/start  (admins) {name, idea, files, skipped} -> a new AI session
     POST /api/assistant/step/<name>  (admins) one Claude round -> {done, events, reply, cost_usd}
 
 Sign-up is invite-only unless FIGFORGE_OPEN_SIGNUP=1 is set.
@@ -51,6 +51,7 @@ at 4.5 MB and a full undo history can approach that, so /api/history travels
 gzipped (X-Body-Encoding: gzip up, Content-Encoding: gzip down).
 """
 
+import base64
 import gzip
 import http.cookies
 import io
@@ -590,12 +591,16 @@ class Handler(BaseHTTPRequestHandler):
         return bool(self._require_admin())
 
     def _assistant_start(self):
+        """{name, idea, files: [{name, text} | {name, b64}], skipped: [...]}:
+        the browser has already unpacked zips and left out installers,
+        slides and duplicates so the upload fits Vercel's 4.5 MB body."""
         if not self._assistant_allowed():
             return
         from figforge import assistant
+        import anthropic
         body = self._body()
-        if not isinstance(body, dict) or not isinstance(body.get("csv"), str):
-            return self._error(400, "expected {name, csv, filename, idea}")
+        if not isinstance(body, dict) or not isinstance(body.get("files"), list):
+            return self._error(400, "expected {name, idea, files: [...]}")
         name = str(body.get("name") or "")
         idea = str(body.get("idea") or "").strip()
         if not NAME_RE.match(name):
@@ -604,18 +609,31 @@ class Handler(BaseHTTPRequestHandler):
             return self._error(409, f"a project named '{name}' already exists")
         if not idea:
             return self._error(400, "describe the figure you want")
-        if len(idea) > 2000:
-            return self._error(400, "please keep the description under 2000 characters")
+        if len(idea) > 4000:
+            return self._error(400, "please keep the description under 4000 characters")
+        files = []
+        for f in body["files"][:500]:
+            fname = str((f or {}).get("name") or "").replace("\\", "/").lstrip("/")
+            if not fname or ".." in fname.split("/"):
+                continue
+            try:
+                data = (f["text"].encode("utf-8") if isinstance(f.get("text"), str)
+                        else base64.b64decode(f.get("b64") or ""))
+            except (ValueError, TypeError):
+                return self._error(400, f"couldn't read {fname}")
+            files.append({"name": fname, "data": data})
+        if not files:
+            return self._error(400, "add at least one file")
+        skipped = [s for s in body.get("skipped") or [] if isinstance(s, dict)]
+        fig = Figure(name, self.store)
         try:
-            state = assistant.start(body["csv"], str(body.get("filename") or ""), idea)
-        except csvimport.CSVError as e:
-            return self._error(400, str(e))
+            state = assistant.start(fig, files, skipped, idea)
+        except anthropic.APIError as e:
+            return self._error(502, f"couldn't hand the files to Claude: {e}")
         # Until the first figure is drawn the project has no spec.json, so
         # it stays out of the project list.
-        fig = Figure(name, self.store)
-        fig.save_source_csv(body["csv"])
         fig.save_assistant(state)
-        return self._json({"name": name})
+        return self._json({"name": name, "tables": list(state["tables"])})
 
     def _assistant_step(self, name):
         if not self._assistant_allowed():
@@ -626,11 +644,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._error(404, "unknown figure")
         fig = Figure(name, self.store)
         state = fig.load_assistant()
-        csv_text = fig.load_source_csv()
-        if state is None or csv_text is None:
+        if state is None:
             return self._error(404, "no AI session for that project")
         try:
-            state, spec, events = assistant.step(state, fig, csv_text)
+            state, spec, events = assistant.step(state, fig)
         except anthropic.AuthenticationError:
             return self._error(502, "Claude rejected the API key (check ANTHROPIC_API_KEY)")
         except anthropic.RateLimitError:
@@ -646,6 +663,8 @@ class Handler(BaseHTTPRequestHandler):
             payload = self._payload(fig, spec)
             fig.save_spec(spec)
             fig.write_outputs(payload["svg"], codegen.generate(spec))
+        if state["done"]:
+            assistant.cleanup(state)
         fig.save_assistant(state)
         return self._json({"done": state["done"], "events": events, "reply": state["reply"],
                            "created": state["created"], "steps": state["steps"],

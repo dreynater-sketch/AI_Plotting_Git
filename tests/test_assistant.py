@@ -1,10 +1,12 @@
 """The assistant's step loop with a scripted fake Claude: no API key, no
-cost. Checks create_figure -> view_figure -> an edit -> the final reply, the
-error paths Claude gets back, the limits, and that the tool schemas stay
-inside strict mode's 16-union-parameter cap."""
+cost. Checks the upload (several files -> one zip, a tidy CSV kept as a
+table, an example image shown to Claude), a sandbox-made table arriving,
+create_figure -> view_figure -> edits (incl. a second axis) -> the final
+reply, the error paths Claude gets back, the limits, and that the tool
+schemas stay inside strict mode's 16-union-parameter cap."""
 import os as _os
 ROOT_DIR = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
-import os, shutil, sys, types
+import io, os, shutil, sys, types, zipfile
 sys.path.insert(0, ROOT_DIR)
 os.chdir(ROOT_DIR)
 
@@ -20,10 +22,11 @@ class Block(types.SimpleNamespace):
         return dict(vars(self))
 
 
-def reply(*blocks, stop="tool_use"):
+def reply(*blocks, stop="tool_use", container="cntr_1"):
     usage = types.SimpleNamespace(input_tokens=1000, output_tokens=200,
                                   cache_creation_input_tokens=0, cache_read_input_tokens=0)
-    return types.SimpleNamespace(content=list(blocks), stop_reason=stop, usage=usage)
+    return types.SimpleNamespace(content=list(blocks), stop_reason=stop, usage=usage,
+                                 container=types.SimpleNamespace(id=container))
 
 
 def tool(name, **inp):
@@ -32,81 +35,137 @@ def tool(name, **inp):
 tool.n = 0
 
 
+def sandbox_wrote(file_id):
+    """What a code-execution run that saved a file to $OUTPUT_DIR looks like."""
+    return [Block(type="server_tool_use", id="srvtoolu_1", name="bash_code_execution",
+                  input={"command": "python make_table.py"}),
+            Block(type="bash_code_execution_tool_result", tool_use_id="srvtoolu_1",
+                  content={"type": "bash_code_execution_result", "stdout": "ok", "stderr": "",
+                           "return_code": 0,
+                           "content": [{"type": "bash_code_execution_output", "file_id": file_id}]})]
+
+
+SPECTRA = "channel,energy_MeV,1A_middle,1B\n" + "\n".join(
+    f"{c},{(1.91758 * c + 72.93) / 1000:.5f},{100 + (c % 7)},{90 + (c % 5)}" for c in range(150, 400)) + "\n"
+
+
 class FakeClient:
     def __init__(self, script):
-        self.script, self.seen = list(script), []
+        self.script, self.seen, self.uploads, self.deleted = list(script), [], [], []
         self.beta = types.SimpleNamespace(messages=types.SimpleNamespace(create=self.create))
+        self.files = types.SimpleNamespace(upload=self.upload, retrieve_metadata=self.meta,
+                                           download=self.download, delete=self.deleted.append)
 
     def create(self, **kw):
         self.seen.append(kw)
         return self.script.pop(0)
 
+    def upload(self, file):
+        name, fh = file
+        self.uploads.append((name, fh.read()))
+        return types.SimpleNamespace(id="file_in")
 
-PANEL = dict(x_column=0, y_columns=[1, 2], plot_as="scatter", title="", x_label="Time ($\\mu$s)",
-             y_label="Counts", x_scale="linear", y_scale="log")
-CSV = "t,a,b,note\n" + "\n".join(f"{i},{100 * 0.9 ** i:.3f},{50 * 0.95 ** i:.3f},x" for i in range(20)) + "\n"
+    def meta(self, fid):
+        return types.SimpleNamespace(filename={"file_tab": "spectra.csv", "file_png": "check.png"}[fid],
+                                     size_bytes=len(SPECTRA))
+
+    def download(self, fid):
+        return io.BytesIO(SPECTRA.encode())
+
+
+PANEL = dict(x_column="channel", y_columns=["1A_middle", "1B"], plot_as="line", title="",
+             x_label="Channel", y_label="Normalized yield", x_scale="linear", y_scale="linear")
 
 P = "zz_assistant_test"
 store = LocalStore()
 if store.project_exists(P):
     shutil.rmtree(f"figures/{P}")
 fig = Figure(P, store)
-fig.save_source_csv(CSV)
-
-state = assistant.start(CSV, "decay.csv", "Compare a and b, log y.")
-first = state["messages"][0]["content"]
-check('"name": "note"' in first and "decay.csv" in first and "Compare a and b" in first,
-      "first message: column summary, file name and the idea")
 
 fake = FakeClient([
     reply(tool("set_text", element_id="a__title", text="too early")),
-    reply(tool("create_figure", figure_title="Decay", panels=[PANEL])),
-    reply(tool("create_figure", figure_title="Again", panels=[PANEL]),
+    reply(tool("create_figure", table="nothing.csv", figure_title="", panels=[PANEL])),
+    reply(*sandbox_wrote("file_tab"), *sandbox_wrote("file_png"), stop="pause_turn"),
+    reply(tool("create_figure", table="spectra.csv", figure_title="RBS", panels=[PANEL])),
+    reply(tool("create_figure", table="spectra.csv", figure_title="Again", panels=[PANEL]),
           tool("view_figure")),
-    reply(tool("style_series", series_id="a_s0", color="#D62728", line_width=None,
-               line_style="keep", marker="keep", marker_size=None, opacity=None)),
-    reply(Block(type="text", text="Both samples decay; a falls faster."), stop="end_turn"),
+    reply(tool("set_second_axis", panel_id="a", side="top", show=True, label="Energy (MeV)",
+               scale=0.00191758, offset=0.07293023),
+          tool("style_series", series_id="a_s1", color="", line_width=None,
+               line_style="--", marker="keep", marker_size=None, opacity=None),
+          tool("add_label", panel_id="a", text="Cu", x=300, y=50, coords="data", size=None, color="")),
+    reply(Block(type="text", text="The two spectra overlap; energy is on top."), stop="end_turn"),
 ])
 assistant._client = lambda: fake
 
+files = [{"name": "RBS/04152025/b_0106.asc", "data": b"<<DATA>>\n1\n2\n"},
+         {"name": "RBS/notes.csv", "data": b"x,y\n1,2\n2,4\n"},
+         {"name": "RBS/example.png", "data": b"\x89PNG\r\n\x1a\nfake"}]
+state = assistant.start(fig, files, [{"name": "RBS/rump_setup.exe", "size": 9_000_000,
+                                      "reason": "program or installer"}], "Overlay the spectra.")
+name, payload = fake.uploads[0]
+check(name == "inputs.zip" and sorted(zipfile.ZipFile(io.BytesIO(payload)).namelist())
+      == sorted(f["name"] for f in files), "several files go to the sandbox as one zip")
+first = state["messages"][0]["content"]
+text = " ".join(b.get("text", "") for b in first)
+check("b_0106.asc" in text and "rump_setup.exe" in text and "installer" in text
+      and "Overlay the spectra." in text, "first message lists the files, what was left out, and the idea")
+check(any(b["type"] == "container_upload" and b["file_id"] == "file_in" for b in first),
+      "the zip is attached to the sandbox")
+check(any(b["type"] == "image" for b in first), "an example picture is shown to Claude")
+check("notes.csv" in state["tables"] and fig.load_table("notes.csv").startswith("x,y"),
+      "an uploaded tidy CSV is available as a table straight away")
 
-def save(spec):
+
+def run():
+    global state
+    state, spec, ev = assistant.step(state, fig)
     if spec is not None:
         fig.save_spec(spec)
+    return spec, ev
 
 
-state, spec, ev = assistant.step(state, fig, CSV)
+spec, ev = run()
 res = state["messages"][-1]["content"][0]
-check(res.get("is_error") and "create_figure first" in res["content"] and spec is None,
-      "an edit before create_figure comes back as an error")
+check(res.get("is_error") and "create_figure first" in res["content"], "an edit before create_figure is an error")
 
-state, spec, ev = assistant.step(state, fig, CSV); save(spec)
+spec, ev = run()
+res = state["messages"][-1]["content"][0]
+check(res.get("is_error") and "no table 'nothing.csv'" in res["content"], "an unknown table is an error")
+
+spec, ev = run()
+check(state["tables"].get("spectra.csv") and "check.png" not in state["tables"]
+      and fig.load_table("spectra.csv") == SPECTRA, "a CSV saved in the sandbox arrives; a PNG doesn't")
+check("Made a table: spectra.csv" in ev and not state["done"], f"pause_turn keeps going ({ev})")
+check(state["container"] == "cntr_1", "the sandbox container is remembered")
+
+spec, ev = run()
 p = spec["panels"][0] if spec else {}
-check(spec and spec["suptitle"]["text"] == "Decay" and p["yscale"] == "log" and len(p["series"]) == 2
-      and p["xlabel"]["text"] == "Time ($\\mu$s)" and p["title"]["text"] == "",
-      "create_figure builds the requested panel (log y, labels, empty title)")
-check(ev == ["Drew the figure"], f"progress event ({ev})")
-check(spec["source"]["kind"] == "csv-panels", "the figure remembers how to be rebuilt")
+check(spec and spec["suptitle"]["text"] == "RBS" and [s["label"] for s in p["series"]] == ["1A_middle", "1B"]
+      and p["xlabel"]["text"] == "Channel", "create_figure uses column names from the table")
+check(fig.load_source_csv() == SPECTRA and spec["source"]["kind"] == "csv-panels",
+      "the table is kept so Start over can rebuild")
+check(fake.seen[-1].get("container") == "cntr_1", "later requests reuse the container")
 
-state, spec, ev = assistant.step(state, fig, CSV); save(spec)
+spec, ev = run()
 again, view = state["messages"][-1]["content"]
 check(again.get("is_error") and "already exists" in again["content"], "a second create_figure is refused")
-check(view["content"][0]["type"] == "image" and view["content"][0]["source"]["media_type"] == "image/png"
-      and state["views"] == 1, "view_figure returns a PNG picture")
+check(view["content"][0]["type"] == "image", "view_figure returns a PNG picture")
 
-state, spec, ev = assistant.step(state, fig, CSV); save(spec)
-check(spec and spec["panels"][0]["series"][0]["style"]["color"].lower() == "#d62728"
-      and spec["panels"][0]["series"][0]["style"].get("marker") == "o",
-      "an edit applies; \"keep\" leaves the marker alone")
+spec, ev = run()
+p = spec["panels"][0]
+check(p["top_axis"]["text"] == "Energy (MeV)" and p["top_axis"]["scale"] == 0.00191758,
+      "set_second_axis adds the energy scale")
+check(p["series"][1]["style"]["ls"] == "--" and p["texts"][0]["text"] == "Cu", "restyle + label applied")
 
-state, spec, ev = assistant.step(state, fig, CSV)
-check(state["done"] and state["reply"] == "Both samples decay; a falls faster.", "final text is the reply")
-check(abs(state["cost_usd"] - 5 * (1000 * 5 + 200 * 25) / 1e6) < 1e-6, f"cost adds up ({state['cost_usd']})")
+spec, ev = run()
+check(state["done"] and state["reply"].startswith("The two spectra"), "final text is the reply")
 kw = fake.seen[-1]
 check(kw["model"] == "claude-opus-5" and kw["fallbacks"] == "default"
-      and "server-side-fallback-2026-07-01" in kw["betas"], "request: model + refusal fallback")
-check(all(m["role"] in ("user", "assistant") for m in kw["messages"]) and kw["messages"][0]["role"] == "user",
-      "history alternates user / assistant")
+      and any(t.get("type", "").startswith("code_execution") for t in kw["tools"]),
+      "request: model, refusal fallback, sandbox tool")
+assistant.cleanup(state)
+check(set(fake.deleted) == {"file_in", "file_tab", "file_png"}, "Anthropic-side files are cleaned up")
 
 
 def unions(s):
@@ -116,15 +175,18 @@ def unions(s):
         n += sum(unions(v) for v in s.get("properties", {}).values())
         n += unions(s.get("items"))
     return n
-total = sum(unions(t["input_schema"]) for t in assistant.TOOLS)
+custom = [t for t in assistant.TOOLS if "input_schema" in t]
+total = sum(unions(t["input_schema"]) for t in custom)
 check(total <= 16, f"strict tools stay under the 16 union-parameter cap ({total})")
-check(all(t.get("strict") for t in assistant.TOOLS), "every tool is strict")
+check([t["name"] for t in custom if t.get("strict")] == ["create_figure"],
+      "only create_figure is strict (the grammar size limit)")
 
 # Limits: a session stops itself.
-st = assistant.start(CSV, "decay.csv", "x")
-st["steps"] = assistant.MAX_STEPS - 1
-assistant._client = lambda: FakeClient([reply(tool("describe_figure"))])
-st, _, _ = assistant.step(st, fig, CSV)
+st = dict(state, done=False, steps=assistant.MAX_STEPS - 1)
+last = FakeClient([reply(tool("describe_figure"))])
+assistant._client = lambda: last
+st, _, _ = assistant.step(st, fig)
+check(last.seen[-1].get("tool_choice") == {"type": "none"}, "the last allowed turn is a no-tools wrap-up")
 check(st["done"] and "maximum number of steps" in st["reply"], "stops at the step limit")
 
 shutil.rmtree(f"figures/{P}")

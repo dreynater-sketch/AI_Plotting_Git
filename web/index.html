@@ -13,6 +13,7 @@
   <div class="project">
     <select id="project-select" title="Open another figure"></select>
     <button id="btn-new" title="Make a new figure from a spreadsheet (CSV) file">New from CSV…</button>
+    <button id="btn-ai" class="ai-btn" hidden title="Give Claude your data files and describe the figure you want">✨ New with AI</button>
     <button id="btn-saveas" title="Save a copy with a new name">Save a copy…</button>
     <button id="btn-rename" title="Give this figure a new name">Rename</button>
   </div>
@@ -461,18 +462,6 @@
     </label>
     <div id="csv-pick" hidden>
       <p class="csv-summary" id="csv-summary"></p>
-      <!-- AI assistant: only shown when it's set up and you may use it. -->
-      <div class="ai-box" id="ai-box" hidden>
-        <label class="field">
-          <span>✨ Describe the figure you want</span>
-          <textarea id="ai-idea" rows="3" spellcheck="true"
-            placeholder="e.g. Show how the signal decays over time for both samples, log scale on the side axis"></textarea>
-        </label>
-        <div class="ai-actions">
-          <button type="button" class="primary" id="ai-make" disabled>✨ Make it with AI</button>
-          <span class="muted">Or pick the columns yourself below.</span>
-        </div>
-      </div>
       <table class="csv-cols">
         <thead><tr><th>Column</th><th>Range</th><th title="Horizontal axis">x</th><th title="Plot these">y</th></tr></thead>
         <tbody id="csv-cols"></tbody>
@@ -492,14 +481,48 @@
         </label>
       </div>
     </div>
-    <div class="ai-run" id="ai-run" hidden>
-      <ol class="ai-log" id="ai-log"></ol>
-      <p class="ai-reply" id="ai-reply" hidden></p>
-    </div>
     <p class="csv-msg" id="csv-msg" role="status"></p>
     <div class="modal-foot">
       <button id="csv-cancel">Cancel</button>
       <button class="primary" id="csv-create" disabled>Create figure</button>
+    </div>
+  </div>
+</div>
+
+<!-- New figure with the AI assistant: any files (zips are opened in the
+     browser), a description, then Claude works step by step. -->
+<div class="modal" id="ai-modal" hidden>
+  <div class="modal-card" role="dialog" aria-labelledby="ai-title">
+    <div class="modal-head">
+      <h3 id="ai-title">✨ New figure with AI</h3>
+      <button class="link" id="ai-close" title="Close (Esc)">×</button>
+    </div>
+    <label class="csv-drop" id="ai-drop">
+      <input type="file" id="ai-files" multiple>
+      <span id="ai-drop-text"><b>Choose your data files</b> or drop them here<br>
+        <em>any files or a .zip · a picture of a figure you like helps too</em></span>
+    </label>
+    <div id="ai-picked" hidden>
+      <p class="csv-summary" id="ai-files-summary"></p>
+      <details class="ai-files"><summary>See which files</summary><ul id="ai-file-list"></ul></details>
+    </div>
+    <label class="field">
+      <span>Describe the figure you want</span>
+      <textarea id="ai-idea" rows="4" spellcheck="true"
+        placeholder="e.g. Overlay the RBS spectra of 1A_middle, 1A_bottom_right, 1A_bottom_left and 1B against channel, energy in MeV on top, label the O, Cu, Nb, Sn and Ta edges"></textarea>
+    </label>
+    <label class="field">
+      <span>Project name</span>
+      <input type="text" id="ai-name" spellcheck="false">
+    </label>
+    <div class="ai-run" id="ai-run" hidden>
+      <ol class="ai-log" id="ai-log"></ol>
+      <p class="ai-reply" id="ai-reply" hidden></p>
+    </div>
+    <p class="csv-msg" id="ai-msg" role="status"></p>
+    <div class="modal-foot">
+      <button id="ai-cancel">Cancel</button>
+      <button class="primary" id="ai-make" disabled>✨ Make it</button>
     </div>
   </div>
 </div>

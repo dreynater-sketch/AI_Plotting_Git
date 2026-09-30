@@ -666,17 +666,18 @@ button.primary:hover:not(:disabled) { background: #1a5fcc; border-color: #1a5fcc
 .csv-cols td:nth-child(2) { color: var(--ink-soft); font-family: var(--mono); font-size: 11.5px; }
 .csv-cols th:nth-child(n+3), .csv-cols td:nth-child(n+3) { text-align: center; width: 36px; }
 .csv-cols tr.muted td { color: #a4a9ae; }
-/* AI assistant inside the new-figure dialog */
-.ai-box {
-  margin: 4px 0 14px; padding: 10px 12px;
-  border: 1px solid #e3d3f5; border-radius: var(--radius); background: #faf6ff;
-}
-.ai-box textarea {
+/* ✨ New with AI */
+.ai-btn { color: #6a3fb0; border-color: #d9c8f2; background: #faf6ff; }
+.ai-btn:hover:not(:disabled) { background: #f3ebff !important; border-color: #c6aeea !important; }
+#ai-modal textarea {
   width: 100%; resize: vertical; font: inherit; font-size: 13px;
   padding: 6px 8px; border: 1px solid var(--line); border-radius: 5px;
 }
-.ai-actions { display: flex; align-items: center; gap: 10px; }
-.ai-actions .muted { font-size: 12px; color: var(--ink-soft); }
+#ai-modal .field { margin-top: 10px; }
+.ai-files { font-size: 12px; color: var(--ink-soft); margin: -2px 0 4px; }
+.ai-files summary { cursor: pointer; }
+.ai-files ul { margin: 6px 0 0; padding-left: 18px; max-height: 160px; overflow-y: auto; }
+.ai-files li.skip { color: #a4a9ae; }
 .ai-run { margin-top: 10px; }
 .ai-log { margin: 0; padding-left: 20px; font-size: 12.5px; color: var(--ink-soft); }
 .ai-log li { margin: 2px 0; }
