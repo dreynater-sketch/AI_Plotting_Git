@@ -27,10 +27,7 @@ nothing in it is executed.
 import ast
 import copy
 import math
-
-STYLE_KEYS = {"color", "lw", "linewidth", "ls", "linestyle", "marker", "ms",
-              "markersize", "mew", "markeredgewidth", "mfc", "markerfacecolor",
-              "mec", "markeredgecolor", "alpha", "zorder"}
+from figforge import layers
 
 # Statements codegen emits that carry nothing for the spec.
 _BOILERPLATE_CALLS = {"plt.show", "fig.patch.set_facecolor", "_t.get_bbox_patch.set_clip_on"}
@@ -381,8 +378,8 @@ def _call(call, new, state, taken, array_keys):
 
     if method == "text":
         return _text(call, args, kw, pnl, taken)
-    if method == "plot":
-        return _series(args, kw, pnl, taken, array_keys)
+    if method in layers.BY_METHOD:      # plot / errorbar / fill_between / bar
+        return _series(method, args, kw, pnl, taken, array_keys)
     if method in ("set_title", "set_xlabel", "set_ylabel"):
         key = method[4:]
         item = dict(pnl.old.get(key) or {})
@@ -504,30 +501,47 @@ def _text(call, args, kw, pnl, taken):
     pnl.p["texts"].append(item)
 
 
-def _series(args, kw, pnl, taken, array_keys):
-    if len(args) < 2:
-        raise Skip("ax.plot needs x and y")
-    x, y = _coord(args[0]), _coord(args[1])
-    for ref in (x, y):
+def _series(method, args, kw, pnl, taken, array_keys):
+    kind = layers.BY_METHOD[method]
+    k = layers.KINDS[kind]
+    if len(args) != len(k["coords"]):
+        raise Skip(f"ax.{method} takes {', '.join(k['coords'])} here "
+                   f"({len(k['coords'])} data arguments)")
+    refs = {f: _coord(a) for f, a in zip(k["coords"], args)}
+    for kwname, field in k["data_kw"].items():
+        if kwname in kw:
+            refs[field] = _coord(kw[kwname])
+    for ref in refs.values():
         if isinstance(ref, str) and array_keys and ref not in array_keys:
             raise Skip(f'there is no D["{ref}"] in the data')
     item = _claim(pnl, "series", kw, taken) or {"id": _new_id(pnl, "curve", taken)}
-    for field, val in (("x", x), ("y", y)):
+    if kind == "line":
+        item.pop("kind", None)
+    else:
+        item["kind"] = kind
+    # Data fields another kind used (the code changed plot -> bar, say) go.
+    for field in _ALL_DATA_FIELDS - set(refs):
+        item.pop(field, None)
+    for field, val in refs.items():
         if not (isinstance(val, list) and _same_numbers(val, item.get(field))):
             item[field] = val
-    # Style keys codegen doesn't write (not matplotlib plot kwargs) survive.
-    style = {k: v for k, v in (item.get("style") or {}).items() if k not in STYLE_KEYS}
-    style.update({k: _lit(v, k) for k, v in kw.items() if k in STYLE_KEYS})
+    # Style keys codegen doesn't write (not matplotlib kwargs) survive.
+    style = {key: v for key, v in (item.get("style") or {}).items() if key not in layers.ALL_STYLE}
+    style.update({key: _lit(v, key) for key, v in kw.items() if key in k["style"]})
     if style or "style" in item:
         item["style"] = style
     if "label" in kw:
         _put(item, "label", _lit(kw["label"], "label"), "")
     elif item.get("label"):
         item.pop("label")
-    unknown = set(kw) - STYLE_KEYS - {"label", "gid"}
+    unknown = set(kw) - k["style"] - set(k["data_kw"]) - {"label", "gid"}
     if unknown:
-        raise Skip(f"plot options {', '.join(sorted(unknown))} aren't supported")
+        raise Skip(f"{method} options {', '.join(sorted(unknown))} aren't supported")
     pnl.p["series"].append(item)
+
+
+_ALL_DATA_FIELDS = {f for k in layers.KINDS.values()
+                    for f in list(k["coords"]) + list(k["data_kw"].values())}
 
 
 def _arrow(call, state, taken):

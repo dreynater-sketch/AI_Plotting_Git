@@ -295,7 +295,11 @@ const KIND_PLURAL = {
 const plotName = (pid) => `plot (${pid})`;
 
 /** KIND_LABEL, except a curve drawn only as markers is called "dots". */
+/* A curve's own kind (layers.py): what it's called on screen. */
+const SERIES_WORDS = { errorbar: 'error bars', band: 'band', bar: 'bars' };
+
 function kindLabel(kind, obj) {
+  if (kind === 'series' && obj?.kind && SERIES_WORDS[obj.kind]) return SERIES_WORDS[obj.kind];
   if (kind === 'series' && obj && !seriesHasLine(obj.style)) return 'dots';
   return KIND_LABEL[kind];
 }
@@ -973,6 +977,13 @@ function refreshSeriesInspector() {
 
   $('f-series-marker').value = common((s) => s.obj.style?.marker ?? 'none') ?? 'none';
 
+  // Bands and bars have no dots, and a band no line: hide what doesn't apply.
+  const kinds = new Set(selected().map((s) => s.obj.kind || 'line'));
+  const flat = [...kinds].every((k) => k === 'band' || k === 'bar');
+  for (const id of ['f-series-marker', 'f-series-ms', 'f-series-lw']) {
+    $(id).closest('label').hidden = flat;
+  }
+
   const lw = common((s) => s.obj.style?.lw ?? 1.5);
   $('f-series-lw').value = lw ?? '';
   $('f-series-lw').placeholder = lw === undefined ? 'mixed' : '';
@@ -1351,7 +1362,7 @@ function buildList() {
       if (p[k]?.text) add(mathHtml(p[k].text), `${p.id}__${k}`, k, ICON.words, p[k]);
     }
     for (const t of p.texts || []) add(mathHtml(t.text), t.id, 'text', ICON.words, t);
-    for (const sr of p.series || []) add(seriesName(sr), sr.id, 'series', seriesIcon(sr.style), sr);
+    for (const sr of p.series || []) add(seriesName(sr), sr.id, 'series', seriesIcon(sr.style, sr.kind), sr);
     (p.arrows || []).forEach((ar, i) => add(
       p.arrows.length > 1 ? `Arrow ${i + 1}` : 'Arrow', ar.id, 'arrow', ICON.arrow));
     for (const hv of ['v', 'h']) {
@@ -1385,7 +1396,8 @@ const ICON = {
 const DASHES = { '--': '4 2', 'dashed': '4 2', ':': '1 2', 'dotted': '1 2', '-.': '4 2 1 2', 'dashdot': '4 2 1 2' };
 
 /** A tiny picture of a line as it is drawn: its color, dash and marker. */
-function seriesIcon(st = {}) {
+function seriesIcon(st = {}, kind = 'line') {
+  if (kind === 'band' || kind === 'bar' || kind === 'errorbar') return layerIcon(st, kind);
   const c = cssColor(st.color);
   const ls = st.ls ?? st.linestyle ?? '-';
   const line = seriesHasLine(st)
@@ -1422,6 +1434,21 @@ function wordsDetail(o) {
 function guideName(hv, l) {
   const at = Number((hv === 'v' ? l.x : l.y).toPrecision(3)).toString().replace('-', '−');
   return hv === 'v' ? `Up-down line at x = ${at}` : `Side-to-side line at y = ${at}`;
+}
+
+/** Small pictures for the curve kinds that aren't plain lines. */
+function layerIcon(st, kind) {
+  const c = cssColor(st.color);
+  if (kind === 'band') {
+    return `<svg viewBox="0 0 22 12"><path d="M1 4 Q11 0 21 4 V9 Q11 12 1 9 Z" fill="${c}" opacity=".35"/></svg>`;
+  }
+  if (kind === 'bar') {
+    return `<svg viewBox="0 0 22 12"><rect x="2" y="5" width="4" height="7" fill="${c}"/>` +
+      `<rect x="9" y="1" width="4" height="11" fill="${c}"/><rect x="16" y="7" width="4" height="5" fill="${c}"/></svg>`;
+  }
+  return `<svg viewBox="0 0 22 12"><path d="M6 1 V11 M4 1 H8 M4 11 H8 M16 3 V9 M14 3 H18 M14 9 H18" ` +
+    `stroke="${c}" stroke-width="1.2" fill="none"/><circle cx="6" cy="6" r="2" fill="${c}"/>` +
+    `<circle cx="16" cy="6" r="2" fill="${c}"/></svg>`;
 }
 
 /** A line's legend name, or a plain "no name" for helper lines. */

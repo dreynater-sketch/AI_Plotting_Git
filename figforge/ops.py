@@ -267,7 +267,7 @@ def _describe(spec, arrays):
             "labels": [{"id": t["id"], "text": t["text"], "x": t["xy"][0], "y": t["xy"][1],
                         "coords": t.get("coords", "data"), "size": t.get("size", 12),
                         "color": t.get("color", "black")} for t in p.get("texts", [])],
-            "curves": [{"id": s["id"], "legend_label": s.get("label", ""),
+            "curves": [{"id": s["id"], "kind": s.get("kind", "line"), "legend_label": s.get("label", ""),
                         "points": int(arrays[s["y"]].size) if isinstance(s["y"], str) and s["y"] in arrays else len(s["y"]),
                         "x_range": rng(s["x"]), "y_range": rng(s["y"]),
                         "style": s.get("style", {})} for s in p.get("series", [])],

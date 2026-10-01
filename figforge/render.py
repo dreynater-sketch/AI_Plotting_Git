@@ -25,6 +25,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.patches import FancyArrowPatch
 
+from figforge import layers
+
 SVG_DPI = 72
 
 # In preview mode, series with more than this many points are rasterized. The
@@ -38,20 +40,11 @@ _LAYOUT_CACHE = {}
 
 # Style keys we forward to Axes.plot. Anything else in a spec style dict is
 # ignored rather than blindly splatted into matplotlib.
-STYLE_KEYS = {"color", "lw", "linewidth", "ls", "linestyle", "marker", "ms",
-              "markersize", "mew", "markeredgewidth", "mfc", "markerfacecolor",
-              "mec", "markeredgecolor", "alpha", "zorder"}
-
-
 def _resolve(ref, arrays):
     """A series coordinate is either an npz key or an inline literal list."""
     if isinstance(ref, str):
         return arrays[ref]
     return np.asarray(ref, dtype=float)
-
-
-def _style(style):
-    return {k: v for k, v in (style or {}).items() if k in STYLE_KEYS}
 
 
 def build_figure(spec, arrays, preview=False):
@@ -219,15 +212,22 @@ def _draw_panel(ax, p, arrays, preview=False):
             _guide_hit(ax.axvline, 0, f"t_{pid}__zero__v")
 
     for s in p.get("series", []):
-        xs = _resolve(s["x"], arrays)
-        ys = _resolve(s["y"], arrays)
-        (line,) = ax.plot(xs, ys,
-                          label=s.get("label"), **_style(s.get("style")))
-        if preview and len(xs) > RASTER_MIN_POINTS:
-            line.set_rasterized(True)
+        # Every kind of curve (line, error bars, band, bars) is drawn the
+        # same way: see layers.py.
+        k = layers.info(s)
+        pos = [_resolve(s[c], arrays) for c in k["coords"]]
+        data_kw = {kw: _resolve(s[f], arrays) for kw, f in k["data_kw"].items()
+                   if s.get(f) is not None}
+        art = getattr(ax, k["method"])(*pos, **data_kw, label=s.get("label"),
+                                       **layers.style_for(s))
+        xs, ys = pos[0], pos[1]
+        if preview and layers.kind_of(s) == "line" and len(xs) > RASTER_MIN_POINTS:
+            art[0].set_rasterized(True)
 
         if preview:
-            _draw_series_hit_target(ax, s, xs, ys)
+            # A band is grabbed along its middle, everything else along y.
+            hy = (ys + pos[2]) / 2 if layers.kind_of(s) == "band" else ys
+            _draw_series_hit_target(ax, s, xs, hy)
 
     for a in p.get("arrows", []):
         patch = FancyArrowPatch(

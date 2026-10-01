@@ -74,7 +74,10 @@ the x values and one column per curve (e.g. channel, energy, 1A_middle, 1B). \
 Crop to the range that matters and keep it under ~20,000 rows. Save it as \
 $OUTPUT_DIR/<short_name>.csv. If the user gave a tidy table already, it is \
 listed as available and you can use it directly.
-3. Call create_figure with that table's file name and column names.
+3. Call create_figure with that table's file name and column names. Data and \
+a fit or model usually belong in the same panel: give the fit its own \
+x_column (a layer or a second table column) - and if you think of a curve \
+later, add_curves adds it to the existing figure.
 4. Call view_figure, then fix what a careful scientist would: axis labels \
 with units (matplotlib mathtext works, e.g. $T_1$ ($\\mu$s)), sensible limits, \
 line styles that stay distinguishable in black and white, a legend when \
@@ -87,10 +90,13 @@ channel calibration). describe_figure gives the ids the editing tools need.
 someone who isn't an expert: what the figure shows, and anything you \
 couldn't do or had to assume.
 
-FigForge can draw lines and points (1-4 panels side by side, linear or log \
-axes, a second top/right scale, labels, legend, fonts). It cannot yet draw \
-bars, histograms, error bars, shaded bands or colour maps - if the idea needs \
-one, make the closest honest figure and say so. If an example image is \
+FigForge can draw lines and points, error bars, shaded bands (uncertainty, \
+ranges, fits with confidence) and bars (bar charts; histograms from bin \
+centres and counts you compute in the sandbox), in 1-4 panels side by side, \
+with linear or log axes, a second top/right scale, labels, legend and fonts. \
+It cannot yet draw colour maps / heatmaps, 3D or polar plots - if the idea \
+needs one, make the closest honest figure and say so. For a fit, compute the \
+fitted curve in the sandbox and plot it as its own column. If an example image is \
 attached, match its layout and style as closely as these tools allow.
 
 Rules: never invent data, values or units that aren't in the files or the \
@@ -101,6 +107,17 @@ Don't ask the user questions - make sensible choices and say what you chose.\
 
 _TEXT = {"type": "string"}
 _SCALE = {"type": "string", "enum": list(csvimport.SCALES)}
+_LAYER = ops._obj({
+    "kind": {"type": "string", "enum": list(csvimport.LAYER_KINDS)},
+    "y_column": {"type": "string"},
+    "second_column": {"type": "string"},
+    "x_column": {"type": "string",
+                 "description": "This layer's own x column, e.g. a fit on a finer grid; \"\" = the panel's x."},
+    "label": {"type": "string", "description": "Legend entry; \"\" uses the column name."},
+})
+_LAYERS_DESC = ("Other kinds of curves ([] for none): error bars (second_column = the +/- error), "
+                "a shaded band (y_column = lower edge, second_column = upper edge), or bars (a bar "
+                "chart, or a histogram from bin centres + counts; second_column \"\").")
 
 CREATE_FIGURE = {
     "name": "create_figure",
@@ -116,7 +133,10 @@ CREATE_FIGURE = {
                        "x_column": {"type": "string", "description": "Header name of the x column."},
                        "y_columns": {"type": "array", "items": {"type": "string"},
                                      "description": "Header names to plot against x, one curve each."},
-                       "plot_as": {"type": "string", "enum": list(csvimport.PLOT_KINDS)},
+                       "plot_as": {"type": "string", "enum": list(csvimport.PLOT_KINDS),
+                                   "description": "How the y_columns are drawn."},
+                       "layers": {"type": "array", "description": _LAYERS_DESC,
+                                  "items": _LAYER},
                        "title": _TEXT,
                        "x_label": _TEXT,
                        "y_label": _TEXT,
@@ -125,6 +145,23 @@ CREATE_FIGURE = {
                    })},
     }),
     "strict": True,
+}
+
+ADD_CURVES = {
+    "name": "add_curves",
+    "description": "Add more curves to a panel of the existing figure - a fit, a model, a "
+                   "band or bars - keeping every edit so far. The table may be the one the "
+                   "figure was made from (re-saved with extra columns is fine) or another "
+                   "table, whose new columns are merged in. Columns by header name.",
+    "input_schema": ops._obj({
+        "table": {"type": "string"},
+        "panel_id": {"type": "string", "description": "e.g. \"a\"."},
+        "x_column": {"type": "string"},
+        "y_columns": {"type": "array", "items": {"type": "string"},
+                      "description": "Columns drawn as plot_as ([] for none)."},
+        "plot_as": {"type": "string", "enum": list(csvimport.PLOT_KINDS)},
+        "layers": {"type": "array", "description": _LAYERS_DESC, "items": _LAYER},
+    }),
 }
 
 VIEW_FIGURE = {
@@ -138,12 +175,13 @@ VIEW_FIGURE = {
 # tools are over its size limit. ops.py re-checks every argument itself
 # (errors go back to Claude as is_error results), so only create_figure --
 # the most intricate schema -- stays strict.
-TOOLS = [CODE_EXECUTION, CREATE_FIGURE, VIEW_FIGURE] + [
+TOOLS = [CODE_EXECUTION, CREATE_FIGURE, ADD_CURVES, VIEW_FIGURE] + [
     {k: v for k, v in t.items() if k != "strict"} for t in ops.TOOLS]
 
 # What the page shows while Claude works, per tool.
 PROGRESS = {
     "create_figure": "Drew the figure",
+    "add_curves": "Added curves",
     "view_figure": "Looked at the figure",
     "describe_figure": "Read the figure's parts",
     "set_text": "Changed some words",
@@ -385,6 +423,52 @@ def _column(names, want, table):
     raise _ToolError(f"{table} has no column {want!r}. Its columns: {names}")
 
 
+def _layers(names, table, layers):
+    out = []
+    for ly in layers or []:
+        item = {"kind": ly["kind"], "y": _column(names, ly["y_column"], table),
+                "extra": (_column(names, ly["second_column"], table) if ly["kind"] != "bar" else None),
+                "label": ly.get("label") or ""}
+        if ly.get("x_column"):
+            item["x"] = _column(names, ly["x_column"], table)
+        out.append(item)
+    return out
+
+
+def _add_curves(state, fig, args, spec):
+    table = _safe_name(args.get("table") or "")
+    if table not in state["tables"]:
+        raise _ToolError(f"FigForge has no table {table!r} (it has: {', '.join(state['tables'])}).")
+    for key in ("panel_id", "x_column", "y_columns", "plot_as", "layers"):
+        if key not in args:
+            raise _ToolError(f"add_curves needs {key}")
+    text, base = fig.load_table(table), fig.load_source_csv() or ""
+    try:
+        have = set(csvimport.parse(base)[0]) if base else set()
+        names = csvimport.parse(text)[0]
+        merged_note = ""
+        if base and not have <= set(names):
+            text, added = csvimport.merge_tables(base, text)
+            names = csvimport.parse(text)[0]
+            merged_note = f" (merged {len(added)} new column(s) of {table} into the figure's table)"
+        batch = {"x": _column(names, args["x_column"], table),
+                 "ys": [_column(names, y, table) for y in args["y_columns"]],
+                 "kind": args["plot_as"], "layers": _layers(names, table, args["layers"])}
+        new_spec, new_arrays, ids = csvimport.add_batch(spec, fig.name, text, args["panel_id"], batch)
+        render.render(new_spec, new_arrays)
+    except csvimport.CSVError as e:
+        raise _ToolError(f"Couldn't add those curves: {e}")
+    except _ToolError:
+        raise
+    except Exception as e:
+        raise _ToolError(f"Those curves couldn't be drawn ({type(e).__name__}: {e}).")
+    fig.save_arrays(new_arrays)
+    fig.save_source_csv(text)
+    p = next(q for q in new_spec["panels"] if q["id"] == args["panel_id"])
+    return (f"Added {', '.join(ids)}{merged_note}. Panel limits stay x {p['xlim']}, y {p['ylim']} - "
+            "use set_axis if the new curves need more room."), new_spec, new_arrays
+
+
 def _run_tool(state, fig, call, spec, arrays):
     """-> (tool_result content, spec, arrays, changed)."""
     args = call.input or {}
@@ -402,7 +486,8 @@ def _run_tool(state, fig, call, spec, arrays):
             panels = [{"x": _column(names, p["x_column"], table),
                        "ys": [_column(names, y, table) for y in p["y_columns"]],
                        "kind": p["plot_as"], "title": p["title"], "xlabel": p["x_label"],
-                       "ylabel": p["y_label"], "xscale": p["x_scale"], "yscale": p["y_scale"]}
+                       "ylabel": p["y_label"], "xscale": p["x_scale"], "yscale": p["y_scale"],
+                       "layers": _layers(names, table, p.get("layers"))}
                       for p in args.get("panels") or []]
             new_spec, new_arrays = csvimport.build_panels(
                 fig.name, text, panels, table, args.get("figure_title") or "")
@@ -421,6 +506,10 @@ def _run_tool(state, fig, call, spec, arrays):
 
     if not state["created"]:
         raise _ToolError("There is no figure yet - call create_figure first.")
+
+    if call.name == "add_curves":
+        content, new_spec, new_arrays = _add_curves(state, fig, args, spec)
+        return content, new_spec, new_arrays, True
 
     if call.name == "view_figure":
         if state["views"] >= MAX_VIEWS:
