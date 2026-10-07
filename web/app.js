@@ -204,6 +204,9 @@ function resolve(id, source = spec) {
     return { id, kind: 'legend', obj: p.legend, draggable: true,
              panel: p.id, coords: 'axes' };
   }
+  // A colour bar belongs to its heatmap / contour / scatter.
+  const cbar = id.match(/^(.+)__cbar$/);
+  if (cbar) return resolve(cbar[1], source);
   // The grey lines through zero: one element per panel, drawn as two
   // paths ("__zero__h" / "__zero__v" in the SVG).
   const zeroMatch = id.match(/^(.+)__zero(?:__[hv])?$/);
@@ -296,7 +299,11 @@ const plotName = (pid) => `plot (${pid})`;
 
 /** KIND_LABEL, except a curve drawn only as markers is called "dots". */
 /* A curve's own kind (layers.py): what it's called on screen. */
-const SERIES_WORDS = { errorbar: 'error bars', band: 'band', bar: 'bars' };
+const SERIES_WORDS = {
+  errorbar: 'error bars', band: 'band', bar: 'bars', step: 'steps', scatter: 'coloured dots',
+  heatmap: 'heatmap', contour: 'contour lines', contourf: 'filled contours', box: 'box plot',
+};
+const CMAP_KINDS = new Set(['heatmap', 'contour', 'contourf', 'scatter']);
 
 function kindLabel(kind, obj) {
   if (kind === 'series' && obj?.kind && SERIES_WORDS[obj.kind]) return SERIES_WORDS[obj.kind];
@@ -965,6 +972,19 @@ function refreshLegendInspector() {
 /** A curve's style lives under obj.style, not on obj itself (unlike every
  *  other kind so far), since that's how the SPEC already models it -- these
  *  fields write to s.obj.style.xxx rather than s.obj.xxx accordingly. */
+function refreshCmapFields() {
+  const st = (s) => s.obj.style || {};
+  $('f-cmap').value = common((s) => st(s).cmap ?? 'viridis') ?? 'viridis';
+  $('f-cmap-log').checked = common((s) => st(s).norm === 'log') === true;
+  const lo = common((s) => st(s).vmin ?? null), hi = common((s) => st(s).vmax ?? null);
+  $('f-cmap-min').value = lo ?? '';
+  $('f-cmap-max').value = hi ?? '';
+  const bar = common((s) => !!s.obj.colorbar);
+  $('f-cbar').checked = bar === true;
+  $('f-cbar-label-field').hidden = bar !== true;
+  $('f-cbar-label').value = common((s) => s.obj.colorbar?.label ?? '') ?? '';
+}
+
 function refreshSeriesInspector() {
   const label = common((s) => s.obj.label ?? '');
   $('f-series-label').value = label ?? '';
@@ -977,12 +997,17 @@ function refreshSeriesInspector() {
 
   $('f-series-marker').value = common((s) => s.obj.style?.marker ?? 'none') ?? 'none';
 
-  // Bands and bars have no dots, and a band no line: hide what doesn't apply.
+  // Show only the settings this kind of curve has.
   const kinds = new Set(selected().map((s) => s.obj.kind || 'line'));
-  const flat = [...kinds].every((k) => k === 'band' || k === 'bar');
-  for (const id of ['f-series-marker', 'f-series-ms', 'f-series-lw']) {
-    $(id).closest('label').hidden = flat;
-  }
+  const all = (...ks) => [...kinds].every((k) => ks.includes(k));
+  const noDots = all('band', 'bar', 'heatmap', 'contour', 'contourf', 'box');
+  $('f-series-marker').closest('label').hidden = noDots;
+  $('f-series-ms').closest('label').hidden = noDots || all('scatter');
+  $('f-series-lw').closest('label').hidden = noDots || all('scatter');
+  const mapped = selected().every((s) => CMAP_KINDS.has(s.obj.kind) && (s.obj.kind !== 'scatter' || s.obj.c));
+  $('f-series-color').closest('label').hidden = mapped;
+  $('cmap-fields').hidden = !mapped;
+  if (mapped) refreshCmapFields();
 
   const lw = common((s) => s.obj.style?.lw ?? 1.5);
   $('f-series-lw').value = lw ?? '';
@@ -1083,7 +1108,7 @@ function refreshDataPanel(sel) {
       if (token !== dataPanelToken) return;  // a newer selection fired since
       if (!ok) throw new Error(data.error || 'failed to load');
       $('data-status').textContent = '';
-      dataPanel = { s, cols: data.columns };
+      dataPanel = { s, cols: data.columns, note: data.note };
       drawDataTable(p);
     })
     .catch((e) => {
@@ -1111,11 +1136,17 @@ function drawDataTable(p) {
     y: p.ylabel?.text ? mathHtml(p.ylabel.text) : 'Up (y)',
   };
   $('data-head-row').innerHTML = cols.map((c) => `<th>${titles[c.field] ?? escapeHtml(c.title)}</th>`).join('');
-  const n = cols[0].values.length;
+  if (!cols.length) {
+    $('data-count').textContent = dataPanel.note || '';
+    $('data-table-body').innerHTML = '';
+    return;
+  }
+  const n = Math.max(...cols.map((c) => c.values.length));
   $('data-count').textContent = `${n.toLocaleString()} point${n === 1 ? '' : 's'} · click a number to change it`;
   const rows = [];
   for (let i = 0; i < n; i++) {
     rows.push('<tr>' + cols.map((c, j) => {
+      if (i >= c.values.length) return '<td class="empty"></td>';
       const { v, edited } = dataValue(c, i);
       return `<td data-i="${i}" data-c="${j}"${edited ? ' class="edited" title="Changed by hand"' : ''}>` +
         `${v === null || v === undefined ? '' : fmtNum(v)}</td>`;
@@ -1126,7 +1157,7 @@ function drawDataTable(p) {
 
 $('data-table-body').addEventListener('click', (e) => {
   const td = e.target.closest('td');
-  if (!td || td.querySelector('input') || !dataPanel?.cols) return;
+  if (!td || td.classList.contains('empty') || td.querySelector('input') || !dataPanel?.cols) return;
   const i = +td.dataset.i, col = dataPanel.cols[+td.dataset.c];
   const { v } = dataValue(col, i);
   const input = document.createElement('input');
@@ -1487,7 +1518,7 @@ const DASHES = { '--': '4 2', 'dashed': '4 2', ':': '1 2', 'dotted': '1 2', '-.'
 
 /** A tiny picture of a line as it is drawn: its color, dash and marker. */
 function seriesIcon(st = {}, kind = 'line') {
-  if (kind === 'band' || kind === 'bar' || kind === 'errorbar') return layerIcon(st, kind);
+  if (kind && kind !== 'line') return layerIcon(st, kind);
   const c = cssColor(st.color);
   const ls = st.ls ?? st.linestyle ?? '-';
   const line = seriesHasLine(st)
@@ -1535,6 +1566,28 @@ function layerIcon(st, kind) {
   if (kind === 'bar') {
     return `<svg viewBox="0 0 22 12"><rect x="2" y="5" width="4" height="7" fill="${c}"/>` +
       `<rect x="9" y="1" width="4" height="11" fill="${c}"/><rect x="16" y="7" width="4" height="5" fill="${c}"/></svg>`;
+  }
+  if (kind === 'step') {
+    return `<svg viewBox="0 0 22 12"><path d="M1 10 H6 V6 H11 V2 H16 V7 H21" stroke="${c}" stroke-width="1.6" fill="none"/></svg>`;
+  }
+  if (kind === 'heatmap' || kind === 'contourf') {
+    return '<svg viewBox="0 0 22 12"><rect x="1" y="1" width="7" height="5" fill="#440154"/>' +
+      '<rect x="8" y="1" width="7" height="5" fill="#21918c"/><rect x="15" y="1" width="6" height="5" fill="#fde725"/>' +
+      '<rect x="1" y="6" width="7" height="5" fill="#3b528b"/><rect x="8" y="6" width="7" height="5" fill="#5ec962"/>' +
+      '<rect x="15" y="6" width="6" height="5" fill="#21918c"/></svg>';
+  }
+  if (kind === 'contour') {
+    return '<svg viewBox="0 0 22 12"><ellipse cx="11" cy="6" rx="9" ry="5" fill="none" stroke="#3b528b" stroke-width="1.2"/>' +
+      '<ellipse cx="11" cy="6" rx="5" ry="2.6" fill="none" stroke="#5ec962" stroke-width="1.2"/></svg>';
+  }
+  if (kind === 'scatter') {
+    return '<svg viewBox="0 0 22 12"><circle cx="4" cy="8" r="2" fill="#440154"/><circle cx="10" cy="5" r="3" fill="#21918c"/>' +
+      '<circle cx="17" cy="4" r="2.5" fill="#fde725" stroke="#c9b200" stroke-width=".6"/></svg>';
+  }
+  if (kind === 'box') {
+    return `<svg viewBox="0 0 22 12"><path d="M11 0 V3 M11 9 V12" stroke="currentColor" stroke-width="1"/>` +
+      `<rect x="6" y="3" width="10" height="6" fill="${c}" fill-opacity=".6" stroke="currentColor" stroke-width=".8"/>` +
+      `<path d="M6 6 H16" stroke="currentColor" stroke-width="1.2"/></svg>`;
   }
   return `<svg viewBox="0 0 22 12"><path d="M6 1 V11 M4 1 H8 M4 11 H8 M16 3 V9 M14 3 H18 M14 9 H18" ` +
     `stroke="${c}" stroke-width="1.2" fill="none"/><circle cx="6" cy="6" r="2" fill="${c}"/>` +
@@ -2103,6 +2156,31 @@ $('f-series-alpha-num').addEventListener('change', (e) => {
     $('f-series-alpha').value = v;
     edit((o) => { (o.style ??= {}).alpha = v; });
   }
+});
+
+$('f-cmap').addEventListener('change', (e) => edit((o) => {
+  o.style ??= {};
+  o.style.cmap = e.target.value;
+  delete o.style.colors;          // contour lines in one colour -> coloured by level
+}));
+$('f-cmap-log').addEventListener('change', (e) => edit((o) => {
+  o.style ??= {};
+  if (e.target.checked) o.style.norm = 'log'; else delete o.style.norm;
+}));
+for (const [id, key] of [['f-cmap-min', 'vmin'], ['f-cmap-max', 'vmax']]) {
+  $(id).addEventListener('change', (e) => {
+    const v = e.target.value.trim() === '' ? null : parseFloat(e.target.value);
+    if (v !== null && !Number.isFinite(v)) return;
+    edit((o) => { o.style ??= {}; if (v === null) delete o.style[key]; else o.style[key] = v; });
+  });
+}
+$('f-cbar').addEventListener('change', (e) => {
+  const on = e.target.checked;
+  edit((o) => { if (on) o.colorbar = o.colorbar ?? { label: o.label ?? '' }; else delete o.colorbar; });
+  $('f-cbar-label-field').hidden = !on;
+});
+$('f-cbar-label').addEventListener('input', (e) => {
+  edit((o) => { if (o.colorbar) o.colorbar.label = e.target.value; }, { immediate: false });
 });
 
 $('f-guide-color').addEventListener('input', (e) => {

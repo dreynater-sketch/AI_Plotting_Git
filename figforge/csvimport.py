@@ -20,7 +20,7 @@ MAX_BYTES = 4 * 1024 * 1024   # Vercel caps a request body at 4.5 MB
 MAX_COLUMNS = 200
 PALETTE = ["#4C78A8", "#E07A3D", "#2E8B57", "#B03A6F", "#6F4FB0",
            "#8C6D31", "#1F9AA8", "#D62728", "#7F7F7F", "#BCBD22"]
-PLOT_KINDS = ("line", "scatter", "line+markers")
+PLOT_KINDS = ("line", "scatter", "line+markers", "steps")
 
 
 class CSVError(ValueError):
@@ -138,7 +138,28 @@ def build(project, text, x, ys, kind="line", filename=""):
     return spec, arrays
 
 
-LAYER_KINDS = ("errorbar", "band", "bar")
+LAYER_KINDS = ("errorbar", "band", "bar", "scatter", "heatmap", "contour", "contourf", "box")
+GRID_KINDS = ("heatmap", "contour", "contourf")
+MAX_GRID_CELLS = 1_000_000
+
+
+def _grid(xcol, ycol, zcol):
+    """Tidy x, y, z columns -> (xs, ys, Z) with Z[len(ys), len(xs)]; cells the
+    table doesn't list stay blank (NaN)."""
+    ok = ~(np.isnan(xcol) | np.isnan(ycol))
+    xs, ys = np.unique(xcol[ok]), np.unique(ycol[ok])
+    if xs.size < 2 or ys.size < 2:
+        raise CSVError("a heatmap or contour needs at least 2 different x and 2 different y values")
+    if xs.size * ys.size > MAX_GRID_CELLS:
+        raise CSVError(f"that grid is {xs.size} x {ys.size}; the limit is {MAX_GRID_CELLS:,} cells")
+    Z = np.full((ys.size, xs.size), np.nan)
+    Z[np.searchsorted(ys, ycol[ok]), np.searchsorted(xs, xcol[ok])] = zcol[ok]
+    return xs, ys, Z
+
+
+def _edges(v):
+    """Outer edges of cells centred on v (what pcolormesh shading='auto' draws)."""
+    return float(v[0] - (v[1] - v[0]) / 2), float(v[-1] + (v[-1] - v[-2]) / 2)
 
 
 def _col(names, cols, ref, what):
@@ -165,50 +186,105 @@ def _col(names, cols, ref, what):
 def _curves(idp, pre, names, cols, batch, arrays, colour):
     """One batch of curves for a panel: batch = {x, ys, kind, layers}; a
     layer may have its own x (a fit on a finer grid than the data).
-    -> (behind, front, lim_x, lim_y, colour, has_bar). Array keys start
-    with `pre` and ids with `idp`, so batches never collide."""
-    x = _col(names, cols, batch.get("x"), "x")
+    -> (behind, front, lim_x, lim_y, colour, has_bar, exact). exact = data
+    edges the axes should hug (heatmaps, contours) instead of padding.
+    Array keys start with `pre` and ids with `idp`, so batches never collide."""
+    layers = batch.get("layers") or []
+    only_boxes = layers and all(ly.get("kind") == "box" for ly in layers) and not batch.get("ys")
+    x = None if only_boxes and batch.get("x") in (None, "") else _col(names, cols, batch.get("x"), "x")
     kind = batch.get("kind") or "line"
     if kind not in PLOT_KINDS:
         raise CSVError(f"unknown plot type '{kind}'")
     ys = [_col(names, cols, y, "y") for y in batch.get("ys") or []]
     ys = [y for y in ys if y != x]
-    layers = batch.get("layers") or []
     if not ys and not layers:
         raise CSVError("pick at least one numeric column to plot")
     xkey = pre + "x"
-    arrays[xkey] = cols[x]
-    behind, front, lim_x, lim_y, has_bar = [], [], [cols[x]], [], False
+    behind, front, lim_x, lim_y, has_bar, exact = [], [], [], [], False, []
+    if x is not None:
+        arrays[xkey] = cols[x]
+        if ys or any(ly.get("kind") not in GRID_KINDS + ("box",) for ly in layers):
+            lim_x.append(cols[x])
     for n, y in enumerate(ys):
         key = f"{pre}y{n}"
         arrays[key] = cols[y]
         style = {"color": PALETTE[colour % len(PALETTE)]}
         colour += 1
+        item = {"id": f"{idp}s{n}", "x": xkey, "y": key, "label": _plain(names[y]), "style": style}
         if kind == "line":
             style.update(lw=1.6)
         elif kind == "scatter":
             style.update(ls="none", marker="o", ms=4)
+        elif kind == "steps":
+            style.update(lw=1.4, where="mid")
+            item["kind"] = "step"
         else:
             style.update(lw=1.4, marker="o", ms=3.5)
-        front.append({"id": f"{idp}s{n}",
-                      "x": xkey, "y": key, "label": _plain(names[y]), "style": style})
+        front.append(item)
         lim_y.append(cols[y])
     for m, ly in enumerate(layers):
         lk = ly.get("kind")
         if lk not in LAYER_KINDS:
             raise CSVError(f"unknown layer kind '{lk}'")
+        colour_hex = PALETTE[colour % len(PALETTE)]
+        colour += 1
+        key, ex = f"{pre}l{m}", f"{pre}l{m}b"
+        if lk == "box":
+            groups = [_col(names, cols, c, "a box plot group") for c in ly.get("columns") or []]
+            if not groups:
+                raise CSVError("a box plot needs at least one column (one per group)")
+            gkeys = []
+            for j, g in enumerate(groups):
+                gk = f"{pre}l{m}g{j}"
+                arrays[gk] = cols[g][~np.isnan(cols[g])]
+                gkeys.append(gk)
+                lim_y.append(arrays[gk])
+            lim_x.append(np.array([0.5, len(groups) + 0.5]))
+            front.append({"id": f"{idp}l{m}", "kind": "box", "groups": gkeys,
+                          "label": _plain(ly.get("label") or ""),
+                          "style": {"color": colour_hex, "alpha": 0.7, "widths": 0.6,
+                                    "medianprops": {"color": "black"},
+                                    "positions": list(range(1, len(groups) + 1)),
+                                    "tick_labels": [_plain(names[g]) for g in groups]}})
+            continue
+        if x is None:
+            raise CSVError(f"a {lk} layer needs an x column")
         y = _col(names, cols, ly.get("y"), f"the {lk} layer")
-        extra = _col(names, cols, ly.get("extra"), f"the {lk} layer's second column") if lk != "bar" else None
         lx = xkey
         if ly.get("x") not in (None, "", x):
             xi = _col(names, cols, ly["x"], f"the {lk} layer's x")
             if xi != x:
                 lx = f"{pre}l{m}x"
                 arrays[lx] = cols[xi]
-                lim_x.append(cols[xi])
-        colour_hex = PALETTE[colour % len(PALETTE)]
-        colour += 1
-        key, ex = f"{pre}l{m}", f"{pre}l{m}b"
+        if lk in GRID_KINDS:
+            z = _col(names, cols, ly.get("extra"), f"the {lk} layer's value (z) column")
+            xs, gys, Z = _grid(arrays[lx], cols[y], cols[z])
+            gx, gy = f"{pre}l{m}gx", f"{pre}l{m}gy"
+            arrays[gx], arrays[gy], arrays[key] = xs, gys, Z
+            item = {"id": f"{idp}l{m}", "kind": lk, "x": gx, "y": gy, "z": key,
+                    "label": _plain(ly.get("label") or names[z])}
+            if lk == "contour":
+                # Over a heatmap, white lines; on their own, coloured by level.
+                over = any(o.get("kind") in ("heatmap", "contourf") for o in layers)
+                item["style"] = ({"levels": 8, "colors": "white", "linewidths": 0.8} if over
+                                 else {"levels": 8, "cmap": "viridis", "linewidths": 1.0})
+                exact.append((float(xs[0]), float(xs[-1]), float(gys[0]), float(gys[-1])))
+            else:
+                item["style"] = {"cmap": "viridis"} if lk == "heatmap" else {"cmap": "viridis", "levels": 12}
+                item["colorbar"] = {"label": _plain(ly.get("label") or names[z])}
+                if lk == "heatmap":
+                    exact.append(_edges(xs) + _edges(gys))
+                else:
+                    exact.append((float(xs[0]), float(xs[-1]), float(gys[0]), float(gys[-1])))
+            behind.append(item)
+            continue
+        extra = (_col(names, cols, ly.get("extra"), f"the {lk} layer's second column")
+                 if lk in ("errorbar", "band") or (lk == "scatter" and ly.get("extra") not in (None, ""))
+                 else None)
+        if lx != xkey:
+            lim_x.append(arrays[lx])
+        elif x is not None and not lim_x:
+            lim_x.append(cols[x])
         arrays[key] = cols[y]
         default = f"{names[y]} – {names[extra]}" if lk == "band" else names[y]
         item = {"id": f"{idp}l{m}",
@@ -224,6 +300,27 @@ def _curves(idp, pre, names, cols, batch, arrays, colour):
             item.update(y2=ex, style={"color": colour_hex, "alpha": 0.25, "lw": 0, "zorder": 1})
             lim_y += [cols[y], cols[extra]]
             behind.append(item)
+        elif lk == "scatter":
+            # Dots coloured by one column (with a colour bar) and, optionally,
+            # sized by another; without a colour column, plain coloured dots.
+            style = {"s": 25}
+            if extra is not None:
+                arrays[ex] = cols[extra]
+                item["c"] = ex
+                style["cmap"] = "viridis"
+                item["colorbar"] = {"label": _plain(names[extra])}
+            else:
+                style["color"] = colour_hex
+            if ly.get("size") not in (None, ""):
+                sz = _col(names, cols, ly["size"], "the dot size column")
+                v = cols[sz]
+                lo, hi = np.nanmin(v), np.nanmax(v)
+                arrays[f"{pre}l{m}s"] = 10 + 90 * (v - lo) / (hi - lo) if hi > lo else np.full_like(v, 30)
+                item["sizes"] = f"{pre}l{m}s"
+                style.pop("s")
+            item["style"] = style
+            lim_y.append(cols[y])
+            front.append(item)
         else:  # bar: as wide as 80% of the closest spacing between x values
             xs = np.unique(arrays[lx][~np.isnan(arrays[lx])])
             width = float(np.min(np.diff(xs))) * 0.8 if xs.size > 1 else 0.8
@@ -231,19 +328,26 @@ def _curves(idp, pre, names, cols, batch, arrays, colour):
             lim_y += [cols[y], np.zeros(1)]   # bars stand on zero
             has_bar = True
             behind.append(item)
-    return behind, front, lim_x, lim_y, colour, has_bar
+    return behind, front, lim_x, lim_y, colour, has_bar, exact
 
 
 def _names_of(names, cols, batch):
     """The batch with every column reference written as its header name."""
     def nm(ref, what):
         return names[_col(names, cols, ref, what)]
-    out = {"x": nm(batch.get("x"), "x"), "ys": [nm(y, "y") for y in batch.get("ys") or []],
+    has_x = batch.get("x") not in (None, "")
+    out = {"x": nm(batch["x"], "x") if has_x else "", "ys": [nm(y, "y") for y in batch.get("ys") or []],
            "kind": batch.get("kind") or "line", "layers": []}
     for ly in batch.get("layers") or []:
-        l = {"kind": ly.get("kind"), "y": nm(ly.get("y"), "layer"), "label": ly.get("label") or ""}
-        if ly.get("kind") != "bar":
-            l["extra"] = nm(ly.get("extra"), "layer")
+        l = {"kind": ly.get("kind"), "label": ly.get("label") or ""}
+        if ly.get("kind") == "box":
+            l["columns"] = [nm(c, "group") for c in ly.get("columns") or []]
+        else:
+            l["y"] = nm(ly.get("y"), "layer")
+            if ly.get("extra") not in (None, ""):
+                l["extra"] = nm(ly["extra"], "layer")
+            if ly.get("size") not in (None, ""):
+                l["size"] = nm(ly["size"], "dot size")
         if ly.get("x") not in (None, ""):
             l["x"] = nm(ly["x"], "layer x")
         out["layers"].append(l)
@@ -272,15 +376,15 @@ def build_panels(project, text, panels, filename="", figure_title=""):
         if xscale not in SCALES or yscale not in SCALES:
             raise CSVError(f"{where}scale must be linear or log")
         batches = [pn] + list(pn.get("more") or [])
-        behind, front, lim_x, lim_y, has_bar = [], [], [], [], False
+        behind, front, lim_x, lim_y, has_bar, exact = [], [], [], [], False, []
         try:
             for b, batch in enumerate(batches):
                 # Panel (a)'s first batch keeps the plain "x" / "y0" names
                 # older projects use.
                 pre = ("" if i == 0 else f"{pid}_") if b == 0 else f"{pid}_m{b}_"
                 idp = f"{pid}_" if b == 0 else f"{pid}_m{b}_"
-                bh, fr, lx, ly_, colour, bar = _curves(idp, pre, names, cols, batch, arrays, colour)
-                behind += bh; front += fr; lim_x += lx; lim_y += ly_; has_bar |= bar
+                bh, fr, lx, ly_, colour, bar, ex_ = _curves(idp, pre, names, cols, batch, arrays, colour)
+                behind += bh; front += fr; lim_x += lx; lim_y += ly_; has_bar |= bar; exact += ex_
             recipe = [_names_of(names, cols, batch) for batch in batches]
         except CSVError as e:
             raise CSVError(f"{where}{e}")
@@ -288,7 +392,16 @@ def build_panels(project, text, panels, filename="", figure_title=""):
         def text_or(value, default):
             return default if value is None else str(value)
 
-        ylim = _limits(lim_y, yscale == "log")
+        # A heatmap or contour fills the box exactly; other curves get padding.
+        ex_x = ex_y = None
+        if exact:
+            ex_x = [min(e[0] for e in exact), max(e[1] for e in exact)]
+            ex_y = [min(e[2] for e in exact), max(e[3] for e in exact)]
+        xlim = _limits(lim_x, xscale == "log") if lim_x else ex_x
+        ylim = _limits(lim_y, yscale == "log") if lim_y else ex_y
+        if exact:
+            xlim = [min(xlim[0], ex_x[0]), max(xlim[1], ex_x[1])] if lim_x else ex_x
+            ylim = [min(ylim[0], ex_y[0]), max(ylim[1], ex_y[1])] if lim_y else ex_y
         # Bars stand on zero: no padding below it when nothing is negative.
         if has_bar and yscale == "linear" and min(float(np.nanmin(c)) for c in lim_y) >= 0:
             ylim[0] = 0.0
@@ -300,14 +413,14 @@ def build_panels(project, text, panels, filename="", figure_title=""):
         out.append({
             "id": pid,
             "title": {"text": title, "loc": "left", "size": 14, "color": "#000000"},
-            "xlabel": {"text": text_or(pn.get("xlabel"), _plain(x0)), "size": 13, "color": "#000000"},
+            "xlabel": {"text": text_or(pn.get("xlabel"), _plain(x0) if x0 else ""), "size": 13, "color": "#000000"},
             "ylabel": {"text": ylabel, "size": 13, "color": "#000000"},
-            "xlim": _limits(lim_x, xscale == "log"),
+            "xlim": xlim,
             "ylim": ylim,
             "xscale": xscale, "yscale": yscale, "aspect": "auto",
             "xtick_size": 11, "ytick_size": 11, "frame_lw": 0.8,
             "legend": {"loc": "best", "frameon": False, "size": 10, "xy": None}
-                      if len(series) > 1 else None,
+                      if sum(1 for c in series if c.get("kind") not in GRID_KINDS + ("box",)) > 1 else None,
             "series": series,
             "arrows": [],
             "texts": [],

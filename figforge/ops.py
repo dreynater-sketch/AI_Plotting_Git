@@ -157,6 +157,21 @@ TOOLS = [
                               "scale": {"type": "number"}, "offset": {"type": "number"}}),
     },
     {
+        "name": "style_colormap",
+        "description": "Colours of a heatmap, contour, filled contour or coloured scatter: the colour "
+                       "map, the value range it spans, a log colour scale, and its colour bar. "
+                       "null or \"keep\" leaves a setting unchanged.",
+        "input_schema": _obj({
+            "series_id": _ID,
+            "colormap": _keep_enum(["viridis", "magma", "inferno", "plasma", "cividis", "turbo",
+                                    "coolwarm", "RdBu_r", "seismic", "Greys", "Blues", "hot"]),
+            "min": _nullable({"type": "number"}), "max": _nullable({"type": "number"}),
+            "log_scale": _keep_enum(["on", "off"]),
+            "colorbar": _keep_enum(["show", "hide"]),
+            "colorbar_label": {"type": "string", "description": "\"keep\" leaves it unchanged."},
+        }),
+    },
+    {
         "name": "set_font",
         "description": "The typeface for all text in the figure.",
         "input_schema": _obj({"family": {"type": "string", "enum": ["sans-serif", "serif", "monospace"]}}),
@@ -239,6 +254,18 @@ def _second_desc(p, key):
             "scale": sa["scale"], "offset": sa["offset"]}
 
 
+def _points(s, arrays):
+    """How many values a curve draws (a heatmap: cells; a box plot: all groups)."""
+    refs = s.get("groups") or [s.get("z") or s.get("y")]
+    n = 0
+    for r in refs:
+        if isinstance(r, str) and r in arrays:
+            n += int(arrays[r].size)
+        elif isinstance(r, list):
+            n += len(r)
+    return n
+
+
 def _describe(spec, arrays):
     def rng(key):
         a = arrays.get(key) if isinstance(key, str) else None
@@ -268,8 +295,10 @@ def _describe(spec, arrays):
                         "coords": t.get("coords", "data"), "size": t.get("size", 12),
                         "color": t.get("color", "black")} for t in p.get("texts", [])],
             "curves": [{"id": s["id"], "kind": s.get("kind", "line"), "legend_label": s.get("label", ""),
-                        "points": int(arrays[s["y"]].size) if isinstance(s["y"], str) and s["y"] in arrays else len(s["y"]),
-                        "x_range": rng(s["x"]), "y_range": rng(s["y"]),
+                        "colorbar": s.get("colorbar"),
+                        "points": _points(s, arrays),
+                        "x_range": rng(s.get("x")), "y_range": rng(s.get("y")),
+                        **({"z_range": rng(s["z"])} if s.get("z") else {}),
                         "style": s.get("style", {})} for s in p.get("series", [])],
             "arrows": [{"id": a["id"], "from": a["p0"], "to": a["p1"],
                         "color": a.get("color", "black")} for a in p.get("arrows", [])],
@@ -421,6 +450,32 @@ def _set_second_axis(spec, a):
     return f"panel {p['id']}: {a['side']} axis = {scale} * value + {p[key]['offset']} (label id {p['id']}__{key})"
 
 
+def _style_colormap(spec, a):
+    from figforge import layers
+    kind, s, _ = _find(spec, a["series_id"])
+    if kind != "series" or not layers.info(s).get("colorbar"):
+        raise OpError(f"'{a['series_id']}' isn't a heatmap, contour or coloured scatter")
+    st = dict(s.get("style") or {})
+    if _given(a["colormap"]):
+        st["cmap"] = a["colormap"]
+        st.pop("colors", None)      # contour lines in one colour -> now by level
+    for key in ("min", "max"):
+        if a[key] is not None:
+            st["vmin" if key == "min" else "vmax"] = _num(a[key], key)
+    if a["log_scale"] == "on":
+        st["norm"] = "log"
+    elif a["log_scale"] == "off":
+        st.pop("norm", None)
+    s["style"] = st
+    if a["colorbar"] == "show":
+        s["colorbar"] = dict(s.get("colorbar") or {"label": s.get("label", "")})
+    elif a["colorbar"] == "hide":
+        s.pop("colorbar", None)
+    if a["colorbar_label"] != "keep" and s.get("colorbar") is not None:
+        s["colorbar"]["label"] = _mathtext_ok(a["colorbar_label"])
+    return f"{a['series_id']} colours updated"
+
+
 def _set_font(spec, a):
     rc = dict(spec.get("rcparams") or {})
     if a["family"] == "sans-serif":
@@ -444,7 +499,8 @@ def _set_size(spec, a):
 _HANDLERS = {"set_text": _set_text, "style_text": _style_text, "move_element": _move,
              "add_label": _add_label, "delete_element": _delete, "set_axis": _set_axis,
              "style_series": _style_series, "set_legend": _set_legend, "set_figure_size": _set_size,
-             "set_second_axis": _set_second_axis, "set_font": _set_font}
+             "set_second_axis": _set_second_axis, "set_font": _set_font,
+             "style_colormap": _style_colormap}
 
 
 def _check_input(name, args):

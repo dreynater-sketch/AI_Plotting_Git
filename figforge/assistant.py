@@ -90,14 +90,15 @@ channel calibration). describe_figure gives the ids the editing tools need.
 someone who isn't an expert: what the figure shows, and anything you \
 couldn't do or had to assume.
 
-FigForge can draw lines and points, error bars, shaded bands (uncertainty, \
-ranges, fits with confidence) and bars (bar charts; histograms from bin \
-centres and counts you compute in the sandbox), in 1-4 panels side by side, \
-with linear or log axes, a second top/right scale, labels, legend and fonts. \
-It cannot yet draw colour maps / heatmaps, 3D or polar plots - if the idea \
-needs one, make the closest honest figure and say so. For a fit, compute the \
-fitted curve in the sandbox and plot it as its own column. If an example image is \
-attached, match its layout and style as closely as these tools allow.
+FigForge can draw lines, points and step lines; error bars; shaded bands; \
+bars (bar charts, and histograms from bin centres and counts you compute); \
+scatter dots coloured and sized by columns; heatmaps, contour lines and \
+filled contours from tidy x, y, z columns; box plots - in 1-4 panels side by \
+side, with linear or log axes, a second top/right scale, labels, legend, \
+colour bars and fonts. style_colormap changes a map's colours, range, log \
+scale and colour bar. It cannot yet draw 3D or polar plots - if the idea \
+needs one, make the closest honest figure and say so. For a fit, compute \
+the fitted curve in the sandbox and plot it as its own column.
 
 Rules: never invent data, values or units that aren't in the files or the \
 idea. Curves that can only come from software you can't run (e.g. a RUMP or \
@@ -109,15 +110,23 @@ _TEXT = {"type": "string"}
 _SCALE = {"type": "string", "enum": list(csvimport.SCALES)}
 _LAYER = ops._obj({
     "kind": {"type": "string", "enum": list(csvimport.LAYER_KINDS)},
-    "y_column": {"type": "string"},
-    "second_column": {"type": "string"},
+    "y_column": {"type": "string", "description": "y values; for heatmap/contour the y coordinate of each cell. \"\" for box."},
+    "second_column": {"type": "string",
+                      "description": "errorbar: the +/- error. band: the upper edge. heatmap/contour/contourf: "
+                                     "the value (z) of each cell. scatter: the column that colours the dots "
+                                     "(\"\" = one colour). bar, box: \"\"."},
+    "size_column": {"type": "string", "description": "scatter only: the column that sizes the dots; \"\" = one size."},
+    "columns": {"type": "array", "items": {"type": "string"},
+                "description": "box only: one column per group (each box); [] otherwise."},
     "x_column": {"type": "string",
                  "description": "This layer's own x column, e.g. a fit on a finer grid; \"\" = the panel's x."},
-    "label": {"type": "string", "description": "Legend entry; \"\" uses the column name."},
+    "label": {"type": "string", "description": "Legend entry or colour-bar label; \"\" uses the column name."},
 })
-_LAYERS_DESC = ("Other kinds of curves ([] for none): error bars (second_column = the +/- error), "
-                "a shaded band (y_column = lower edge, second_column = upper edge), or bars (a bar "
-                "chart, or a histogram from bin centres + counts; second_column \"\").")
+_LAYERS_DESC = ("Other kinds of curves ([] for none): errorbar, band (shaded between two columns), bar "
+                "(bar chart; a histogram from bin centres + counts), scatter (dots coloured and/or sized "
+                "by columns, with a colour bar), heatmap / contour / contourf (a 2-D map from TIDY "
+                "x, y, z columns - one row per cell; FigForge arranges the grid), box (box plot, one "
+                "column per group; the panel's x_column may be \"\").")
 
 CREATE_FIGURE = {
     "name": "create_figure",
@@ -130,7 +139,7 @@ CREATE_FIGURE = {
         "figure_title": {"type": "string", "description": "Title over the whole figure, or \"\"."},
         "panels": {"type": "array", "description": "1-4 panels, left to right.",
                    "items": ops._obj({
-                       "x_column": {"type": "string", "description": "Header name of the x column."},
+                       "x_column": {"type": "string", "description": "Header name of the x column (\"\" only for a panel of box plots)."},
                        "y_columns": {"type": "array", "items": {"type": "string"},
                                      "description": "Header names to plot against x, one curve each."},
                        "plot_as": {"type": "string", "enum": list(csvimport.PLOT_KINDS),
@@ -144,7 +153,6 @@ CREATE_FIGURE = {
                        "y_scale": _SCALE,
                    })},
     }),
-    "strict": True,
 }
 
 ADD_CURVES = {
@@ -195,6 +203,7 @@ PROGRESS = {
     "set_figure_size": "Resized the figure",
     "set_second_axis": "Added a second axis scale",
     "set_font": "Changed the font",
+    "style_colormap": "Adjusted the colours",
 }
 
 
@@ -426,9 +435,16 @@ def _column(names, want, table):
 def _layers(names, table, layers):
     out = []
     for ly in layers or []:
-        item = {"kind": ly["kind"], "y": _column(names, ly["y_column"], table),
-                "extra": (_column(names, ly["second_column"], table) if ly["kind"] != "bar" else None),
-                "label": ly.get("label") or ""}
+        kind = ly.get("kind")
+        item = {"kind": kind, "label": ly.get("label") or ""}
+        if kind == "box":
+            item["columns"] = [_column(names, c, table) for c in ly.get("columns") or []]
+        else:
+            item["y"] = _column(names, ly.get("y_column") or "", table)
+            if ly.get("second_column"):
+                item["extra"] = _column(names, ly["second_column"], table)
+            if ly.get("size_column"):
+                item["size"] = _column(names, ly["size_column"], table)
         if ly.get("x_column"):
             item["x"] = _column(names, ly["x_column"], table)
         out.append(item)
@@ -451,7 +467,7 @@ def _add_curves(state, fig, args, spec):
             text, added = csvimport.merge_tables(base, text)
             names = csvimport.parse(text)[0]
             merged_note = f" (merged {len(added)} new column(s) of {table} into the figure's table)"
-        batch = {"x": _column(names, args["x_column"], table),
+        batch = {"x": _column(names, args["x_column"], table) if args.get("x_column") else "",
                  "ys": [_column(names, y, table) for y in args["y_columns"]],
                  "kind": args["plot_as"], "layers": _layers(names, table, args["layers"])}
         new_spec, new_arrays, ids = csvimport.add_batch(spec, fig.name, text, args["panel_id"], batch)
@@ -483,7 +499,7 @@ def _run_tool(state, fig, call, spec, arrays):
         text = fig.load_table(table)
         try:
             names = csvimport.parse(text)[0]
-            panels = [{"x": _column(names, p["x_column"], table),
+            panels = [{"x": _column(names, p["x_column"], table) if p.get("x_column") else "",
                        "ys": [_column(names, y, table) for y in p["y_columns"]],
                        "kind": p["plot_as"], "title": p["title"], "xlabel": p["x_label"],
                        "ylabel": p["y_label"], "xscale": p["x_scale"], "yscale": p["y_scale"],

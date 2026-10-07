@@ -23,7 +23,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.patches import FancyArrowPatch
+from matplotlib.patches import FancyArrowPatch, Rectangle
 
 from figforge import layers
 
@@ -132,13 +132,82 @@ def _layout_key(spec):
         [[p.get("title"), p.get("xlabel"), p.get("ylabel"), p.get("xlim"),
           p.get("ylim"), p.get("xscale"), p.get("yscale"), p.get("aspect"),
           p.get("xtick_size"), p.get("ytick_size"),
-          p.get("legend"), p.get("top_axis"), p.get("right_axis")] for p in spec["panels"]],
+          p.get("legend"), p.get("top_axis"), p.get("right_axis"),
+          [x.get("colorbar") for x in p.get("series", [])]] for p in spec["panels"]],
     ], sort_keys=True, default=str)
 
 
 HIT_STROKE_WIDTH = 10
 HIT_POINT_SIZE = 20
 HIT_PATH_MAX_POINTS = 150
+
+
+def _finite(a):
+    a = np.asarray(a, dtype=float)
+    return a[~np.isnan(a)]
+
+
+def _draw_series(ax, s, arrays, preview):
+    """Every kind of curve is drawn the same way, from layers.KINDS."""
+    k = layers.info(s)
+    kind = layers.kind_of(s)
+    pos = [_resolve(s[c], arrays) for c in k["coords"]]
+    for field in k.get("lists", ()):
+        pos.append([_finite(_resolve(r, arrays)) for r in s.get(field) or []])
+    data_kw = {kw: _resolve(s[f], arrays) for kw, f in k["data_kw"].items()
+               if s.get(f) is not None}
+    kw = dict(k.get("fixed", {}))
+    kw.update(layers.style_for(s))
+    if kind in layers.LEGEND_KINDS and s.get("label"):
+        kw["label"] = s["label"]
+    art = getattr(ax, k["method"])(*pos, **data_kw, **kw)
+
+    if preview:
+        # Big drawings become one picture in the editor (exports stay vector).
+        if kind == "line" and len(pos[0]) > RASTER_MIN_POINTS:
+            art[0].set_rasterized(True)
+        elif kind == "heatmap" or (kind == "scatter" and len(pos[0]) > 2000):
+            art.set_rasterized(True)
+
+    cb = s.get("colorbar")
+    if k.get("colorbar") and cb:
+        bar = ax.figure.colorbar(art, ax=ax)
+        bar.ax.tick_params(labelsize=cb.get("tick_size", 10))
+        if cb.get("label"):
+            bar.set_label(cb["label"], fontsize=cb.get("size", 12),
+                          color=cb.get("color", "black"))
+        if preview:
+            # Clicking anywhere on the bar picks its curve: an invisible but
+            # painted (so clickable) rectangle over the whole bar. It belongs
+            # to the figure, not the bar, so it's drawn after everything --
+            # a long colour bar is turned into a picture that would sit on
+            # top of anything inside the bar's own axes.
+            # (alpha=0 would make matplotlib write fill:none, which can't be
+            # clicked; 0.001 stays painted and invisible.)
+            hit = Rectangle((0, 0), 1, 1, transform=bar.ax.transAxes, facecolor="white",
+                            alpha=0.001, lw=0, zorder=10, clip_on=False)
+            ax.figure.add_artist(hit)
+            hit.set_gid(f"t_{s['id']}__cbar")
+
+    if preview:
+        _draw_series_hit_target(ax, s, *_hit_path(kind, s, pos, kw))
+
+
+def _hit_path(kind, s, pos, kw):
+    """Where a curve can be clicked: along its data for lines and dots, the
+    middle of a band, the box medians, the outline of a 2-D grid."""
+    if kind == "band":
+        return pos[0], (pos[1] + pos[2]) / 2
+    if kind in ("heatmap", "contour", "contourf"):
+        x0, x1 = float(np.nanmin(pos[0])), float(np.nanmax(pos[0]))
+        y0, y1 = float(np.nanmin(pos[1])), float(np.nanmax(pos[1]))
+        return np.array([x0, x1, x1, x0, x0]), np.array([y0, y0, y1, y1, y0])
+    if kind == "box":
+        groups = pos[-1]
+        where = kw.get("positions") or list(range(1, len(groups) + 1))
+        meds = [float(np.median(g)) if len(g) else np.nan for g in groups]
+        return np.asarray(where, dtype=float), np.asarray(meds, dtype=float)
+    return pos[0], pos[1]
 
 
 def _draw_series_hit_target(ax, s, xs, ys):
@@ -233,22 +302,7 @@ def _draw_panel(ax, p, arrays, preview=False):
             _guide_hit(ax.axvline, 0, f"t_{pid}__zero__v")
 
     for s in p.get("series", []):
-        # Every kind of curve (line, error bars, band, bars) is drawn the
-        # same way: see layers.py.
-        k = layers.info(s)
-        pos = [_resolve(s[c], arrays) for c in k["coords"]]
-        data_kw = {kw: _resolve(s[f], arrays) for kw, f in k["data_kw"].items()
-                   if s.get(f) is not None}
-        art = getattr(ax, k["method"])(*pos, **data_kw, label=s.get("label"),
-                                       **layers.style_for(s))
-        xs, ys = pos[0], pos[1]
-        if preview and layers.kind_of(s) == "line" and len(xs) > RASTER_MIN_POINTS:
-            art[0].set_rasterized(True)
-
-        if preview:
-            # A band is grabbed along its middle, everything else along y.
-            hy = (ys + pos[2]) / 2 if layers.kind_of(s) == "band" else ys
-            _draw_series_hit_target(ax, s, xs, hy)
+        _draw_series(ax, s, arrays, preview)
 
     for a in p.get("arrows", []):
         patch = FancyArrowPatch(
@@ -301,8 +355,12 @@ def _draw_panel(ax, p, arrays, preview=False):
                           color=yl.get("color", "black"))
         a.set_gid("t_" + p["id"] + "__ylabel")
 
-    ax.set_xscale(p.get("xscale", "linear"))
-    ax.set_yscale(p.get("yscale", "linear"))
+    # Only when it changes: set_xscale resets the tick labels, which would
+    # wipe a box plot's group names.
+    if ax.get_xscale() != p.get("xscale", "linear"):
+        ax.set_xscale(p.get("xscale", "linear"))
+    if ax.get_yscale() != p.get("yscale", "linear"):
+        ax.set_yscale(p.get("yscale", "linear"))
     ax.set_xlim(*p["xlim"])
     ax.set_ylim(*p["ylim"])
     if p.get("aspect", "auto") == "equal":

@@ -179,8 +179,8 @@ def unions(s):
 custom = [t for t in assistant.TOOLS if "input_schema" in t]
 total = sum(unions(t["input_schema"]) for t in custom)
 check(total <= 16, f"strict tools stay under the 16 union-parameter cap ({total})")
-check([t["name"] for t in custom if t.get("strict")] == ["create_figure"],
-      "only create_figure is strict (the grammar size limit)")
+check(not any(t.get("strict") for t in custom),
+      "no tool is strict (the API's grammar size limit); ops.py checks every argument")
 
 # Limits: a session stops itself.
 st = dict(state, done=False, steps=assistant.MAX_STEPS - 1)

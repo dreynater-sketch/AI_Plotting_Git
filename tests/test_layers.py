@@ -79,7 +79,8 @@ new, res, _ = ops.apply(spec, [{"name": "style_series", "input": {
 check(not res[0]["is_error"] and new["panels"][1]["series"][0]["style"]["alpha"] == 0.5,
       "style_series restyles bars")
 render.render(new, arrays)
-check(set(layers.KINDS) == {"line", "errorbar", "band", "bar"}, "kinds table")
+check(set(layers.KINDS) == {"line", "step", "errorbar", "band", "bar", "scatter", "heatmap",
+                            "contour", "contourf", "box"}, "kinds table")
 
 # Data + a fit on its own, finer grid, added later from a separate table.
 NL = "\n"
@@ -104,4 +105,53 @@ rspec, _ = csvimport.build_panels("f", merged, nspec["source"]["panels"])
 check([s["id"] for s in rspec["panels"][0]["series"]] == [s["id"] for s in p0["series"]],
       "Start over rebuilds the added curves with the same ids")
 render.render(nspec, narr)
+
+# --- 2-D maps, coloured scatter, box plots, steps (from one tidy table) ---
+import numpy as np
+rng = np.random.RandomState(3)
+gx, gy = np.linspace(0, 2, 25), np.linspace(-1, 1, 20)
+rows = ["x,y,z,temp,size,sampleA,sampleB,t,signal"]
+for i, (a_, b_) in enumerate((a_, b_) for b_ in gy for a_ in gx):
+    z = np.exp(-((a_ - 1) ** 2 + b_ ** 2) * 3)
+    sa = f"{rng.normal(1.0, 0.1):.4f}" if i < 60 else ""
+    sb = f"{rng.normal(1.3, 0.2):.4f}" if i < 45 else ""
+    t = f"{i * 0.1:.2f}" if i < 80 else ""
+    sig = f"{np.sin(i * 0.2):.4f}" if i < 80 else ""
+    rows.append(f"{a_:.4f},{b_:.4f},{z:.5f},{4 + i * 0.05:.3f},{rng.uniform(1, 5):.3f},{sa},{sb},{t},{sig}")
+TBL = NL.join(rows) + NL
+k2, a2 = csvimport.build_panels("k", TBL, [
+    {"x": "x", "ys": [], "layers": [{"kind": "heatmap", "y": "y", "extra": "z"},
+                                   {"kind": "contour", "y": "y", "extra": "z"}]},
+    {"x": "", "ys": [], "layers": [{"kind": "box", "columns": ["sampleA", "sampleB"]}]},
+    {"x": "temp", "ys": [], "layers": [{"kind": "scatter", "y": "z", "extra": "temp", "size": "size"}]},
+    {"x": "t", "ys": ["signal"], "kind": "steps"}])
+hm, ct = k2["panels"][0]["series"]
+check(hm["kind"] == "heatmap" and a2[hm["z"]].shape == (20, 25) and hm.get("colorbar"),
+      "tidy x, y, z columns become a gridded heatmap with a colour bar")
+check(ct["style"].get("colors") == "white", "contours over a heatmap default to white lines")
+check(abs(k2["panels"][0]["xlim"][0] - (-1 / 24)) < 1e-3, "a heatmap's axes hug its cell edges")
+bx = k2["panels"][1]["series"][0]
+check(bx["kind"] == "box" and len(a2[bx["groups"][0]]) == 60 and bx["style"]["tick_labels"] == ["sampleA", "sampleB"],
+      "box plot: one group per column, blanks dropped, named on the axis")
+sc = k2["panels"][2]["series"][0]
+check(sc.get("c") and sc.get("sizes") and sc["colorbar"]["label"] == "temp", "scatter coloured and sized by columns")
+check(k2["panels"][3]["series"][0]["kind"] == "step", "plot_as steps draws step lines")
+svg2, _ = render.render(k2, a2, preview=True)
+check(all(f"t_{s['id']}" in svg2 for p in k2["panels"] for s in p["series"]) and f"t_{hm['id']}__cbar" in svg2,
+      "every new kind draws with a click target; the colour bar is clickable")
+code2 = codegen.generate(k2)
+check("_m = ax.pcolormesh(" in code2 and "fig.colorbar(_m, ax=ax)" in code2 and '_b["boxes"][0].set_gid(' in code2,
+      "exported as plain matplotlib, colour bars included")
+back2, rep2 = codesync.apply(code2, k2, list(a2))
+check(back2["panels"] == k2["panels"] and not rep2["skipped"], "new kinds round-trip through code exactly")
+nobar = NL.join(l for l in code2.split(NL) if not l.startswith("_cb"))
+back3, _ = codesync.apply(nobar, k2, list(a2))
+check("colorbar" not in back3["panels"][0]["series"][0], "deleting the colour bar lines in code removes the bar")
+re2, _ = csvimport.build_panels("k", TBL, k2["source"]["panels"])
+check(re2["panels"] == k2["panels"], "Start over rebuilds the new kinds identically")
+new2, res2, _ = ops.apply(k2, [{"name": "style_colormap", "input": {
+    "series_id": hm["id"], "colormap": "magma", "min": 0, "max": None, "log_scale": "keep",
+    "colorbar": "keep", "colorbar_label": "I (a.u.)"}}], a2)
+check(not res2[0]["is_error"] and new2["panels"][0]["series"][0]["style"]["cmap"] == "magma"
+      and new2["panels"][0]["series"][0]["colorbar"]["label"] == "I (a.u.)", "style_colormap restyles a heatmap")
 print(len(fails), "failure(s)")

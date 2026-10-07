@@ -60,6 +60,36 @@ def _coord(ref):
 
 
 
+def _series_lines(s):
+    """One curve as matplotlib, from layers.KINDS. A colour-mapped curve with
+    a colour bar is kept as _m for fig.colorbar; boxplot takes no gid, so
+    its id goes on the first box."""
+    k = layers.info(s)
+    kind = layers.kind_of(s)
+    args = [_coord(s[c]) for c in k["coords"]]
+    args += ["[" + ", ".join(_coord(r) for r in s.get(f) or []) + "]" for f in k.get("lists", ())]
+    args += [f"{kw}={_coord(s[f])}" for kw, f in k["data_kw"].items() if s.get(f) is not None]
+    style = dict(k.get("fixed", {}))
+    style.update(layers.style_for(s))
+    kw = _kw(style)
+    if kind in layers.LEGEND_KINDS and s.get("label"):
+        kw = (kw + ", " if kw else "") + f"label={_s(s['label'])}"
+    if kind != "box":
+        kw = (kw + ", " if kw else "") + f"gid={_s(s['id'])}"
+    cb = s.get("colorbar") if k.get("colorbar") else None
+    target = "_b = " if kind == "box" else "_m = " if cb else ""
+    out = [f"{target}ax.{k['method']}({', '.join(args)}" + (f", {kw}" if kw else "") + ")"]
+    if kind == "box":
+        out.append(f'_b["boxes"][0].set_gid({_s(s["id"])})')
+    if cb:
+        out.append("_cb = fig.colorbar(_m, ax=ax)")
+        out.append(f"_cb.ax.tick_params(labelsize={cb.get('tick_size', 10)})")
+        if cb.get("label"):
+            out.append(f"_cb.set_label({_s(cb['label'])}, fontsize={cb.get('size', 12)}, "
+                       f"color={_s(cb.get('color', 'black'))})")
+    return out
+
+
 def generate(spec):
     sup = spec.get("suptitle", {})
     L = [HEADER.format(
@@ -120,14 +150,7 @@ def _panel(p, i):
         L.append("ax.axvline(0, color='0.88', lw=0.7)")
 
     for s in p.get("series", []):
-        k = layers.info(s)
-        args = [_coord(s[c]) for c in k["coords"]]
-        args += [f"{kw}={_coord(s[f])}" for kw, f in k["data_kw"].items() if s.get(f) is not None]
-        kw = _kw(layers.style_for(s))
-        if s.get("label"):
-            kw = (kw + ", " if kw else "") + f"label={_s(s['label'])}"
-        kw = (kw + ", " if kw else "") + f"gid={_s(s['id'])}"
-        L.append(f"ax.{k['method']}({', '.join(args)}" + (f", {kw}" if kw else "") + ")")
+        L += _series_lines(s)
 
     for a in p.get("arrows", []):
         L.append("ax.add_patch(FancyArrowPatch(")

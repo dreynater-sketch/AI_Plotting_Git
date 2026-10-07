@@ -722,3 +722,5 @@ sub, sup { font-size: 0.75em; line-height: 0; }
   width: 100%; font: inherit; padding: 0 3px; margin: -1px 0;
   border: 1px solid var(--sel); border-radius: 3px; outline: none;
 }
+.data-table td.empty { cursor: default; }
+.data-table td.empty:hover { background: none; }

@@ -220,17 +220,28 @@ class Handler(BaseHTTPRequestHandler):
                 # lays spec.data_edits on top, so undo shows instantly.
                 # key is the npz array a column comes from (null for numbers
                 # written inline in the spec, which edit the spec directly).
-                cols = []
-                for field, title in (("x", "x"), ("y", "y"), ("yerr", "± error"), ("y2", "upper")):
-                    ref = s.get(field)
-                    if ref is None:
-                        continue
-                    vals = arrays[ref] if isinstance(ref, str) else ref
-                    cols.append({"field": field, "title": title,
-                                 "key": ref if isinstance(ref, str) else None, "values": clean(vals)})
+                from figforge import layers
+                cols, note = [], ""
+                if layers.info(s).get("grid"):
+                    z = arrays.get(s.get("z"))
+                    note = (f"a {z.shape[1]} × {z.shape[0]} grid of values" if z is not None else "")
+                elif s.get("groups"):
+                    names = (s.get("style") or {}).get("tick_labels") or []
+                    for j, ref in enumerate(s["groups"]):
+                        cols.append({"field": "groups", "title": names[j] if j < len(names) else f"group {j + 1}",
+                                     "key": ref, "values": clean(arrays[ref])})
+                else:
+                    for field, title in (("x", "x"), ("y", "y"), ("yerr", "± error"), ("y2", "upper"),
+                                         ("c", "colour"), ("sizes", "dot size")):
+                        ref = s.get(field)
+                        if ref is None:
+                            continue
+                        vals = arrays[ref] if isinstance(ref, str) else ref
+                        cols.append({"field": field, "title": title,
+                                     "key": ref if isinstance(ref, str) else None, "values": clean(vals)})
                 return self._json({
                     "id": series_id, "panel": p["id"], "label": s.get("label", ""),
-                    "x": cols[0]["values"], "y": cols[1]["values"], "columns": cols,
+                    "columns": cols, "note": note,
                 })
         return self._error(404, "unknown series")
 

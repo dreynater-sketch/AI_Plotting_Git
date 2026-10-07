@@ -370,7 +370,42 @@
               <input type="number" id="f-series-alpha-num" min="0" max="1" step="0.05">
             </span>
           </label>
-          <p class="note">Its numbers are listed under the figure, on the right.</p>
+          <div id="cmap-fields" hidden>
+            <div class="subhead">Colours</div>
+            <div class="row">
+              <label class="field">
+                <span>Colour map</span>
+                <select id="f-cmap">
+                  <option value="viridis">Viridis</option><option value="magma">Magma</option>
+                  <option value="inferno">Inferno</option><option value="plasma">Plasma</option>
+                  <option value="cividis">Cividis</option><option value="turbo">Turbo</option>
+                  <option value="coolwarm">Cool–warm</option><option value="RdBu_r">Blue–red</option>
+                  <option value="seismic">Seismic</option><option value="Greys">Greys</option>
+                  <option value="Blues">Blues</option><option value="hot">Hot</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>&nbsp;</span>
+                <label class="check"><input type="checkbox" id="f-cmap-log"> Log colour scale</label>
+              </label>
+            </div>
+            <div class="row">
+              <label class="field">
+                <span>Colours start at</span>
+                <input type="number" id="f-cmap-min" step="any" placeholder="auto">
+              </label>
+              <label class="field">
+                <span>Colours end at</span>
+                <input type="number" id="f-cmap-max" step="any" placeholder="auto">
+              </label>
+            </div>
+            <label class="check"><input type="checkbox" id="f-cbar"> Show the colour bar</label>
+            <label class="field" id="f-cbar-label-field">
+              <span>Colour bar label</span>
+              <input type="text" id="f-cbar-label" spellcheck="false">
+            </label>
+          </div>
+          <p class="note" id="series-note">Its numbers are listed under the figure, on the right.</p>
         </div>
 
         <div id="guide-fields" hidden>

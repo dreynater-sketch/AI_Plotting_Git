@@ -146,7 +146,7 @@ def apply(code, spec, array_keys=()):
     for pnl in panels:
         pnl.legacy = legacy
     kept = set()  # elements whose line couldn't be applied: left exactly as they were
-    for node in tree.body:
+    for node in _attach_box_gids(tree.body):
         try:
             _statement(node, new, panels, state, taken, array_keys)
         except Skip as e:
@@ -183,6 +183,9 @@ def apply(code, spec, array_keys=()):
                 del pnl.p[key]
         if "zero_lines" not in pnl.old and not pnl.p["zero_lines"]:
             del pnl.p["zero_lines"]
+    for pnl in panels:
+        for item in pnl.p["series"]:
+            item.pop("_old_colorbar", None)
     new["panels"] = [pnl.p for pnl in panels]
     _diff(old, new, report)
     return new, report
@@ -234,9 +237,15 @@ def _statement(node, new, panels, state, taken, array_keys):
                 raise Skip("there's no panel with that index")
             state["ax"] = panels[i]
             return
-        # _t = ax.text(...)
-        if tname == "_t" and isinstance(node.value, ast.Call):
-            return _call(node.value, new, state, taken, array_keys)
+        # _t = ax.text(...), _m = ax.pcolormesh(...), _b = ax.boxplot(...), _cb = fig.colorbar(...)
+        if tname in ("_t", "_m", "_b", "_cb") and isinstance(node.value, ast.Call):
+            state["assigning_m"] = tname == "_m"
+            if tname == "_m":
+                state["last_mapped"] = None      # a skipped _m line mustn't leave an old one
+            try:
+                return _call(node.value, new, state, taken, array_keys)
+            finally:
+                state.pop("assigning_m", None)
         # _top = ax.secondary_xaxis('top', functions=(lambda v: a * v + b, ...))
         if tname in _SECOND_VARS and isinstance(node.value, ast.Call):
             return _second_axis(tname, node.value, state)
@@ -376,6 +385,8 @@ def _call(call, new, state, taken, array_keys):
         if "dpi" in kw:
             _put(new, "dpi", _num(_lit(kw["dpi"], "dpi"), "dpi"), 200)
         return
+    if name in ("fig.colorbar", "_cb.set_label", "_cb.ax.tick_params"):
+        return _colorbar_call(name, call, state)
     if name and name.split(".")[0] in _SECOND_VARS:
         return _second_axis_call(name.split(".")[0], call, state)
     if name == "ax.add_patch":
@@ -392,8 +403,13 @@ def _call(call, new, state, taken, array_keys):
 
     if method == "text":
         return _text(call, args, kw, pnl, taken)
-    if method in layers.BY_METHOD:      # plot / errorbar / fill_between / bar
-        return _series(method, args, kw, pnl, taken, array_keys)
+    if method in layers.BY_METHOD:      # plot / errorbar / bar / pcolormesh / boxplot ...
+        item = _series(method, args, kw, pnl, taken, array_keys)
+        # Only the curve on an `_m = ...` line can get the next fig.colorbar(_m).
+        mapped = state.pop("assigning_m", False) and layers.KINDS[item.get("kind", "line")].get("colorbar")
+        state["last_mapped"] = item if mapped else None
+        state["colorbar"] = None
+        return
     if method in ("set_title", "set_xlabel", "set_ylabel"):
         key = method[4:]
         item = dict(pnl.old.get(key) or {})
@@ -515,17 +531,43 @@ def _text(call, args, kw, pnl, taken):
     pnl.p["texts"].append(item)
 
 
+def _keys(node):
+    """[D["a"], D["b"]] -> ["a", "b"] (a box plot's groups)."""
+    if not isinstance(node, (ast.List, ast.Tuple)):
+        raise Skip("box plot groups must be a list like [D[\"a\"], D[\"b\"]]")
+    out = []
+    for el in node.elts:
+        ref = _coord(el)
+        if not isinstance(ref, str):
+            raise Skip("box plot groups must be D[\"...\"] arrays")
+        out.append(ref)
+    return out
+
+
+def _is_data(node):
+    """D["key"] or a list of numbers -- data, not a style value."""
+    return ((isinstance(node, ast.Subscript) and _name(node.value) == "D")
+            or isinstance(node, (ast.List, ast.Tuple)))
+
+
 def _series(method, args, kw, pnl, taken, array_keys):
     kind = layers.BY_METHOD[method]
     k = layers.KINDS[kind]
-    if len(args) != len(k["coords"]):
-        raise Skip(f"ax.{method} takes {', '.join(k['coords'])} here "
-                   f"({len(k['coords'])} data arguments)")
+    lists = k.get("lists", ())
+    want = len(k["coords"]) + len(lists)
+    if len(args) != want:
+        names = list(k["coords"]) + list(lists)
+        raise Skip(f"ax.{method} takes {', '.join(names)} here ({want} data argument"
+                   f"{'' if want == 1 else 's'})")
     refs = {f: _coord(a) for f, a in zip(k["coords"], args)}
+    as_data = set()
     for kwname, field in k["data_kw"].items():
-        if kwname in kw:
+        # s=D["sizes"] is data; s=20 is a style value (both are matplotlib's s=).
+        if kwname in kw and _is_data(kw[kwname]):
             refs[field] = _coord(kw[kwname])
-    for ref in refs.values():
+            as_data.add(kwname)
+    lrefs = {f: _keys(a) for f, a in zip(lists, args[len(k["coords"]):])}
+    for ref in list(refs.values()) + [r for v in lrefs.values() for r in v]:
         if isinstance(ref, str) and array_keys and ref not in array_keys:
             raise Skip(f'there is no D["{ref}"] in the data')
     item = _claim(pnl, "series", kw, taken) or {"id": _new_id(pnl, "curve", taken)}
@@ -534,28 +576,81 @@ def _series(method, args, kw, pnl, taken, array_keys):
     else:
         item["kind"] = kind
     # Data fields another kind used (the code changed plot -> bar, say) go.
-    for field in _ALL_DATA_FIELDS - set(refs):
+    for field in _ALL_DATA_FIELDS - set(refs) - set(lrefs):
         item.pop(field, None)
     for field, val in refs.items():
         if not (isinstance(val, list) and _same_numbers(val, item.get(field))):
             item[field] = val
+    item.update(lrefs)
     # Style keys codegen doesn't write (not matplotlib kwargs) survive.
     style = {key: v for key, v in (item.get("style") or {}).items() if key not in layers.ALL_STYLE}
-    style.update({key: _lit(v, key) for key, v in kw.items() if key in k["style"]})
+    style.update(layers.style_from_kwargs(kind, {key: _lit(v, key) for key, v in kw.items()
+                                                 if key in k["style"] and key not in as_data}))
     if style or "style" in item:
         item["style"] = style
     if "label" in kw:
         _put(item, "label", _lit(kw["label"], "label"), "")
-    elif item.get("label"):
-        item.pop("label")
-    unknown = set(kw) - k["style"] - set(k["data_kw"]) - {"label", "gid"}
+    elif item.get("label") and kind in layers.LEGEND_KINDS:
+        item.pop("label")      # (a heatmap's name isn't in the code: it stays)
+    # The colour bar comes back only if the code still has its lines.
+    item["_old_colorbar"] = item.pop("colorbar", None)
+    unknown = set(kw) - k["style"] - set(k["data_kw"]) - set(k.get("fixed", {})) - {"label", "gid"}
     if unknown:
         raise Skip(f"{method} options {', '.join(sorted(unknown))} aren't supported")
     pnl.p["series"].append(item)
+    return item
+
+
+def _colorbar_call(name, call, state):
+    """_cb = fig.colorbar(_m, ax=ax) / _cb.set_label(...) / _cb.ax.tick_params(...)."""
+    item = state.get("last_mapped")
+    kw = _kwargs(call)
+    if name == "fig.colorbar":
+        if item is None or not call.args or _name(call.args[0]) != "_m":
+            raise Skip("fig.colorbar(_m, ax=ax) needs `_m = ax.pcolormesh(...)` (or contour, "
+                       "contourf, scatter) just before it")
+        cb = dict(item.get("_old_colorbar") or {})
+        cb["label"] = ""
+        cb.pop("tick_size", None)
+        item["colorbar"] = cb
+        state["colorbar"] = cb
+        return
+    cb = state.get("colorbar")
+    if cb is None:
+        raise Skip("this comes before `_cb = fig.colorbar(...)`")
+    if name == "_cb.set_label":
+        cb["label"] = _lit(call.args[0], "colour bar label") if call.args else ""
+        for k, field, default in (("fontsize", "size", 12), ("color", "color", "black")):
+            if k in kw:
+                _put(cb, field, _lit(kw[k], k), default)
+        return
+    if name == "_cb.ax.tick_params":
+        if "labelsize" in kw:
+            _put(cb, "tick_size", _num(_lit(kw["labelsize"], "labelsize"), "labelsize"), 10)
+        return
+    raise Skip(f"`{name}` isn't reflected in the figure")
 
 
 _ALL_DATA_FIELDS = {f for k in layers.KINDS.values()
-                    for f in list(k["coords"]) + list(k["data_kw"].values())}
+                    for f in list(k["coords"]) + list(k.get("lists", ())) + list(k["data_kw"].values())}
+
+
+def _attach_box_gids(body):
+    """codegen writes `_b = ax.boxplot(...)` then `_b["boxes"][0].set_gid('id')`
+    (boxplot takes no gid=). Fold the id into the boxplot call so it's
+    claimed like every other curve, and drop the set_gid line."""
+    out = []
+    for node in body:
+        prev = out[-1] if out else None
+        if (isinstance(node, ast.Expr) and isinstance(node.value, ast.Call)
+                and isinstance(node.value.func, ast.Attribute) and node.value.func.attr == "set_gid"
+                and isinstance(prev, ast.Assign) and _name(prev.targets[0]) == "_b"
+                and isinstance(prev.value, ast.Call) and _name(prev.value.func) == "ax.boxplot"
+                and node.value.args):
+            prev.value.keywords.append(ast.keyword(arg="gid", value=node.value.args[0]))
+            continue
+        out.append(node)
+    return out
 
 
 def _arrow(call, state, taken):
