@@ -31,7 +31,7 @@
       </div>
     </div>
     <button id="btn-png" title="Download the figure as a picture (PNG)">Download picture</button>
-    <button id="btn-rebuild" class="danger" title="Throw away every change and draw the figure fresh from your data">Start over</button>
+    <button id="btn-rebuild" class="danger" title="Throw away every change (moves, styles, numbers you changed) and draw the figure fresh from your data">Start over</button>
   </div>
   <div class="account" id="account" hidden>
     <button id="btn-account" title="Your profile"><span class="avatar" id="account-avatar"></span><span id="account-name"></span></button>
@@ -136,7 +136,7 @@
           </div>
           <div class="data-table-wrap" id="data-table-wrap">
             <table class="data-table">
-              <thead><tr><th id="data-col-x">x</th><th id="data-col-y">y</th></tr></thead>
+              <thead><tr id="data-head-row"><th>x</th><th>y</th></tr></thead>
               <tbody id="data-table-body"></tbody>
             </table>
           </div>

@@ -4,6 +4,7 @@ ROOT_DIR = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
 OUT_DIR = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "_out")
 _os.makedirs(OUT_DIR, exist_ok=True)
 import json, os, shutil, subprocess, sys, urllib.request
+from _cleanup import rmtree
 from playwright.sync_api import sync_playwright
 
 ROOT = ROOT_DIR
@@ -11,7 +12,7 @@ B = _os.environ.get("FF_BASE", "http://127.0.0.1:8765")
 P = "zz_t"
 os.chdir(ROOT)
 if os.path.exists(f"figures/{P}"):
-    shutil.rmtree(f"figures/{P}")
+    rmtree(f"figures/{P}")
 urllib.request.urlopen(urllib.request.Request(
     B + "/api/project/duplicate", data=json.dumps({"from": "qcircle", "name": P}).encode(),
     method="POST"))
@@ -135,5 +136,5 @@ r = subprocess.run([sys.executable, "figure.py"], cwd=f"figures/{P}",
                    env={**os.environ, "MPLBACKEND": "Agg"}, capture_output=True, text=True)
 check(r.returncode == 0, "generated figure.py runs " + r.stderr[-300:])
 
-shutil.rmtree(f"figures/{P}")
+rmtree(f"figures/{P}")
 print("\n%d failure(s)" % len(fails))

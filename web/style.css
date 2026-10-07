@@ -712,3 +712,13 @@ button.primary:hover:not(:disabled) { background: #1a5fcc; border-color: #1a5fcc
 
 /* Readable math (mathHtml) inside lists and labels: keep rows the same height. */
 sub, sup { font-size: 0.75em; line-height: 0; }
+
+/* Editable numbers under the figure */
+.data-table td { cursor: text; }
+.data-table td:hover { background: rgba(31, 111, 235, 0.06); }
+.data-table td.edited { color: var(--accent-ink); font-weight: 600; }
+.data-table td.edited::after { content: " ✎"; font-size: 10px; }
+.data-edit {
+  width: 100%; font: inherit; padding: 0 3px; margin: -1px 0;
+  border: 1px solid var(--sel); border-radius: 3px; outline: none;
+}

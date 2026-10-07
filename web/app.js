@@ -1048,22 +1048,33 @@ function refreshArrowInspector() {
  *  at most here) and this only runs on a real click, not on every render. */
 let dataPanelToken = 0;
 
+/* The numbers behind a picked curve, editable: click a number, type,
+ * Enter. The server sends the numbers as stored; the user's changes live in
+ * spec.data_edits ({array key: {row: value}}) and are laid on top here, so
+ * undo/redo show at once. Numbers written inline in the spec (no array key)
+ * are changed in the spec itself. */
+let dataPanel = null;   // {s, cols} for the curve on show
+
 function refreshDataPanel(sel) {
   const panelEl = $('data-panel');
   const single = sel.length === 1 && sel[0].kind === 'series';
   panelEl.hidden = !single;
-  if (!single) return;
+  if (!single) { dataPanel = null; return; }
 
   const s = sel[0];
   const p = panelById(s.panel);
   $('data-title').innerHTML = s.obj.label ? mathHtml(s.obj.label)
     : `${capitalize(kindLabel('series', s.obj))} with no name`;
-  $('data-col-x').innerHTML = p.xlabel?.text ? mathHtml(p.xlabel.text) : 'Across (x)';
-  $('data-col-y').innerHTML = p.ylabel?.text ? mathHtml(p.ylabel.text) : 'Up (y)';
+  if (dataPanel?.s.id === s.id && dataPanel.cols) {
+    dataPanel.s = s;
+    drawDataTable(p);           // same curve: just re-lay the edits
+    return;
+  }
   $('data-count').textContent = '';
   $('data-status').textContent = 'Loading…';
   $('data-status').className = 'data-status';
   $('data-table-body').innerHTML = '';
+  dataPanel = { s, cols: null };
 
   const token = ++dataPanelToken;
   fetch(`/api/data/${FIGURE}/${s.id}`)
@@ -1072,17 +1083,96 @@ function refreshDataPanel(sel) {
       if (token !== dataPanelToken) return;  // a newer selection fired since
       if (!ok) throw new Error(data.error || 'failed to load');
       $('data-status').textContent = '';
-      const n = data.x.length;
-      $('data-count').textContent = `${n.toLocaleString()} point${n === 1 ? '' : 's'}`;
-      const rows = data.x.map((x, i) =>
-        `<tr><td>${fmtNum(x)}</td><td>${fmtNum(data.y[i])}</td></tr>`);
-      $('data-table-body').innerHTML = rows.join('');
+      dataPanel = { s, cols: data.columns };
+      drawDataTable(p);
     })
     .catch((e) => {
       if (token !== dataPanelToken) return;
       $('data-status').textContent = e.message;
       $('data-status').className = 'data-status err';
     });
+}
+
+/** The value on show for one cell: the user's change if there is one. */
+function dataValue(col, i) {
+  if (col.key) {
+    const v = spec.data_edits?.[col.key]?.[i];
+    if (v !== undefined) return { v, edited: true };
+    return { v: col.values[i], edited: false };
+  }
+  const own = dataPanel.s.obj[col.field];
+  return { v: Array.isArray(own) ? own[i] : col.values[i], edited: false };
+}
+
+function drawDataTable(p) {
+  const { cols } = dataPanel;
+  const titles = {
+    x: p.xlabel?.text ? mathHtml(p.xlabel.text) : 'Across (x)',
+    y: p.ylabel?.text ? mathHtml(p.ylabel.text) : 'Up (y)',
+  };
+  $('data-head-row').innerHTML = cols.map((c) => `<th>${titles[c.field] ?? escapeHtml(c.title)}</th>`).join('');
+  const n = cols[0].values.length;
+  $('data-count').textContent = `${n.toLocaleString()} point${n === 1 ? '' : 's'} · click a number to change it`;
+  const rows = [];
+  for (let i = 0; i < n; i++) {
+    rows.push('<tr>' + cols.map((c, j) => {
+      const { v, edited } = dataValue(c, i);
+      return `<td data-i="${i}" data-c="${j}"${edited ? ' class="edited" title="Changed by hand"' : ''}>` +
+        `${v === null || v === undefined ? '' : fmtNum(v)}</td>`;
+    }).join('') + '</tr>');
+  }
+  $('data-table-body').innerHTML = rows.join('');
+}
+
+$('data-table-body').addEventListener('click', (e) => {
+  const td = e.target.closest('td');
+  if (!td || td.querySelector('input') || !dataPanel?.cols) return;
+  const i = +td.dataset.i, col = dataPanel.cols[+td.dataset.c];
+  const { v } = dataValue(col, i);
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'data-edit';
+  input.value = v === null || v === undefined ? '' : String(v);
+  td.textContent = '';
+  td.appendChild(input);
+  input.focus();
+  input.select();
+  let done = false;
+  const finish = (save) => {
+    if (done) return;
+    done = true;
+    const text = input.value.trim().replace(/,/g, '');
+    const num = Number(text);
+    if (save && text !== '' && Number.isFinite(num) && text !== fmtNum(v)) {
+      // Typing back what the table showed for the original (it's rounded
+      // there) means "the original", not a new, slightly different value.
+      const orig = col.values[i];
+      setDataValue(col, i, orig !== null && text === fmtNum(orig) ? orig : num);
+    }
+    drawDataTable(panelById(dataPanel.s.panel));
+  };
+  input.addEventListener('keydown', (ev) => {
+    ev.stopPropagation();                 // arrows/Delete edit the number, not the figure
+    if (ev.key === 'Enter') finish(true);
+    if (ev.key === 'Escape') finish(false);
+  });
+  input.addEventListener('blur', () => finish(true));
+});
+
+function setDataValue(col, i, num) {
+  pushHistory();
+  if (col.key) {
+    spec.data_edits ??= {};
+    spec.data_edits[col.key] ??= {};
+    if (num === col.values[i]) delete spec.data_edits[col.key][i];   // back to the original
+    else spec.data_edits[col.key][i] = num;
+    if (!Object.keys(spec.data_edits[col.key]).length) delete spec.data_edits[col.key];
+    if (!Object.keys(spec.data_edits).length) delete spec.data_edits;
+  } else {
+    dataPanel.s.obj[col.field][i] = num;
+  }
+  setStatus('Saving…', 'busy');
+  scheduleSave(0);
 }
 
 function fmtNum(v) {

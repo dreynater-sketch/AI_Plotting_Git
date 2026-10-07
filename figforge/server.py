@@ -180,7 +180,8 @@ class Handler(BaseHTTPRequestHandler):
             fig = self._figure(path[len("/api/describe/"):])
             if not fig:
                 return self._error(404, "unknown figure")
-            return self._json(ops.describe(fig.load_spec(), fig.load_arrays()))
+            spec = fig.load_spec()
+            return self._json(ops.describe(spec, render.apply_data_edits(fig.load_arrays(), spec)))
 
         if path.startswith("/api/history/"):
             fig = self._figure(path[len("/api/history/"):])
@@ -213,13 +214,23 @@ class Handler(BaseHTTPRequestHandler):
             for s in p.get("series", []):
                 if s["id"] != series_id:
                     continue
-                x = arrays[s["x"]] if isinstance(s["x"], str) else s["x"]
-                y = arrays[s["y"]] if isinstance(s["y"], str) else s["y"]
                 # NaN (a gap in imported data) isn't valid JSON: send null.
                 clean = lambda vs: [None if v != v else float(v) for v in vs]
+                # The numbers as stored, before the user's edits: the page
+                # lays spec.data_edits on top, so undo shows instantly.
+                # key is the npz array a column comes from (null for numbers
+                # written inline in the spec, which edit the spec directly).
+                cols = []
+                for field, title in (("x", "x"), ("y", "y"), ("yerr", "± error"), ("y2", "upper")):
+                    ref = s.get(field)
+                    if ref is None:
+                        continue
+                    vals = arrays[ref] if isinstance(ref, str) else ref
+                    cols.append({"field": field, "title": title,
+                                 "key": ref if isinstance(ref, str) else None, "values": clean(vals)})
                 return self._json({
                     "id": series_id, "panel": p["id"], "label": s.get("label", ""),
-                    "x": clean(x), "y": clean(y),
+                    "x": cols[0]["values"], "y": cols[1]["values"], "columns": cols,
                 })
         return self._error(404, "unknown series")
 

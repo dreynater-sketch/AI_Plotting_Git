@@ -7,6 +7,7 @@ schemas stay inside strict mode's 16-union-parameter cap."""
 import os as _os
 ROOT_DIR = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
 import io, os, shutil, sys, types, zipfile
+from _cleanup import rmtree
 sys.path.insert(0, ROOT_DIR)
 os.chdir(ROOT_DIR)
 
@@ -79,7 +80,7 @@ PANEL = dict(x_column="channel", y_columns=["1A_middle", "1B"], plot_as="line", 
 P = "zz_assistant_test"
 store = LocalStore()
 if store.project_exists(P):
-    shutil.rmtree(f"figures/{P}")
+    rmtree(f"figures/{P}")
 fig = Figure(P, store)
 
 fake = FakeClient([
@@ -189,5 +190,5 @@ st, _, _ = assistant.step(st, fig)
 check(last.seen[-1].get("tool_choice") == {"type": "none"}, "the last allowed turn is a no-tools wrap-up")
 check(st["done"] and "maximum number of steps" in st["reply"], "stops at the step limit")
 
-shutil.rmtree(f"figures/{P}")
+rmtree(f"figures/{P}")
 print(len(fails), "failure(s)")

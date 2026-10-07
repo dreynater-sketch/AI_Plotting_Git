@@ -133,6 +133,7 @@ def apply(code, spec, array_keys=()):
     lines = code.splitlines()
     report = {"skipped": [], "added": [], "removed": [], "changed": []}
     state = {"ax": None, "suptitle": False}
+    new["data_edits"] = {}   # the code's D["k"][i] = v lines are the whole truth
     taken = set()
 
     def skip(node, reason):
@@ -155,6 +156,8 @@ def apply(code, spec, array_keys=()):
                 kept.add(gid)
                 taken.add(gid)
 
+    if not new.get("data_edits"):
+        new.pop("data_edits", None)
     if not state["suptitle"] and new.get("suptitle"):
         new["suptitle"]["text"] = ""
 
@@ -193,6 +196,17 @@ def _statement(node, new, panels, state, taken, array_keys):
         return
     if isinstance(node, ast.Assign) and len(node.targets) == 1:
         target = node.targets[0]
+        # D["key"][row] = value: a number changed by hand
+        if isinstance(target, ast.Subscript) and isinstance(target.value, ast.Subscript)                 and _name(target.value.value) == "D":
+            key = _lit(target.value.slice, "data key")
+            row = _lit(target.slice, "row")
+            value = _lit(node.value, "value")
+            if not isinstance(key, str) or (array_keys and key not in array_keys):
+                raise Skip(f'there is no D["{key}"] in the data')
+            if not isinstance(row, int) or isinstance(row, bool) or row < 0:
+                raise Skip("the row must be a whole number, 0 or more")
+            new.setdefault("data_edits", {}).setdefault(key, {})[str(row)] = float(_num(value, "value"))
+            return
         tname = _name(target)
         if tname in ("HERE", "D"):
             return
@@ -591,6 +605,8 @@ def _diff(old, new, report):
                     "hlines", "vlines", "zero_lines", "top_axis", "right_axis"):
             if po.get(key) != pn.get(key):
                 report["changed"].append(f"({po['id']}) {key.replace('_', ' ')}")
+    if (old.get("data_edits") or {}) != (new.get("data_edits") or {}):
+        report["changed"].append("numbers changed by hand")
     for key in ("suptitle", "size_in", "rcparams", "layout", "dpi"):
         if old.get(key) != new.get(key):
             report["changed"].append({"suptitle": "figure title", "size_in": "figure size"}

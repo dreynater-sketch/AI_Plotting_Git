@@ -67,6 +67,15 @@ def generate(spec):
         rev=spec.get("rev", 1),
     )]
 
+    edits = {k: v for k, v in (spec.get("data_edits") or {}).items() if v}
+    if edits:
+        L.append("# Numbers changed by hand in FigForge (the data file still has the originals).")
+        L.append("D = {k: D[k].copy() for k in D.files}")
+        for key, rows in edits.items():
+            for row, value in sorted(rows.items(), key=lambda kv: int(kv[0])):
+                L.append(f'D["{key}"][{int(row)}] = {float(value)!r}')
+        L.append("")
+
     rc = spec.get("rcparams", {})
     if rc:
         L.append("plt.rcParams.update({")

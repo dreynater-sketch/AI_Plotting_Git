@@ -4,13 +4,14 @@ ROOT_DIR = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
 OUT_DIR = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "_out")
 _os.makedirs(OUT_DIR, exist_ok=True)
 import json, os, shutil, tempfile
+from _cleanup import rmtree
 from playwright.sync_api import sync_playwright
 
 ROOT = ROOT_DIR; os.chdir(ROOT)
 S = OUT_DIR
 B = _os.environ.get("FF_BASE", "http://127.0.0.1:8765")
 NAME = "zz_growth"
-if os.path.exists(f"figures/{NAME}"): shutil.rmtree(f"figures/{NAME}")
+if os.path.exists(f"figures/{NAME}"): rmtree(f"figures/{NAME}")
 
 csv_path = os.path.join(tempfile.mkdtemp(), "growth curve.csv")
 rows = ["# plate reader export", "time (h);OD600 wt;OD600 mutant;label"]
@@ -100,5 +101,5 @@ with sync_playwright() as pw:
     check(not errs, f"no page errors {errs}")
     br.close()
 
-shutil.rmtree(f"figures/{NAME}")
+rmtree(f"figures/{NAME}")
 print(len(fails), "failure(s)")

@@ -83,7 +83,9 @@ try:
         check(cookies["ff_at"]["httpOnly"] and cookies["ff_rt"]["httpOnly"], "session cookies are HttpOnly")
         check(pg.evaluate("document.cookie").find("ff_") == -1, "page scripts can't read the session")
 
-        # --- Ada edits her figure
+        # --- Ada edits her figure (the Q-circle one; other starter projects
+        # depend on what's in the local figures/ folder)
+        pg.goto(B + "/?project=qcircle"); loaded()
         tid = pg.evaluate("spec.panels[0].texts[0].id"); s0 = pg.evaluate("spec.panels[0].texts[0].size")
         pg.evaluate(f"setSelection(['{tid}'])"); pg.click("#f-size-up"); settle()
 
@@ -117,6 +119,7 @@ try:
         signup("Bob", "bob@test.dev", "bob-password-1")
         pg.goto(mail("bob@test.dev", "signup")); loaded()
         check(pg.inner_text("#account-name") == "Bob", "Bob signed in")
+        pg.goto(B + "/?project=qcircle"); loaded()
         check(pg.evaluate("spec.panels[0].texts[0].size") == s0, "Bob does not see Ada's edit (isolated)")
         pg.evaluate("document.activeElement.blur()")
         pg.click("#btn-saveas") if False else None

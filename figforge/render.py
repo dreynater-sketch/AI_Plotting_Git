@@ -47,8 +47,29 @@ def _resolve(ref, arrays):
     return np.asarray(ref, dtype=float)
 
 
+def apply_data_edits(arrays, spec):
+    """The arrays with the numbers the user changed by hand (spec
+    "data_edits": {array key: {row: value}}). Copies only what changes;
+    unknown keys and rows out of range are ignored."""
+    edits = spec.get("data_edits") or {}
+    if not edits:
+        return arrays
+    out = dict(arrays)
+    for key, rows in edits.items():
+        if key not in out or not rows:
+            continue
+        a = np.array(out[key], dtype=float)
+        for row, value in rows.items():
+            i = int(row)
+            if 0 <= i < a.size and isinstance(value, (int, float)):
+                a[i] = value
+        out[key] = a
+    return out
+
+
 def build_figure(spec, arrays, preview=False):
     """Realise a SPEC as a matplotlib Figure. Returns (fig, axes_by_id)."""
+    arrays = apply_data_edits(arrays, spec)
     plt.rcParams.update(matplotlib.rcParamsDefault)
     plt.rcParams.update(spec.get("rcparams", {}))
 
