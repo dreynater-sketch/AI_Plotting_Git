@@ -94,6 +94,14 @@ class LocalStore:
     def rename_project(self, src, dst):
         os.rename(self._path(src), self._path(dst))
 
+    def delete_project(self, name):
+        def writable(func, path, _exc):     # read-only files (OneDrive, git)
+            os.chmod(path, 0o666)
+            func(path)
+        import sys
+        kw = {"onexc": writable} if sys.version_info >= (3, 12) else {"onerror": writable}
+        shutil.rmtree(self._path(name), **kw)
+
 
 class SupabaseStore:
     """Project folders as "projects/<name>/<file>" objects in a private
@@ -227,6 +235,11 @@ class SupabaseStore:
                 "bucketId": self.bucket, "sourceKey": key,
                 "destinationKey": self.PREFIX + dst + key[len(self.PREFIX + src):],
             })
+
+    def delete_project(self, name):
+        keys = self._walk(self.PREFIX + name)
+        if keys:
+            self._call("DELETE", f"/object/{self.bucket}", {"prefixes": keys})
 
     def _seed(self):
         """An empty bucket gets the figures bundled with the deployment, so

@@ -62,7 +62,7 @@ import posixpath
 import re
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import unquote, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 from figforge import codegen, codesync, csvimport, ops, render
 from figforge.auth import AuthError, is_admin, public_user
@@ -169,6 +169,19 @@ class Handler(BaseHTTPRequestHandler):
             buf = io.BytesIO()
             render.render_png(spec, fig.load_arrays(), buf, spec.get("dpi", 200))
             return self._send(200, buf.getvalue(), "image/png")
+
+        if path.startswith("/api/export/"):
+            # /api/export/<name>?format=png|pdf|svg
+            fig = self._figure(path[len("/api/export/"):])
+            if not fig:
+                return self._error(404, "unknown figure")
+            fmt = (parse_qs(urlparse(self.path).query).get("format") or ["png"])[0].lower()
+            if fmt not in render.EXPORT_FORMATS:
+                return self._error(400, "format must be png, pdf or svg")
+            spec = fig.load_spec()
+            buf = io.BytesIO()
+            render.render_file(spec, fig.load_arrays(), buf, fmt, spec.get("dpi", 200))
+            return self._send(200, buf.getvalue(), render.EXPORT_FORMATS[fmt])
 
         if path.startswith("/api/data/"):
             return self._series_data(path[len("/api/data/"):])
@@ -277,6 +290,8 @@ class Handler(BaseHTTPRequestHandler):
 
         if path in ("/api/project/duplicate", "/api/project/rename"):
             return self._project_op(path.rsplit("/", 1)[1])
+        if path == "/api/project/delete":
+            return self._project_delete()
 
         if path == "/api/csv/inspect":
             body = self._body()
@@ -434,6 +449,19 @@ class Handler(BaseHTTPRequestHandler):
         else:
             self.store.rename_project(src.name, name)
         return self._json({"name": name, "figures": list_figures(self.store)})
+
+    def _project_delete(self):
+        """Delete a whole project folder -- never the last one, so the
+        editor always has something to open."""
+        body = self._body()
+        fig = self._figure((body or {}).get("name") if isinstance(body, dict) else None)
+        if not fig:
+            return self._error(404, "unknown project")
+        names = list_figures(self.store)
+        if names == [fig.name]:
+            return self._error(409, "that's your only project -- make another one first")
+        self.store.delete_project(fig.name)
+        return self._json({"deleted": fig.name, "figures": list_figures(self.store)})
 
     def _apply_ops(self, fig, calls):
         """Editing operations (ops.py) -- what a future assistant's tool calls

@@ -724,3 +724,8 @@ sub, sup { font-size: 0.75em; line-height: 0; }
 }
 .data-table td.empty { cursor: default; }
 .data-table td.empty:hover { background: none; }
+
+/* Add buttons in the zoom bar; whole-figure settings in the empty side panel */
+#btn-add-label, #btn-add-arrow { padding: 3px 10px; }
+#insp-empty .subhead { margin-top: 6px; }
+#insp-empty .check { display: block; margin: 2px 0 12px; }

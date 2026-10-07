@@ -787,6 +787,7 @@ function common(get) {
 function refreshInspector() {
   const sel = selected();
   $('insp-empty').hidden = sel.length > 0;
+  if (!sel.length) refreshFigureFields();
   $('insp-body').hidden = sel.length === 0;
   refreshDataPanel(sel);
   if (!sel.length) return;
@@ -2351,6 +2352,7 @@ $('btn-py').onclick = async () => {
 document.addEventListener('pointerdown', (e) => {
   if (!$('btn-py').parentElement.contains(e.target)) $('py-menu').hidden = true;
   if (!$('btn-help').parentElement.contains(e.target)) showHelp(false);
+  if (!$('btn-dl').parentElement.contains(e.target)) $('dl-menu').hidden = true;
 });
 
 /* "? Help": the how-to and the keyboard keys, out of the way until asked. */
@@ -2375,7 +2377,146 @@ $('py-download-edited').onclick = () => {
   $('py-menu').hidden = true;
   download(`/api/code/${FIGURE}?edited=1`, `${FIGURE}_edited.py`);
 };
-$('btn-png').onclick = () => download(`/api/png/${FIGURE}`, `${FIGURE}.png`);
+$('btn-dl').onclick = () => { $('dl-menu').hidden = !$('dl-menu').hidden; };
+const exportAs = (fmt) => {
+  $('dl-menu').hidden = true;
+  download(`/api/export/${FIGURE}?format=${fmt}`, `${FIGURE}.${fmt}`);
+};
+$('btn-png').onclick = () => exportAs('png');
+$('dl-pdf').onclick = () => exportAs('pdf');
+$('dl-svg').onclick = () => exportAs('svg');
+
+/* ---------------------------------------------- whole-figure settings */
+
+function refreshFigureFields() {
+  if (!spec) return;
+  $('f-fig-w').value = spec.size_in[0];
+  $('f-fig-h').value = spec.size_in[1];
+  $('f-fig-preset').value = '';
+  $('f-fig-font').value = spec.rcparams?.['font.family'] ?? 'sans-serif';
+}
+
+/** Every text size in the figure, times k (rounded to half points): so a
+ *  figure shrunk to one journal column keeps readable, proportionate text. */
+function scaleText(k) {
+  const r = (v) => Math.max(4, Math.round(v * k * 2) / 2);
+  const sz = (o, d) => { if (o) o.size = r(o.size ?? d); };
+  sz(spec.suptitle, 16);
+  for (const p of spec.panels) {
+    sz(p.title, 14); sz(p.xlabel, 13); sz(p.ylabel, 13);
+    if (p.top_axis) sz(p.top_axis, 13);
+    if (p.right_axis) sz(p.right_axis, 13);
+    p.xtick_size = r(p.xtick_size ?? 11);
+    p.ytick_size = r(p.ytick_size ?? 11);
+    if (p.legend) p.legend.size = r(p.legend.size ?? 10);
+    for (const t of p.texts || []) t.size = r(t.size ?? 12);
+    for (const c of p.series || []) {
+      if (c.colorbar) { c.colorbar.size = r(c.colorbar.size ?? 12); c.colorbar.tick_size = r(c.colorbar.tick_size ?? 10); }
+    }
+  }
+}
+
+function setFigureSize(w, h) {
+  if (!(w >= 1 && w <= 40 && h >= 1 && h <= 40)) return;
+  pushHistory();
+  const k = w / spec.size_in[0];
+  if ($('f-fig-scale').checked && Math.abs(k - 1) > 0.01) scaleText(k);
+  spec.size_in = [Math.round(w * 100) / 100, Math.round(h * 100) / 100];
+  refreshFigureFields();
+  scheduleSave(0);
+  setTimeout(fit, 0);
+}
+
+$('f-fig-preset').addEventListener('change', (e) => {
+  const v = e.target.value;
+  const [w0, h0] = spec.size_in;
+  if (v === 'slide') setFigureSize(10, 5.6);
+  else if (v === 'poster') setFigureSize(12, 8);
+  else if (v) { const w = parseFloat(v); setFigureSize(w, w * h0 / w0); }   // same proportions
+});
+$('f-fig-w').addEventListener('change', (e) => setFigureSize(parseFloat(e.target.value), spec.size_in[1]));
+$('f-fig-h').addEventListener('change', (e) => {
+  // Height alone: the text keeps its size.
+  const h = parseFloat(e.target.value);
+  if (!(h >= 1 && h <= 40)) return;
+  pushHistory();
+  spec.size_in = [spec.size_in[0], Math.round(h * 100) / 100];
+  scheduleSave(0);
+  setTimeout(fit, 0);
+});
+$('f-fig-font').addEventListener('change', (e) => {
+  pushHistory();
+  const rc = { ...(spec.rcparams || {}) };
+  if (e.target.value === 'sans-serif') delete rc['font.family']; else rc['font.family'] = e.target.value;
+  if (e.target.value === 'serif') rc['mathtext.fontset'] = 'dejavuserif'; else delete rc['mathtext.fontset'];
+  spec.rcparams = rc;
+  scheduleSave(0);
+});
+
+/* ------------------------------------------- add a label / an arrow */
+
+/** The plot new things go into: the picked element's, else the first. */
+function workingPanel() {
+  const s = selected()[0];
+  return panelById(s?.panel) || spec.panels[0];
+}
+
+function middleOf(p) {
+  const mid = (lim, scale) => scale === 'log' ? Math.sqrt(lim[0] * lim[1]) : (lim[0] + lim[1]) / 2;
+  const at = (lim, scale, f) => scale === 'log'
+    ? lim[0] * Math.pow(lim[1] / lim[0], f) : lim[0] + (lim[1] - lim[0]) * f;
+  return { x: mid(p.xlim, p.xscale), y: mid(p.ylim, p.yscale),
+           xAt: (f) => at(p.xlim, p.xscale, f), yAt: (f) => at(p.ylim, p.yscale, f) };
+}
+
+function freshId(p, word) {
+  const used = new Set(spec.panels.flatMap((q) => ['texts', 'series', 'arrows']
+    .flatMap((k) => (q[k] || []).map((i) => i.id))));
+  let n = 1;
+  while (used.has(`${p.id}_${word}${n}`)) n++;
+  return `${p.id}_${word}${n}`;
+}
+
+$('btn-add-label').onclick = () => {
+  const p = workingPanel();
+  const m = middleOf(p);
+  const id = freshId(p, 'label');
+  pushHistory();
+  (p.texts ??= []).push({ id, text: 'New label', xy: [m.x, m.y], coords: 'data',
+                          size: 12, color: '#000000', ha: 'center', va: 'center' });
+  buildList();
+  setSelection([id]);
+  scheduleSave(0);
+  setTimeout(() => { $('f-text').focus(); $('f-text').select(); }, 0);
+};
+
+$('btn-add-arrow').onclick = () => {
+  const p = workingPanel();
+  const m = middleOf(p);
+  const id = freshId(p, 'arrow');
+  pushHistory();
+  (p.arrows ??= []).push({ id, p0: [m.xAt(0.35), m.yAt(0.5)], p1: [m.xAt(0.65), m.yAt(0.5)],
+                           arrowstyle: '->', color: '#000000', lw: 1.5, mutation_scale: 14, zorder: 6 });
+  buildList();
+  setSelection([id]);
+  scheduleSave(0);
+  setStatus('Arrow added: drag the middle to move it, an end to stretch it');
+};
+
+$('btn-delete-project').onclick = async () => {
+  if (!confirm(`Delete "${FIGURE}" and everything in it? This can't be undone.`)) return;
+  await flushPending();
+  try {
+    const r = await fetch('/api/project/delete', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: FIGURE }),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || r.statusText);
+    try { localStorage.removeItem(LAST_PROJECT_KEY); } catch { /* fine */ }
+    location.search = '?project=' + encodeURIComponent(d.figures[0]);
+  } catch (e) { setStatus(e.message, 'err'); }
+};
 
 // Two-step confirm rather than a modal dialog.
 let rebuildArmed = false;
@@ -3215,6 +3356,7 @@ async function startEditor() {
     refreshUndoButtons();
     applySvg(data.svg);
     buildList();
+    refreshFigureFields();
     fit();
     setStatus('');
     $('status').dataset.ready = '1';  // "the figure is on screen" (tests wait on it)

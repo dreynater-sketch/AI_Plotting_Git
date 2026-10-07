@@ -16,6 +16,7 @@
     <button id="btn-ai" class="ai-btn" hidden title="Give Claude your data files and describe the figure you want">✨ New with AI</button>
     <button id="btn-saveas" title="Save a copy with a new name">Save a copy…</button>
     <button id="btn-rename" title="Give this figure a new name">Rename</button>
+    <button id="btn-delete-project" class="danger" title="Delete this figure and everything in it">Delete</button>
   </div>
   <div class="spacer"></div>
   <div class="status" id="status" role="status"></div>
@@ -30,7 +31,14 @@
         <button role="menuitem" id="py-download-edited" hidden><b>Download my edited version</b><span>The code you saved in the editor.</span></button>
       </div>
     </div>
-    <button id="btn-png" title="Download the figure as a picture (PNG)">Download picture</button>
+    <div class="menu-wrap">
+      <button id="btn-dl" aria-haspopup="menu" title="Download the figure">Download ▾</button>
+      <div class="py-menu" id="dl-menu" role="menu" hidden>
+        <button role="menuitem" id="dl-pdf"><b>PDF</b><span>For papers and LaTeX. Sharp at any size; text stays text.</span></button>
+        <button role="menuitem" id="dl-svg"><b>SVG</b><span>To keep editing in Illustrator or Inkscape.</span></button>
+        <button role="menuitem" id="btn-png"><b>PNG picture</b><span>For slides, posters and the web.</span></button>
+      </div>
+    </div>
     <button id="btn-rebuild" class="danger" title="Throw away every change (moves, styles, numbers you changed) and draw the figure fresh from your data">Start over</button>
   </div>
   <div class="account" id="account" hidden>
@@ -77,6 +85,8 @@
       <span id="zoomval">100%</span>
       <button id="btn-fit" class="link" title="Make the figure fit the window">Fit</button>
       <span class="spacer"></span>
+      <button id="btn-add-label" title="Add a new label to the plot you're working in">+ Label</button>
+      <button id="btn-add-arrow" title="Add a new arrow to the plot you're working in">+ Arrow</button>
       <div class="menu-wrap">
         <button id="btn-help" aria-haspopup="dialog" aria-expanded="false" title="How to use the editor">? Help</button>
         <div class="help-pop" id="help-pop" role="dialog" aria-label="How to use the editor" hidden>
@@ -149,7 +159,40 @@
   <aside class="sidebar">
     <div class="panel" id="inspector">
       <h2>Change it</h2>
-      <div class="empty" id="insp-empty">Nothing picked yet.<br><span>Click anything on the figure, or in the list under it.</span></div>
+      <div id="insp-empty">
+        <div class="empty">Nothing picked yet.<br><span>Click anything on the figure, or in the list under it.</span></div>
+        <div class="subhead">Whole figure</div>
+        <label class="field">
+          <span>Size</span>
+          <select id="f-fig-preset">
+            <option value="">Choose a size…</option>
+            <option value="3.4">Journal, 1 column (3.4 in wide)</option>
+            <option value="5">Journal, 1.5 columns (5 in wide)</option>
+            <option value="7">Journal, 2 columns (7 in wide)</option>
+            <option value="slide">Slide (10 × 5.6 in)</option>
+            <option value="poster">Poster panel (12 × 8 in)</option>
+          </select>
+        </label>
+        <div class="row">
+          <label class="field">
+            <span>Width <em>(in)</em></span>
+            <input type="number" id="f-fig-w" min="1" max="40" step="0.1">
+          </label>
+          <label class="field">
+            <span>Height <em>(in)</em></span>
+            <input type="number" id="f-fig-h" min="1" max="40" step="0.1">
+          </label>
+        </div>
+        <label class="check"><input type="checkbox" id="f-fig-scale" checked> Resize the text with the figure</label>
+        <label class="field">
+          <span>Font</span>
+          <select id="f-fig-font">
+            <option value="sans-serif">Sans-serif (Helvetica-like)</option>
+            <option value="serif">Serif (Times-like)</option>
+            <option value="monospace">Monospace</option>
+          </select>
+        </label>
+      </div>
 
       <div id="insp-body" hidden>
         <div class="elid"><b id="insp-kind">Label</b><span id="insp-where"></span><button id="btn-delete" class="danger small" title="Delete it (Del)">Delete</button><button id="btn-done" class="small" title="Let go of it (Esc)">Done</button></div>

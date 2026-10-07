@@ -474,8 +474,19 @@ def render(spec, arrays, preview=False):
     return buf.getvalue(), geom
 
 
-def render_png(spec, arrays, path, dpi=None):
+EXPORT_FORMATS = {"png": "image/png", "pdf": "application/pdf", "svg": "image/svg+xml"}
+
+
+def render_file(spec, arrays, out, fmt="png", dpi=None):
+    """The figure as a file for papers and slides: PNG, or vector PDF / SVG.
+    PDF keeps text as real, editable text (TrueType, not outlines)."""
     fig, _ = build_figure(spec, arrays)
-    fig.savefig(path, dpi=dpi or spec.get("dpi", 200), facecolor="white")
+    # After building: build_figure resets rcParams, and these are read at save time.
+    with plt.rc_context({"pdf.fonttype": 42, "svg.fonttype": "none" if fmt == "svg" else "path"}):
+        fig.savefig(out, format=fmt, dpi=dpi or spec.get("dpi", 200), facecolor="white")
     plt.close(fig)
-    return path
+    return out
+
+
+def render_png(spec, arrays, path, dpi=None):
+    return render_file(spec, arrays, path, "png", dpi)
