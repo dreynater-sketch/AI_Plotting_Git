@@ -40,6 +40,7 @@ SUITES = [
     ("test_guides.py", True),
     ("test_data_edits.py", True),
     ("test_quickwins.py", True),
+    ("test_panel_features.py", True),
     ("test_pad.py", True),
     ("test_csv_import.py", True),
     ("test_code_editor.py", True),

@@ -408,7 +408,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._error(404, "this project's source CSV is missing")
             spec, arrays = csvimport.build_panels(fig.name, text, source["panels"],
                                                   source.get("filename", ""),
-                                                  source.get("figure_title", ""))
+                                                  source.get("figure_title", ""),
+                                                  source.get("rows", 1))
             fig.save_arrays(arrays)
             return self._finish_rebuild(fig, spec)
         from figforge import analyze, spec_builder

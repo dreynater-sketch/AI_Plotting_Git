@@ -112,7 +112,7 @@ TOOLS = [
         "name": "set_axis",
         "description": "Change one axis of a panel: limits, linear/log scale, tick label size. "
                        "Pass null for anything to leave unchanged. Log scale needs positive limits.",
-        "input_schema": _obj({"panel_id": _PANEL, "axis": {"type": "string", "enum": ["x", "y"]},
+        "input_schema": _obj({"panel_id": _PANEL, "axis": {"type": "string", "enum": ["x", "y", "right"]},
                               "min": _nullable({"type": "number"}), "max": _nullable({"type": "number"}),
                               "scale": _keep_enum(["linear", "log"]),
                               "tick_size": _nullable({"type": "number"})}),
@@ -172,6 +172,46 @@ TOOLS = [
         }),
     },
     {
+        "name": "set_grid",
+        "description": "Grid lines and small (minor) ticks of a panel. grid: \"none\", \"major\" "
+                       "(at the numbered ticks) or \"both\" (also between them).",
+        "input_schema": _obj({"panel_id": _PANEL,
+                              "grid": {"type": "string", "enum": ["none", "major", "both"]},
+                              "minor_ticks": {"type": "boolean"}}),
+    },
+    {
+        "name": "set_tick_format",
+        "description": "How one axis numbers its ticks: scientific notation (x10^n at the axis end) "
+                       "and/or a tick every `step` data units (null = automatic).",
+        "input_schema": _obj({"panel_id": _PANEL, "axis": {"type": "string", "enum": ["x", "y"]},
+                              "scientific": {"type": "boolean"},
+                              "step": _nullable({"type": "number"})}),
+    },
+    {
+        "name": "add_span",
+        "description": "Shade a range of a panel behind the data: axis \"x\" shades from..to "
+                       "along x (a vertical band), \"y\" along y. label \"\" keeps it out of the "
+                       "legend. Its id is \"<panel>__span_<n>\" (delete_element removes it).",
+        "input_schema": _obj({"panel_id": _PANEL, "axis": {"type": "string", "enum": ["x", "y"]},
+                              "from": {"type": "number"}, "to": {"type": "number"},
+                              "color": _KEEP_COLOR, "opacity": _nullable({"type": "number"}),
+                              "label": {"type": "string"}}),
+    },
+    {
+        "name": "set_curve_axis",
+        "description": "Put a curve on the left y-axis or on a second, independent y-axis on the "
+                       "right (for a second quantity with other units against the same x). The "
+                       "right axis's label id is \"<panel>__ylabel2\"; set_axis with axis "
+                       "\"right\" sets its range and scale.",
+        "input_schema": _obj({"series_id": _ID, "axis": {"type": "string", "enum": ["left", "right"]}}),
+    },
+    {
+        "name": "set_layout",
+        "description": "Arrange the panels in a grid: rows x columns, filled left to right then "
+                       "down (rows 1 = all side by side). rows x columns must hold every panel.",
+        "input_schema": _obj({"rows": {"type": "integer"}, "columns": {"type": "integer"}}),
+    },
+    {
         "name": "set_font",
         "description": "The typeface for all text in the figure.",
         "input_schema": _obj({"family": {"type": "string", "enum": ["sans-serif", "serif", "monospace"]}}),
@@ -210,6 +250,16 @@ def _find(spec, eid):
         p = _panel(spec, pid)
         if part in ("title", "xlabel", "ylabel"):
             return part, p.setdefault(part, {}), p
+        if part == "ylabel2":
+            if p.get("twin") is None:
+                raise OpError(f"panel {pid} has no right axis")
+            return part, p.setdefault("ylabel2", {}), p
+        if part.startswith("span_") and part[5:].isdigit():
+            spans = p.get("spans") or []
+            i = int(part[5:])
+            if i >= len(spans):
+                raise OpError(f"panel {pid} has no shaded region {i}")
+            return "span", spans[i], p
         if part in ("top_axis", "right_axis"):
             if not p.get(part):
                 raise OpError(f"panel {pid} has no {part.replace('_', ' ')} -- add it with set_second_axis")
@@ -274,7 +324,7 @@ def _describe(spec, arrays):
         good = a[~(a != a)]
         return [round(float(good.min()), 6), round(float(good.max()), 6)] if good.size else None
 
-    out = {"size_in": spec.get("size_in"),
+    out = {"size_in": spec.get("size_in"), "grid_shape": spec.get("grid_shape") or [1, len(spec["panels"])],
            "font": (spec.get("rcparams") or {}).get("font.family", "sans-serif"),
            "title": (spec.get("suptitle") or {}).get("text", ""),
            "panels": []}
@@ -286,6 +336,12 @@ def _describe(spec, arrays):
                        "min": p["xlim"][0], "max": p["xlim"][1], "scale": p.get("xscale", "linear")},
             "y_axis": {"label_id": f"{p['id']}__ylabel", "label": (p.get("ylabel") or {}).get("text", ""),
                        "min": p["ylim"][0], "max": p["ylim"][1], "scale": p.get("yscale", "linear")},
+            "right_y_axis": None if p.get("twin") is None else {
+                "label_id": f"{p['id']}__ylabel2", "label": (p.get("ylabel2") or {}).get("text", ""),
+                **p["twin"]},
+            "grid": p.get("grid", "none"), "minor_ticks": bool(p.get("minor_ticks")),
+            "x_ticks": p.get("xfmt") or "automatic", "y_ticks": p.get("yfmt") or "automatic",
+            "shaded_regions": [{"id": f"{p['id']}__span_{i}", **sp} for i, sp in enumerate(p.get("spans", []))],
             "top_axis": _second_desc(p, "top_axis"),
             "right_axis": _second_desc(p, "right_axis"),
             "legend": None if not p.get("legend") else {
@@ -295,6 +351,7 @@ def _describe(spec, arrays):
                         "coords": t.get("coords", "data"), "size": t.get("size", 12),
                         "color": t.get("color", "black")} for t in p.get("texts", [])],
             "curves": [{"id": s["id"], "kind": s.get("kind", "line"), "legend_label": s.get("label", ""),
+                        "y_axis": s.get("axis", "left"),
                         "colorbar": s.get("colorbar"),
                         "points": _points(s, arrays),
                         "x_range": rng(s.get("x")), "y_range": rng(s.get("y")),
@@ -307,7 +364,7 @@ def _describe(spec, arrays):
     return out
 
 
-_TEXT_KINDS = ("text", "title", "xlabel", "ylabel", "suptitle", "top_axis", "right_axis")
+_TEXT_KINDS = ("text", "title", "xlabel", "ylabel", "suptitle", "top_axis", "right_axis", "ylabel2")
 
 
 def _set_text(spec, a):
@@ -372,6 +429,8 @@ def _delete(spec, a):
         p[key] = [i for i in p[key] if i["id"] != a["element_id"]]
     elif kind == "legend":
         p["legend"] = None
+    elif kind == "span":
+        p["spans"] = [x for x in p["spans"] if x is not obj]
     else:
         obj["text"] = ""
     return f"{a['element_id']} removed"
@@ -380,6 +439,8 @@ def _delete(spec, a):
 def _set_axis(spec, a):
     p = _panel(spec, a["panel_id"])
     ax = a["axis"]
+    if ax == "right":
+        return _set_twin_axis(p, a)
     lim = list(p[f"{ax}lim"])
     if a["min"] is not None:
         lim[0] = _num(a["min"], "min")
@@ -438,6 +499,8 @@ def _set_legend(spec, a):
 def _set_second_axis(spec, a):
     p = _panel(spec, a["panel_id"])
     key = "top_axis" if a["side"] == "top" else "right_axis"
+    if key == "right_axis" and a["show"] and p.get("twin") is not None:
+        raise OpError(f"panel {p['id']}'s right side already holds a second y-axis with its own data")
     if not a["show"]:
         p.pop(key, None)
         return f"panel {p['id']}: {a['side']} axis removed"
@@ -476,6 +539,107 @@ def _style_colormap(spec, a):
     return f"{a['series_id']} colours updated"
 
 
+def _set_grid(spec, a):
+    p = _panel(spec, a["panel_id"])
+    if a["grid"] == "none":
+        p.pop("grid", None)
+    else:
+        p["grid"] = a["grid"]
+    if a["minor_ticks"]:
+        p["minor_ticks"] = True
+    else:
+        p.pop("minor_ticks", None)
+    return f"panel {p['id']}: grid {a['grid']}, minor ticks {'on' if a['minor_ticks'] else 'off'}"
+
+
+def _set_tick_format(spec, a):
+    p = _panel(spec, a["panel_id"])
+    key = f"{a['axis']}fmt"
+    f = {}
+    if a["scientific"]:
+        f["sci"] = True
+    if a["step"] is not None:
+        step = _num(a["step"], "step")
+        lim = p[f"{a['axis']}lim"]
+        if step <= 0 or abs(lim[1] - lim[0]) / step > 200:
+            raise OpError(f"a step of {step} would put more than 200 ticks on that axis")
+        f["step"] = step
+    if f:
+        p[key] = f
+    else:
+        p.pop(key, None)
+    return f"panel {p['id']} {a['axis']} ticks: {f or 'automatic'}"
+
+
+def _add_span(spec, a):
+    p = _panel(spec, a["panel_id"])
+    lo, hi = sorted((_num(a["from"], "from"), _num(a["to"], "to")))
+    if lo == hi:
+        raise OpError("from and to can't be equal")
+    sp = {"axis": a["axis"], "lo": lo, "hi": hi,
+          "color": _color(a["color"]) if _given(a["color"]) else "#cccccc",
+          "alpha": _num(a["opacity"], "opacity", 0, 1) if a["opacity"] is not None else 0.25}
+    if a["label"]:
+        sp["label"] = _mathtext_ok(a["label"])
+    p.setdefault("spans", []).append(sp)
+    return f"added shaded region {p['id']}__span_{len(p['spans']) - 1}"
+
+
+def _set_twin_axis(p, a):
+    if p.get("twin") is None:
+        raise OpError(f"panel {p['id']} has no right axis -- put a curve on it with set_curve_axis")
+    tw = p["twin"]
+    lim = list(tw.get("ylim") or [None, None])
+    if a["min"] is not None:
+        lim[0] = _num(a["min"], "min")
+    if a["max"] is not None:
+        lim[1] = _num(a["max"], "max")
+    if None not in lim and lim[0] == lim[1]:
+        raise OpError("min and max can't be equal")
+    if any(v is not None for v in lim):
+        tw["ylim"] = lim   # a None end is picked automatically
+    scale = a["scale"] if _given(a["scale"]) else tw.get("yscale", "linear")
+    if scale == "log" and any(v is not None and v <= 0 for v in lim):
+        raise OpError("log scale needs both limits above zero")
+    if _given(a["scale"]):
+        tw["yscale"] = a["scale"]
+    if a["tick_size"] is not None:
+        tw["tick_size"] = _num(a["tick_size"], "tick_size", 4, 48)
+    return f"panel {p['id']} right axis: {tw}"
+
+
+def _set_curve_axis(spec, a):
+    kind, s, p = _find(spec, a["series_id"])
+    if kind != "series":
+        raise OpError(f"'{a['series_id']}' isn't a curve")
+    if a["axis"] == "right":
+        if p.get("right_axis"):
+            raise OpError(f"panel {p['id']} already has a right-hand scale (a calibration); remove "
+                          "it with set_second_axis show false first")
+        s["axis"] = "right"
+        if p.get("twin") is None:
+            p["twin"] = {}
+            p["ylabel2"] = {"text": s.get("label", ""), "size": 13, "color": "#000000"}
+    else:
+        s.pop("axis", None)
+        if not any(c.get("axis") == "right" for c in p.get("series", [])):
+            p.pop("twin", None)
+            p.pop("ylabel2", None)
+    return f"{a['series_id']} is on the {a['axis']} axis"
+
+
+def _set_layout(spec, a):
+    n = len(spec["panels"])
+    rows, cols = int(_num(a["rows"], "rows", 1, 9)), int(_num(a["columns"], "columns", 1, 9))
+    if rows * cols < n:
+        raise OpError(f"{rows} x {cols} holds {rows * cols} panels, but there are {n}")
+    if (rows, cols) == (1, n):
+        spec.pop("grid_shape", None)
+    else:
+        spec["grid_shape"] = [rows, cols]
+    return f"panels arranged {rows} x {cols} (resize the figure with set_figure_size if needed)"
+
+
 def _set_font(spec, a):
     rc = dict(spec.get("rcparams") or {})
     if a["family"] == "sans-serif":
@@ -500,7 +664,9 @@ _HANDLERS = {"set_text": _set_text, "style_text": _style_text, "move_element": _
              "add_label": _add_label, "delete_element": _delete, "set_axis": _set_axis,
              "style_series": _style_series, "set_legend": _set_legend, "set_figure_size": _set_size,
              "set_second_axis": _set_second_axis, "set_font": _set_font,
-             "style_colormap": _style_colormap}
+             "style_colormap": _style_colormap, "set_grid": _set_grid,
+             "set_tick_format": _set_tick_format, "add_span": _add_span, "set_layout": _set_layout,
+             "set_curve_axis": _set_curve_axis}
 
 
 def _check_input(name, args):

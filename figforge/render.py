@@ -24,6 +24,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.patches import FancyArrowPatch, Rectangle
+from matplotlib.ticker import MultipleLocator
 
 from figforge import layers
 
@@ -67,6 +68,15 @@ def apply_data_edits(arrays, spec):
     return out
 
 
+def grid_shape(spec):
+    """(rows, columns) of panels: spec "grid_shape", else one row."""
+    n = len(spec["panels"])
+    shape = spec.get("grid_shape")
+    if shape and len(shape) == 2 and shape[0] * shape[1] >= n and shape[0] >= 1 and shape[1] >= 1:
+        return int(shape[0]), int(shape[1])
+    return 1, n
+
+
 def build_figure(spec, arrays, preview=False):
     """Realise a SPEC as a matplotlib Figure. Returns (fig, axes_by_id)."""
     arrays = apply_data_edits(arrays, spec)
@@ -74,9 +84,11 @@ def build_figure(spec, arrays, preview=False):
     plt.rcParams.update(spec.get("rcparams", {}))
 
     panels = spec["panels"]
-    fig, axes = plt.subplots(1, len(panels), figsize=tuple(spec["size_in"]))
-    if len(panels) == 1:
-        axes = [axes]
+    rows, cols = grid_shape(spec)
+    fig, grid = plt.subplots(rows, cols, figsize=tuple(spec["size_in"]), squeeze=False)
+    axes = list(grid.flat)
+    for spare in axes[len(panels):]:      # a 2 x 2 grid holding 3 panels
+        spare.remove()
     fig.set_dpi(SVG_DPI)
     fig.patch.set_facecolor("white")
 
@@ -127,12 +139,13 @@ def _apply_layout(fig, spec):
 
 def _layout_key(spec):
     return json.dumps([
-        spec.get("size_in"), spec.get("layout"), spec.get("rcparams"),
+        spec.get("size_in"), spec.get("layout"), spec.get("rcparams"), spec.get("grid_shape"),
         spec.get("suptitle"),
         [[p.get("title"), p.get("xlabel"), p.get("ylabel"), p.get("xlim"),
           p.get("ylim"), p.get("xscale"), p.get("yscale"), p.get("aspect"),
           p.get("xtick_size"), p.get("ytick_size"),
-          p.get("legend"), p.get("top_axis"), p.get("right_axis"),
+          p.get("legend"), p.get("top_axis"), p.get("right_axis"), p.get("xfmt"), p.get("yfmt"),
+          p.get("minor_ticks"), p.get("twin"), p.get("ylabel2"),
           [x.get("colorbar") for x in p.get("series", [])]] for p in spec["panels"]],
     ], sort_keys=True, default=str)
 
@@ -260,6 +273,52 @@ def _guide_hit(draw, pos, gid):
     hit.set_gid(gid)
 
 
+def _draw_spans(ax, p, preview):
+    """Shaded regions: an x range (axvspan) or a y range (axhspan), behind
+    the data. The region itself is the click target."""
+    for i, sp in enumerate(p.get("spans", [])):
+        fn = ax.axvspan if sp.get("axis", "x") == "x" else ax.axhspan
+        art = fn(sp["lo"], sp["hi"], color=sp.get("color", "#cccccc"), alpha=sp.get("alpha", 0.25),
+                 lw=0, zorder=0.5, label=sp.get("label") or None)
+        if preview:
+            art.set_gid(f"t_{p['id']}__span_{i}")
+
+
+MAX_TICKS = 200
+
+
+def _draw_ticks_and_grid(ax, p):
+    """Tick spacing, scientific notation (x10^n), minor ticks, grid lines."""
+    for xy in ("x", "y"):
+        f = p.get(f"{xy}fmt") or {}
+        lim = p.get(f"{xy}lim") or [0, 1]
+        step = f.get("step")
+        if step and step > 0 and abs(lim[1] - lim[0]) / step <= MAX_TICKS:
+            (ax.xaxis if xy == "x" else ax.yaxis).set_major_locator(MultipleLocator(step))
+        if f.get("sci") and p.get(f"{xy}scale", "linear") == "linear":
+            ax.ticklabel_format(axis=xy, style="sci", scilimits=(0, 0))
+    if p.get("minor_ticks") or p.get("grid") == "both":
+        ax.minorticks_on()
+    if p.get("grid"):
+        ax.set_axisbelow(True)
+        ax.grid(True, which="major", color="0.85", lw=0.6)
+        if p["grid"] == "both":
+            ax.grid(True, which="minor", color="0.93", lw=0.4)
+
+
+def _draw_twin(ax2, p):
+    tw = p.get("twin") or {}
+    if tw.get("yscale", "linear") != "linear":
+        ax2.set_yscale(tw["yscale"])
+    if tw.get("ylim"):
+        ax2.set_ylim(*tw["ylim"])
+    ax2.tick_params(axis="y", labelsize=tw.get("tick_size", p.get("ytick_size", 11)))
+    lab = p.get("ylabel2") or {}
+    if lab.get("text"):
+        a = ax2.set_ylabel(lab["text"], fontsize=lab.get("size", 13), color=lab.get("color", "black"))
+        a.set_gid(f"t_{p['id']}__ylabel2")
+
+
 SECOND_AXES = (("top_axis", "top", "x"), ("right_axis", "right", "y"))
 
 
@@ -301,8 +360,13 @@ def _draw_panel(ax, p, arrays, preview=False):
             _guide_hit(ax.axhline, 0, f"t_{pid}__zero__h")
             _guide_hit(ax.axvline, 0, f"t_{pid}__zero__v")
 
+    _draw_spans(ax, p, preview)
+    # A second y-axis on the right with its own data (twinx): curves with
+    # "axis": "right" are drawn on it.
+    ax2 = ax.twinx() if p.get("twin") is not None else None
     for s in p.get("series", []):
-        _draw_series(ax, s, arrays, preview)
+        on = ax2 if (ax2 is not None and s.get("axis") == "right") else ax
+        _draw_series(on, s, arrays, preview)
 
     for a in p.get("arrows", []):
         patch = FancyArrowPatch(
@@ -364,13 +428,18 @@ def _draw_panel(ax, p, arrays, preview=False):
     ax.set_xlim(*p["xlim"])
     ax.set_ylim(*p["ylim"])
     if p.get("aspect", "auto") == "equal":
-        ax.set_aspect("equal", "box")
+        # a twinned plot can't resize its box, so it stretches the data range instead
+        ax.set_aspect("equal", "datalim" if p.get("twin") is not None else "box")
 
     ax.tick_params(axis="x", labelsize=p.get("xtick_size", 11))
     ax.tick_params(axis="y", labelsize=p.get("ytick_size", 11))
     for spine in ax.spines.values():
         spine.set_linewidth(p.get("frame_lw", 0.8))
-    _draw_second_axes(ax, p)
+    _draw_ticks_and_grid(ax, p)
+    if ax2 is not None:
+        _draw_twin(ax2, p)
+    else:
+        _draw_second_axes(ax, p)
 
     # Individually gid-tagged so a click can be resolved to a specific
     # tick, but only to canonicalise it: the editor treats every tick on
@@ -399,6 +468,8 @@ def _draw_panel(ax, p, arrays, preview=False):
                       bbox_transform=ax.transAxes, borderaxespad=0)
         else:
             kw["loc"] = lg.get("loc", "best")
+        if ax2 is not None:   # one legend for the curves on both axes
+            kw["handles"] = ax.get_legend_handles_labels()[0] + ax2.get_legend_handles_labels()[0]
         legend_artist = ax.legend(**kw)
         legend_artist.set_gid("t_" + p["id"] + "__legend")
 

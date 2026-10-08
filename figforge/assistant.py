@@ -93,9 +93,12 @@ couldn't do or had to assume.
 FigForge can draw lines, points and step lines; error bars; shaded bands; \
 bars (bar charts, and histograms from bin centres and counts you compute); \
 scatter dots coloured and sized by columns; heatmaps, contour lines and \
-filled contours from tidy x, y, z columns; box plots - in 1-4 panels side by \
-side, with linear or log axes, a second top/right scale, labels, legend, \
-colour bars and fonts. style_colormap changes a map's colours, range, log \
+filled contours from tidy x, y, z columns; box plots - in 1-9 panels, side by \
+side or in a grid (rows), with linear or log axes, a second top/right scale, labels, legend, \
+colour bars, fonts, grid lines and minor ticks (set_grid), scientific \
+tick numbers and tick spacing (set_tick_format), and shaded x or y ranges \
+(add_span), a second y-axis on the right with its own data (set_curve_axis), \
+panel grids (set_layout). style_colormap changes a map's colours, range, log \
 scale and colour bar. It cannot yet draw 3D or polar plots - if the idea \
 needs one, make the closest honest figure and say so. For a fit, compute \
 the fitted curve in the sandbox and plot it as its own column.
@@ -130,14 +133,15 @@ _LAYERS_DESC = ("Other kinds of curves ([] for none): errorbar, band (shaded bet
 
 CREATE_FIGURE = {
     "name": "create_figure",
-    "description": "Create the figure from a table FigForge has received: one to four panels "
-                   "side by side. Call exactly once. Refer to columns by their header names. "
+    "description": "Create the figure from a table FigForge has received: 1-9 panels. "
+                   "Call exactly once. Refer to columns by their header names. "
                    "Write every title and axis label yourself (matplotlib mathtext works); "
                    "\"\" leaves it empty.",
     "input_schema": ops._obj({
         "table": {"type": "string", "description": "File name of a table FigForge has, e.g. \"spectra.csv\"."},
         "figure_title": {"type": "string", "description": "Title over the whole figure, or \"\"."},
-        "panels": {"type": "array", "description": "1-4 panels, left to right.",
+        "rows": {"type": "integer", "description": "Rows of panels: 1 = side by side; e.g. 2 for a 2 x 2 grid of 4."},
+        "panels": {"type": "array", "description": "1-9 panels, left to right, then down.",
                    "items": ops._obj({
                        "x_column": {"type": "string", "description": "Header name of the x column (\"\" only for a panel of box plots)."},
                        "y_columns": {"type": "array", "items": {"type": "string"},
@@ -149,6 +153,11 @@ CREATE_FIGURE = {
                        "title": _TEXT,
                        "x_label": _TEXT,
                        "y_label": _TEXT,
+                       "right_y_columns": {"type": "array", "items": {"type": "string"},
+                                           "description": "Columns drawn (as plot_as) against a second "
+                                                          "y-axis on the right with its own range - a "
+                                                          "second quantity in other units. [] for none."},
+                       "right_y_label": {"type": "string", "description": "Label of the right y-axis, or \"\"."},
                        "x_scale": _SCALE,
                        "y_scale": _SCALE,
                    })},
@@ -204,6 +213,11 @@ PROGRESS = {
     "set_second_axis": "Added a second axis scale",
     "set_font": "Changed the font",
     "style_colormap": "Adjusted the colours",
+    "set_grid": "Changed the grid lines",
+    "set_tick_format": "Changed the axis numbers",
+    "add_span": "Shaded a region",
+    "set_layout": "Arranged the panels",
+    "set_curve_axis": "Moved a curve to the other y-axis",
 }
 
 
@@ -531,10 +545,12 @@ def _run_tool(state, fig, call, spec, arrays):
                        "ys": [_column(names, y, table) for y in p["y_columns"]],
                        "kind": p["plot_as"], "title": p["title"], "xlabel": p["x_label"],
                        "ylabel": p["y_label"], "xscale": p["x_scale"], "yscale": p["y_scale"],
-                       "layers": _layers(names, table, p.get("layers"))}
+                       "layers": _layers(names, table, p.get("layers")),
+                       "right_ys": [_column(names, y, table) for y in p.get("right_y_columns") or []],
+                       "right_label": p.get("right_y_label") or None}
                       for p in args.get("panels") or []]
             new_spec, new_arrays = csvimport.build_panels(
-                fig.name, text, panels, table, args.get("figure_title") or "")
+                fig.name, text, panels, table, args.get("figure_title") or "", args.get("rows") or 1)
             render.render(new_spec, new_arrays)   # prove it draws before keeping it
         except csvimport.CSVError as e:
             raise _ToolError(f"Couldn't make that figure: {e}")

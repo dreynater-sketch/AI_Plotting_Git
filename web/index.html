@@ -185,6 +185,10 @@
           </label>
         </div>
         <label class="check"><input type="checkbox" id="f-fig-scale" checked> Resize the text with the figure</label>
+        <label class="field" id="f-fig-layout-field">
+          <span>Layout of the plots</span>
+          <select id="f-fig-layout"></select>
+        </label>
         <label class="field">
           <span>Font</span>
           <select id="f-fig-font">
@@ -306,6 +310,16 @@
                 <input type="number" id="f-xticksize" min="4" max="48" step="0.5">
               </label>
             </div>
+            <div class="row">
+              <label class="field">
+                <span>A number every</span>
+                <input type="number" id="f-xstep" min="0" step="any" placeholder="auto">
+              </label>
+              <label class="field">
+                <span>&nbsp;</span>
+                <label class="check"><input type="checkbox" id="f-xsci"> ×10ⁿ numbers</label>
+              </label>
+            </div>
           </div>
 
           <div id="axes-y-fields">
@@ -332,6 +346,35 @@
                 <input type="number" id="f-yticksize" min="4" max="48" step="0.5">
               </label>
             </div>
+            <div class="row">
+              <label class="field">
+                <span>A number every</span>
+                <input type="number" id="f-ystep" min="0" step="any" placeholder="auto">
+              </label>
+              <label class="field">
+                <span>&nbsp;</span>
+                <label class="check"><input type="checkbox" id="f-ysci"> ×10ⁿ numbers</label>
+              </label>
+            </div>
+            <div id="twin-fields" hidden>
+              <div class="subhead">Right side axis</div>
+              <div class="row">
+                <label class="field">
+                  <span>min</span>
+                  <input type="number" id="f-y2min" step="any" placeholder="auto">
+                </label>
+                <label class="field">
+                  <span>max</span>
+                  <input type="number" id="f-y2max" step="any" placeholder="auto">
+                </label>
+              </div>
+              <label class="field">
+                <span>scale</span>
+                <select id="f-y2scale">
+                  <option value="linear">linear</option><option value="log">log</option>
+                </select>
+              </label>
+            </div>
           </div>
 
           <div id="axes-panel-fields">
@@ -351,6 +394,21 @@
             <label class="check">
               <input type="checkbox" id="f-zero"> Lines through zero
             </label>
+            <div class="row">
+              <label class="field">
+                <span>Grid lines</span>
+                <select id="f-grid">
+                  <option value="none">None</option>
+                  <option value="major">At the numbers</option>
+                  <option value="both">At the numbers + in between</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>&nbsp;</span>
+                <label class="check"><input type="checkbox" id="f-minor"> Small ticks</label>
+              </label>
+            </div>
+            <button type="button" id="btn-add-span" class="link">+ Shade a range</button>
           </div>
 
           <p class="note" id="axes-note" hidden></p>
@@ -374,6 +432,13 @@
           <label class="field">
             <span>Name <em>(shown in the legend)</em></span>
             <input type="text" id="f-series-label" spellcheck="false" placeholder="No name">
+          </label>
+          <label class="field" id="series-axis-field">
+            <span>Measured on</span>
+            <select id="f-series-axis">
+              <option value="left">the left side axis</option>
+              <option value="right">a second axis on the right</option>
+            </select>
           </label>
           <div class="row">
             <label class="field">
@@ -482,6 +547,37 @@
             </label>
           </div>
           <p class="note">A straight line across the plot, to guide the eye.</p>
+        </div>
+
+        <div id="span-fields" hidden>
+          <div class="row">
+            <label class="field">
+              <span>Color</span>
+              <span class="colorwrap">
+                <input type="color" id="f-span-color">
+                <input type="text" id="f-span-color-hex" spellcheck="false">
+              </span>
+            </label>
+            <label class="field">
+              <span>Opacity</span>
+              <input type="number" id="f-span-alpha" min="0" max="1" step="0.05">
+            </label>
+          </div>
+          <div class="row">
+            <label class="field">
+              <span id="f-span-from-name">From</span>
+              <input type="number" id="f-span-lo" step="any">
+            </label>
+            <label class="field">
+              <span>To</span>
+              <input type="number" id="f-span-hi" step="any">
+            </label>
+          </div>
+          <label class="field">
+            <span>Name <em>(shown in the legend)</em></span>
+            <input type="text" id="f-span-label" spellcheck="false" placeholder="No name">
+          </label>
+          <p class="note">A shaded range behind the data, to mark a region.</p>
         </div>
 
         <div id="zero-fields" hidden>

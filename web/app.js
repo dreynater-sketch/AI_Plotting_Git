@@ -187,7 +187,7 @@ function resolve(id, source = spec) {
     if (!p) return null;
     return { id, kind: 'panel', obj: p, draggable: false, panel: pid };
   }
-  const m = id.match(/^(.+)__(title|xlabel|ylabel|top_axis|right_axis)$/);
+  const m = id.match(/^(.+)__(title|xlabel|ylabel|ylabel2|top_axis|right_axis)$/);
   if (m) {
     const p = source.panels.find((q) => q.id === m[1]);
     if (!p || !p[m[2]]) return null;
@@ -217,6 +217,13 @@ function resolve(id, source = spec) {
   }
   // Guide lines (axhline/axvline) have no stored id, so they're named by
   // their place in the panel's hlines/vlines list.
+  const spanMatch = id.match(/^(.+)__span_(\d+)$/);
+  if (spanMatch) {
+    const [, pid, i] = spanMatch;
+    const sp = source.panels.find((q) => q.id === pid)?.spans?.[+i];
+    if (!sp) return null;
+    return { id, kind: 'span', obj: sp, draggable: false, panel: pid };
+  }
   const guideMatch = id.match(/^(.+)__(h|v)line_(\d+)$/);
   if (guideMatch) {
     const [, pid, hv, i] = guideMatch;
@@ -263,7 +270,7 @@ function allElements(source = spec) {
   const out = [];
   if (source.suptitle?.text) out.push(resolve('suptitle', source));
   for (const p of source.panels) {
-    for (const k of ['title', 'xlabel', 'ylabel', 'top_axis', 'right_axis']) {
+    for (const k of ['title', 'xlabel', 'ylabel', 'ylabel2', 'top_axis', 'right_axis']) {
       if (p[k]?.text) out.push(resolve(`${p.id}__${k}`, source));
     }
     out.push(resolve(`${p.id}__legend`, source));
@@ -274,6 +281,7 @@ function allElements(source = spec) {
       (p[`${hv}lines`] || []).forEach((_, i) => out.push(resolve(`${p.id}__${hv}line_${i}`, source)));
     }
     out.push(resolve(`${p.id}__zero`, source));
+    (p.spans || []).forEach((_, i) => out.push(resolve(`${p.id}__span_${i}`, source)));
   }
   return out.filter(Boolean);
 }
@@ -282,17 +290,17 @@ function allElements(source = spec) {
  * "side numbers", not "y-axis tick labels". */
 const KIND_LABEL = {
   suptitle: 'figure title', title: 'title', panel: 'plot box',
-  xlabel: 'bottom label', ylabel: 'side label', text: 'label',
+  xlabel: 'bottom label', ylabel: 'side label', ylabel2: 'right side label', text: 'label',
   top_axis: 'top axis label', right_axis: 'right axis label',
   xticks: 'bottom numbers', yticks: 'side numbers', legend: 'legend',
-  series: 'line', arrow: 'arrow', guide: 'guide line', zero: 'zero lines',
+  series: 'line', arrow: 'arrow', guide: 'guide line', zero: 'zero lines', span: 'shaded range',
 };
 const KIND_PLURAL = {
   suptitle: 'figure titles', title: 'titles', panel: 'plot boxes',
-  xlabel: 'bottom labels', ylabel: 'side labels', text: 'labels',
+  xlabel: 'bottom labels', ylabel: 'side labels', ylabel2: 'right side labels', text: 'labels',
   top_axis: 'top axis labels', right_axis: 'right axis labels',
   xticks: 'bottom numbers', yticks: 'side numbers', legend: 'legends',
-  series: 'lines', arrow: 'arrows', guide: 'guide lines', zero: 'zero lines',
+  series: 'lines', arrow: 'arrows', guide: 'guide lines', zero: 'zero lines', span: 'shaded ranges',
 };
 
 const plotName = (pid) => `plot (${pid})`;
@@ -318,8 +326,8 @@ const capitalize = (s) => s.charAt(0).toUpperCase() + s.slice(1);
  * mean re-laying-out the figure, so they're refused rather than guessed at.
  * Titles and axis labels are blanked, not removed, so their size/color
  * survive if the text is ever typed back. */
-const DELETABLE = new Set(['text', 'arrow', 'series', 'legend', 'guide', 'zero', 'top_axis', 'right_axis',
-                           'title', 'xlabel', 'ylabel', 'suptitle']);
+const DELETABLE = new Set(['text', 'arrow', 'series', 'legend', 'guide', 'zero', 'span', 'top_axis', 'right_axis',
+                           'title', 'xlabel', 'ylabel', 'ylabel2', 'suptitle']);
 
 /* ------------------------------------------- coordinate transformations */
 
@@ -410,7 +418,7 @@ function applySvg(svgText) {
     // reasoning for an arrow: a diagonal one's bbox covers a rectangle well
     // beyond its actual line, and the server already drew appropriately
     // narrow/small hit targets along its body and at each endpoint.
-    if (!['series', 'arrow', 'guide', 'zero'].includes(r.kind)) addHitTarget(g);
+    if (!['series', 'arrow', 'guide', 'zero', 'span'].includes(r.kind)) addHitTarget(g);
   }
   reconcilePreviews();
   drawOutlines();
@@ -812,8 +820,10 @@ function refreshInspector() {
   const allArrows = sel.every((s) => s.kind === 'arrow');
   const allGuides = sel.every((s) => s.kind === 'guide');
   const allZero = sel.every((s) => s.kind === 'zero');
+  const allSpans = sel.every((s) => s.kind === 'span');
   $('label-fields').hidden = allPanels || allLegends || allSeries || allArrows
-    || allGuides || allZero;
+    || allGuides || allZero || allSpans;
+  $('span-fields').hidden = !allSpans;
   $('guide-fields').hidden = !allGuides;
   $('zero-fields').hidden = !allZero;
   $('axes-fields').hidden = !allPanels;
@@ -826,6 +836,7 @@ function refreshInspector() {
   if (allArrows) { refreshArrowInspector(); return; }
   if (allGuides) { refreshGuideInspector(); return; }
   if (allZero) return;
+  if (allSpans) { refreshSpanInspector(); return; }
 
   // Retyping many labels at once is meaningless; offer it only for one.
   $('text-field').hidden = multi;
@@ -954,6 +965,22 @@ function refreshAxesInspector() {
   const zero = common((s) => !!s.obj.zero_lines);
   $('f-zero').indeterminate = zero === undefined;
   $('f-zero').checked = zero === true;
+  $('f-grid').value = common((s) => s.obj.grid ?? 'none') ?? 'none';
+  $('f-minor').checked = common((s) => !!s.obj.minor_ticks) === true;
+  for (const xy of ['x', 'y']) {
+    const step = common((s) => s.obj[`${xy}fmt`]?.step ?? null);
+    $(`f-${xy}step`).value = step ?? '';
+    $(`f-${xy}sci`).checked = common((s) => !!s.obj[`${xy}fmt`]?.sci) === true;
+  }
+  const twins = selected().filter((s) => s.kind !== 'xticks').map((s) => s.obj.twin);
+  $('twin-fields').hidden = !showY || !twins.length || twins.some((t) => !t);
+  if (!$('twin-fields').hidden) {
+    for (const [fid, i] of [['f-y2min', 0], ['f-y2max', 1]]) {
+      const v = common((s) => s.obj.twin.ylim?.[i] ?? null);
+      $(fid).value = v ?? '';
+    }
+    $('f-y2scale').value = common((s) => s.obj.twin.yscale ?? 'linear') ?? 'linear';
+  }
   $('axes-note').hidden = true;
 }
 
@@ -997,6 +1024,11 @@ function refreshSeriesInspector() {
   $('f-series-color-hex').placeholder = color === undefined ? 'mixed' : '';
 
   $('f-series-marker').value = common((s) => s.obj.style?.marker ?? 'none') ?? 'none';
+  $('f-series-axis').value = common((s) => s.obj.axis ?? 'left') ?? 'left';
+  // A right axis holds its own data; not when the right side is already a
+  // calibrated copy of the left one, and not for colour maps or box plots.
+  $('series-axis-field').hidden = selected().some((s) => panelById(s.panel)?.right_axis
+    || ['heatmap', 'contour', 'contourf', 'box'].includes(s.obj.kind));
 
   // Show only the settings this kind of curve has.
   const kinds = new Set(selected().map((s) => s.obj.kind || 'line'));
@@ -1028,6 +1060,22 @@ function refreshSeriesInspector() {
 /** Unlike a curve, an arrow's own color/lw/arrowstyle/mutation_scale live
  *  directly on the object -- that's how the SPEC already stores them, no
  *  nested style dict to reach into. */
+function refreshSpanInspector() {
+  const color = common((s) => normHex(s.obj.color ?? '#cccccc'));
+  $('f-span-color').value = color ?? '#cccccc';
+  $('f-span-color-hex').value = color ?? '';
+  const alpha = common((s) => s.obj.alpha ?? 0.25);
+  $('f-span-alpha').value = alpha ?? '';
+  const one = selected().length === 1 ? selected()[0].obj : null;
+  for (const id of ['f-span-lo', 'f-span-hi', 'f-span-label']) $(id).closest('label').hidden = !one;
+  if (one) {
+    $('f-span-from-name').textContent = one.axis === 'y' ? 'From (up the side)' : 'From (along the bottom)';
+    $('f-span-lo').value = one.lo;
+    $('f-span-hi').value = one.hi;
+    $('f-span-label').value = one.label ?? '';
+  }
+}
+
 function refreshGuideInspector() {
   const color = common((s) => normHex(s.obj.color ?? '0.8'));
   $('f-guide-color').value = color ?? '#cccccc';
@@ -1480,6 +1528,7 @@ function buildList() {
     if (p.title?.text) add(mathHtml(p.title.text), `${p.id}__title`, 'title', ICON.words, p.title);
     if (p.xlabel?.text) add(mathHtml(p.xlabel.text), `${p.id}__xlabel`, 'xlabel', ICON.words, p.xlabel);
     if (p.ylabel?.text) add(mathHtml(p.ylabel.text), `${p.id}__ylabel`, 'ylabel', ICON.words, p.ylabel);
+    if (p.ylabel2?.text) add(mathHtml(p.ylabel2.text), `${p.id}__ylabel2`, 'ylabel2', ICON.words, p.ylabel2);
     for (const k of ['top_axis', 'right_axis']) {
       if (p[k]?.text) add(mathHtml(p[k].text), `${p.id}__${k}`, k, ICON.words, p[k]);
     }
@@ -1492,6 +1541,8 @@ function buildList() {
         'guide', seriesIcon({ color: l.color ?? '0.8', ls: l.ls ?? '-' })));
     }
     if (p.zero_lines) add('Lines through zero', `${p.id}__zero`, 'zero', ICON.zero);
+    (p.spans || []).forEach((sp, i) => add(spanName(sp), `${p.id}__span_${i}`, 'span',
+      `<svg viewBox="0 0 22 12"><rect x="6" y="0" width="10" height="12" fill="${cssColor(sp.color ?? '#cccccc')}" opacity=".5"/></svg>`));
     // ...then the frame around them.
     add('Plot box', `panel:${p.id}`, 'panel', ICON.box);
     add('Bottom numbers', `panel:${p.id}:xticks`, 'xticks', ICON.numbers);
@@ -1503,7 +1554,7 @@ function buildList() {
 
 /* Kinds whose row shows user text, so it needs a word saying what it is.
  * Rows like "Plot box" already say it. */
-const TAGGED_KINDS = new Set(['suptitle', 'title', 'xlabel', 'ylabel', 'top_axis', 'right_axis',
+const TAGGED_KINDS = new Set(['suptitle', 'title', 'xlabel', 'ylabel', 'ylabel2', 'top_axis', 'right_axis',
                               'text', 'series', 'guide']);
 
 const ICON = {
@@ -1595,6 +1646,13 @@ function layerIcon(st, kind) {
     `<circle cx="16" cy="6" r="2" fill="${c}"/></svg>`;
 }
 
+/** "Shaded x 2 – 5" (or its legend name). */
+function spanName(sp) {
+  if (sp.label) return mathHtml(sp.label);
+  const n = (v) => Number(Number(v).toPrecision(3)).toString().replace('-', '−');
+  return `Shaded ${sp.axis ?? 'x'} ${n(sp.lo)} – ${n(sp.hi)}`;
+}
+
 /** A line's legend name, or a plain "no name" for helper lines. */
 function seriesName(sr) {
   return sr.label ? mathHtml(sr.label) : '<em class="noname">no name</em>';
@@ -1610,6 +1668,7 @@ function chipLabel(s) {
   if (s.kind === 'series') return seriesName(s.obj);
   if (s.kind === 'arrow') return `Arrow${where}`;
   if (s.kind === 'guide') return guideName(s.axis, s.obj);
+  if (s.kind === 'span') return spanName(s.obj);
   if (s.kind === 'zero') return `Lines through zero${where}`;
   return mathHtml(s.obj.text);
 }
@@ -2122,6 +2181,48 @@ $('btn-legend-reset').addEventListener('click', () => {
   edit((o) => { delete o.xy; });
 });
 
+$('f-series-axis').addEventListener('change', (e) => {
+  const right = e.target.value === 'right';
+  pushHistory();
+  for (const s of selected()) {
+    const p = panelById(s.panel);
+    if (right) {
+      s.obj.axis = 'right';
+      if (!p.twin) {
+        p.twin = {};
+        p.ylabel2 = { text: s.obj.label || 'value', size: 13, color: '#000000' };
+      }
+    } else {
+      delete s.obj.axis;
+      if (!p.series.some((c) => c.axis === 'right')) { delete p.twin; delete p.ylabel2; }
+    }
+  }
+  buildList();
+  refreshInspector();
+  scheduleSave(0);
+});
+for (const [fid, i] of [['f-y2min', 0], ['f-y2max', 1]]) {
+  $(fid).addEventListener('change', (e) => {
+    const t = e.target.value.trim();
+    const v = t === '' ? null : parseFloat(t);
+    if (v !== null && !Number.isFinite(v)) return;
+    edit((o) => {
+      const lim = [...(o.twin.ylim ?? [null, null])];
+      lim[i] = v;
+      if (lim[0] !== null && lim[0] === lim[1]) return;
+      if (lim.every((x) => x === null)) delete o.twin.ylim; else o.twin.ylim = lim;
+    });
+  });
+}
+$('f-y2scale').addEventListener('change', (e) => {
+  const v = e.target.value;
+  if (v === 'log' && selected().some((s) => (s.obj.twin?.ylim ?? []).some((x) => x !== null && x <= 0))) {
+    setStatus('Log scale needs every number above zero', 'err');
+    e.target.value = 'linear';
+    return;
+  }
+  edit((o) => { if (v === 'linear') delete o.twin.yscale; else o.twin.yscale = v; });
+});
 $('f-series-label').addEventListener('input', (e) => {
   edit((o) => { o.label = e.target.value; }, { immediate: false });
 });
@@ -2204,6 +2305,63 @@ $('f-guide-pos').addEventListener('change', (e) => {
   if (Number.isFinite(v)) edit((o, s) => { o[s.axis === 'v' ? 'x' : 'y'] = v; });
 });
 $('f-zero').addEventListener('change', (e) => edit((o) => { o.zero_lines = e.target.checked; }));
+$('f-grid').addEventListener('change', (e) => edit((o) => {
+  if (e.target.value === 'none') delete o.grid; else o.grid = e.target.value;
+}));
+$('f-minor').addEventListener('change', (e) => edit((o) => {
+  if (e.target.checked) o.minor_ticks = true; else delete o.minor_ticks;
+}));
+for (const xy of ['x', 'y']) {
+  const tidy = (o) => { if (o[`${xy}fmt`] && !Object.keys(o[`${xy}fmt`]).length) delete o[`${xy}fmt`]; };
+  $(`f-${xy}step`).addEventListener('change', (e) => {
+    const v = e.target.value.trim() === '' ? null : parseFloat(e.target.value);
+    if (v !== null && !(v > 0)) return;
+    const bad = v !== null && selected().some((s) => Math.abs(s.obj[`${xy}lim`][1] - s.obj[`${xy}lim`][0]) / v > 200);
+    if (bad) { setStatus('That would put more than 200 numbers on the axis', 'err'); return; }
+    edit((o) => { o[`${xy}fmt`] = { ...(o[`${xy}fmt`] || {}) };
+                  if (v === null) delete o[`${xy}fmt`].step; else o[`${xy}fmt`].step = v; tidy(o); });
+  });
+  $(`f-${xy}sci`).addEventListener('change', (e) => edit((o) => {
+    o[`${xy}fmt`] = { ...(o[`${xy}fmt`] || {}) };
+    if (e.target.checked) o[`${xy}fmt`].sci = true; else delete o[`${xy}fmt`].sci;
+    tidy(o);
+  }));
+}
+$('btn-add-span').addEventListener('click', () => {
+  const pid = selected()[0]?.panel;
+  const p = panelById(pid);
+  if (!p) return;
+  const m = middleOf(p);
+  pushHistory();
+  (p.spans ??= []).push({ axis: 'x', lo: m.xAt(0.4), hi: m.xAt(0.6), color: '#cccccc', alpha: 0.3 });
+  buildList();
+  setSelection([`${p.id}__span_${p.spans.length - 1}`]);
+  scheduleSave(0);
+});
+$('f-span-color').addEventListener('input', (e) => {
+  $('f-span-color-hex').value = e.target.value;
+  edit((o) => { o.color = e.target.value; }, { immediate: false });
+});
+$('f-span-color-hex').addEventListener('change', (e) => {
+  const v = e.target.value.trim();
+  if (!/^#[0-9a-f]{6}$/i.test(v)) { e.target.value = $('f-span-color').value; return; }
+  $('f-span-color').value = v;
+  edit((o) => { o.color = v; });
+});
+$('f-span-alpha').addEventListener('change', (e) => {
+  const v = parseFloat(e.target.value);
+  if (v >= 0 && v <= 1) edit((o) => { o.alpha = v; });
+});
+for (const [id, key] of [['f-span-lo', 'lo'], ['f-span-hi', 'hi']]) {
+  $(id).addEventListener('change', (e) => {
+    const v = parseFloat(e.target.value);
+    if (Number.isFinite(v)) edit((o) => { o[key] = v; });
+  });
+}
+$('f-span-label').addEventListener('input', (e) => {
+  edit((o) => { if (e.target.value) o.label = e.target.value; else delete o.label; }, { immediate: false });
+  buildList();
+});
 
 $('f-arrow-color').addEventListener('input', (e) => {
   $('f-arrow-color-hex').value = e.target.value;
@@ -2277,6 +2435,7 @@ function deleteSelection() {
     else if (s.kind === 'series') p.series = p.series.filter((r) => r.id !== s.id);
     else if (s.kind === 'legend') p.legend = null;
     else if (s.kind === 'guide') p[`${s.axis}lines`] = p[`${s.axis}lines`].filter((l) => l !== s.obj);
+    else if (s.kind === 'span') p.spans = p.spans.filter((x) => x !== s.obj);
     else if (s.kind === 'zero') p.zero_lines = false;
     else if (s.kind === 'top_axis' || s.kind === 'right_axis') delete p[s.kind];  // the whole second scale
     else s.obj.text = '';
@@ -2394,7 +2553,36 @@ function refreshFigureFields() {
   $('f-fig-h').value = spec.size_in[1];
   $('f-fig-preset').value = '';
   $('f-fig-font').value = spec.rcparams?.['font.family'] ?? 'sans-serif';
+  // Rows of plots: 1 row = side by side; columns follow.
+  const n = spec.panels.length;
+  $('f-fig-layout-field').hidden = n < 2;
+  const sel = $('f-fig-layout');
+  sel.innerHTML = '';
+  for (let r = 1; r <= n; r++) {
+    const c = Math.ceil(n / r);
+    if (r > 1 && Math.ceil(n / (r - 1)) === c) continue;      // same grid as fewer rows
+    const o = document.createElement('option');
+    o.value = `${r}x${c}`;
+    o.textContent = r === 1 ? 'All in one row' : c === 1 ? 'All in one column' : `${r} rows × ${c} columns`;
+    sel.appendChild(o);
+  }
+  const [r0, c0] = spec.grid_shape ?? [1, n];
+  sel.value = `${r0}x${c0}`;
 }
+
+$('f-fig-layout').addEventListener('change', (e) => {
+  const [r, c] = e.target.value.split('x').map(Number);
+  const [r0, c0] = spec.grid_shape ?? [1, spec.panels.length];
+  pushHistory();
+  if (r === 1) delete spec.grid_shape; else spec.grid_shape = [r, c];
+  // Keep each plot about the same size: scale the figure with the grid.
+  const w = Math.min(40, Math.max(1, spec.size_in[0] * c / c0));
+  const h = Math.min(40, Math.max(1, spec.size_in[1] * r / r0));
+  spec.size_in = [Math.round(w * 100) / 100, Math.round(h * 100) / 100];
+  refreshFigureFields();
+  scheduleSave(0);
+  setTimeout(fit, 0);
+});
 
 /** Every text size in the figure, times k (rounded to half points): so a
  *  figure shrunk to one journal column keeps readable, proportionate text. */
@@ -2406,6 +2594,8 @@ function scaleText(k) {
     sz(p.title, 14); sz(p.xlabel, 13); sz(p.ylabel, 13);
     if (p.top_axis) sz(p.top_axis, 13);
     if (p.right_axis) sz(p.right_axis, 13);
+    if (p.ylabel2) sz(p.ylabel2, 13);
+    if (p.twin?.tick_size) p.twin.tick_size = r(p.twin.tick_size);
     p.xtick_size = r(p.xtick_size ?? 11);
     p.ytick_size = r(p.ytick_size ?? 11);
     if (p.legend) p.legend.size = r(p.legend.size ?? 10);

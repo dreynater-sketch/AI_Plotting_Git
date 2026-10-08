@@ -124,7 +124,7 @@ def _limits(arrays, log=False):
     return [round(lo - pad, 12), round(hi + pad, 12)]
 
 
-MAX_PANELS = 4
+MAX_PANELS = 9
 SCALES = ("linear", "log")
 
 
@@ -354,15 +354,16 @@ def _names_of(names, cols, batch):
     return out
 
 
-def build_panels(project, text, panels, filename="", figure_title=""):
-    """-> (spec, arrays) for 1-4 panels side by side. Each panel is a dict:
+def build_panels(project, text, panels, filename="", figure_title="", rows=1):
+    """-> (spec, arrays) for 1-9 panels, side by side or `rows` rows. Each panel is a dict:
     x, ys, kind, layers (columns by index or header name), and optionally
     title, xlabel, ylabel, xscale, yscale -- None or missing picks the
     default (column names as labels, the file name as the first panel's
     title) -- plus "more": later batches of {x, ys, kind, layers} added with
     add_batch(). A layer is {kind: errorbar|band|bar, y, extra, label, x?}:
     extra is the error column (errorbar) or the upper edge (band); x, if
-    given, is the layer's own x column."""
+    given, is the layer's own x column. right_ys (+ right_label): columns
+    drawn against a second y-axis on the right, with its own range."""
     names, cols, _ = parse(text)
     if not isinstance(panels, list) or not 1 <= len(panels) <= MAX_PANELS:
         raise CSVError(f"a figure has 1 to {MAX_PANELS} panels")
@@ -370,7 +371,7 @@ def build_panels(project, text, panels, filename="", figure_title=""):
     arrays, out, source = {}, [], []
     colour = 0
     for i, pn in enumerate(panels):
-        pid = "abcd"[i]
+        pid = "abcdefghi"[i]
         where = f"panel ({pid}): " if len(panels) > 1 else ""
         xscale, yscale = pn.get("xscale") or "linear", pn.get("yscale") or "linear"
         if xscale not in SCALES or yscale not in SCALES:
@@ -386,6 +387,14 @@ def build_panels(project, text, panels, filename="", figure_title=""):
                 bh, fr, lx, ly_, colour, bar, ex_ = _curves(idp, pre, names, cols, batch, arrays, colour)
                 behind += bh; front += fr; lim_x += lx; lim_y += ly_; has_bar |= bar; exact += ex_
             recipe = [_names_of(names, cols, batch) for batch in batches]
+            right, lim_r, right_names = [], [], []
+            if pn.get("right_ys"):
+                rb = {"x": pn.get("x"), "ys": pn["right_ys"], "kind": pn.get("kind")}
+                pre = "r_" if i == 0 else f"{pid}_r_"
+                _, right, _, lim_r, colour, _, _ = _curves(f"{pid}_r_", pre, names, cols, rb, arrays, colour)
+                for c in right:
+                    c["axis"] = "right"
+                right_names = _names_of(names, cols, rb)["ys"]
         except CSVError as e:
             raise CSVError(f"{where}{e}")
 
@@ -409,7 +418,7 @@ def build_panels(project, text, panels, filename="", figure_title=""):
         ys0 = recipe[0]["ys"]
         title = text_or(pn.get("title"), _plain(stem) if i == 0 else "")
         ylabel = text_or(pn.get("ylabel"), _plain(ys0[0]) if len(ys0) == 1 else "value")
-        series = behind + front
+        series = behind + front + right
         out.append({
             "id": pid,
             "title": {"text": title, "loc": "left", "size": 14, "color": "#000000"},
@@ -425,28 +434,39 @@ def build_panels(project, text, panels, filename="", figure_title=""):
             "arrows": [],
             "texts": [],
         })
+        if right:
+            out[-1]["twin"] = {"ylim": _limits(lim_r, False)}
+            out[-1]["ylabel2"] = {"text": text_or(pn.get("right_label"), _plain(right_names[0])
+                                                  if len(right_names) == 1 else "value"),
+                                  "size": 13, "color": "#000000"}
         src = dict(recipe[0], title=pn.get("title"), xlabel=pn.get("xlabel"),
                    ylabel=pn.get("ylabel"), xscale=xscale, yscale=yscale)
+        if right:
+            src.update(right_ys=right_names, right_label=pn.get("right_label"))
         if len(recipe) > 1:
             src["more"] = recipe[1:]
         source.append(src)
 
     n = len(out)
+    rows = max(1, min(int(rows or 1), n))
+    cols = -(-n // rows)
     spec = {
         "figure_id": project,
         "rev": 1,
-        "size_in": [8.0, 5.0] if n == 1 else [min(4.6 * n, 18.0), 4.6],
+        "size_in": ([8.0, 5.0] if n == 1 else [min(4.6 * cols, 18.0), min(4.2 * rows, 16.0)]),
         "dpi": 200,
         "data_ref": "data/curves.npz",
         # How to rebuild this figure from its raw data (Start over button).
         "source": {"kind": "csv-panels", "file": "data/source.csv", "panels": source,
-                   "filename": filename, "figure_title": figure_title or ""},
+                   "filename": filename, "figure_title": figure_title or "", "rows": rows},
         "suptitle": {"text": figure_title or "", "size": 16, "y": 0.98, "color": "#000000"},
         "layout": {"tight": True, "rect": [0, 0, 1, 1]},
         "rcparams": {"font.size": 12},
         "derived": {},
         "panels": out,
     }
+    if rows > 1:
+        spec["grid_shape"] = [rows, cols]
     return spec, arrays
 
 
@@ -470,7 +490,7 @@ def add_batch(spec, project, text, panel_id, batch):
     i = ids.index(panel_id)
     src["panels"][i].setdefault("more", []).append(batch)
     full, arrays = build_panels(project, text, src["panels"], src.get("filename", ""),
-                                src.get("figure_title", ""))
+                                src.get("figure_title", ""), src.get("rows", 1))
     new = copy.deepcopy(spec)
     have = {s["id"] for p in new["panels"] for s in p["series"]}
     added = [s for s in full["panels"][i]["series"] if s["id"] not in have]

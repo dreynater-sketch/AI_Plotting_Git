@@ -64,12 +64,13 @@ with sync_playwright() as pw:
     check(pg.evaluate("cm.listSelections().length") == 3 and "3 selection regions" in pg.inner_text("#status-pos"),
           "Ctrl+D adds the next occurrence (multi-cursor), status bar counts them")
     pg.keyboard.press("Escape")
-    pg.evaluate("cm.setCursor({line: 30, ch: 0})")
-    before = pg.evaluate("cm.getLine(30)")
+    ln = pg.evaluate("[...Array(cm.lineCount()).keys()].find((i) => cm.getLine(i).startsWith('ax.axhline('))")
+    pg.evaluate(f"cm.setCursor({{line: {ln}, ch: 0}})")
+    before = pg.evaluate(f"cm.getLine({ln})")
     pg.keyboard.press("Control+/")
-    check(pg.evaluate("cm.getLine(30)").lstrip().startswith("#"), "Ctrl+/ comments the line")
+    check(pg.evaluate(f"cm.getLine({ln})").lstrip().startswith("#"), "Ctrl+/ comments the line")
     pg.keyboard.press("Control+z")
-    check(pg.evaluate("cm.getLine(30)") == before, "Ctrl+Z undoes it")
+    check(pg.evaluate(f"cm.getLine({ln})") == before, "Ctrl+Z undoes it")
 
     # --- edit + save
     pg.evaluate("cm.setValue(cm.getValue() + '\\nprint(\"hello from figure.py\")\\n')")

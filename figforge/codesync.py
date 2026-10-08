@@ -109,10 +109,12 @@ def _num(v, what):
 class _Panel:
     def __init__(self, old):
         self.old = old
+        # Lists and switches the code spells out in full start empty/off.
         self.p = {k: v for k, v in old.items()
-                  if k not in ("texts", "series", "arrows", "hlines", "vlines")}
+                  if k not in ("texts", "series", "arrows", "hlines", "vlines", "spans",
+                               "grid", "minor_ticks", "xfmt", "yfmt")}
         self.p["texts"], self.p["series"], self.p["arrows"] = [], [], []
-        self.p["hlines"], self.p["vlines"] = [], []
+        self.p["hlines"], self.p["vlines"], self.p["spans"] = [], [], []
         self.p["zero_lines"] = False
         self.p["legend"] = None
         self.saw = set()      # which one-per-panel settings the code spelled out
@@ -172,13 +174,18 @@ def apply(code, spec, array_keys=()):
         for key in ("top_axis", "right_axis"):
             if key not in pnl.saw:
                 pnl.p.pop(key, None)
+        if "twin" not in pnl.saw:
+            pnl.p.pop("twin", None)
+            pnl.p.pop("ylabel2", None)
+        elif "ylabel2" not in pnl.saw and pnl.p.get("ylabel2"):
+            pnl.p["ylabel2"] = {**pnl.p["ylabel2"], "text": ""}
 
     for pnl in panels:
         for kind in ("texts", "series", "arrows"):
             placed = {i["id"] for q in panels for i in q.p[kind]}
             pnl.p[kind] += [copy.deepcopy(i) for i in pnl.old.get(kind, [])
                             if i["id"] in kept and i["id"] not in placed]
-        for key in ("hlines", "vlines"):
+        for key in ("hlines", "vlines", "spans"):
             if key not in pnl.old and not pnl.p[key]:
                 del pnl.p[key]
         if "zero_lines" not in pnl.old and not pnl.p["zero_lines"]:
@@ -220,8 +227,14 @@ def _statement(node, new, panels, state, taken, array_keys):
             args = [_lit(a, "subplot count") for a in call.args]
             if "squeeze" in _kwargs(call) and _lit(_kwargs(call)["squeeze"], "squeeze") is not False:
                 raise Skip("squeeze=True would break `axes[0, i]`")
-            if args and args[-1] != len(panels):
+            rows, cols = (args + [1, 1])[:2] if len(args) >= 2 else (1, args[0] if args else len(panels))
+            if not all(isinstance(v, int) and v >= 1 for v in (rows, cols)) or rows * cols < len(panels):
                 raise Skip("changing the number of panels isn't supported")
+            state["cols"] = cols
+            if (rows, cols) == (1, len(panels)):
+                new.pop("grid_shape", None)
+            else:
+                new["grid_shape"] = [rows, cols]
             kw = _kwargs(call)
             if "figsize" in kw:
                 w, h = _lit(kw["figsize"], "figsize")
@@ -231,11 +244,12 @@ def _statement(node, new, panels, state, taken, array_keys):
         if tname == "ax" and isinstance(node.value, ast.Subscript) \
                 and _name(node.value.value) == "axes":
             i = _lit(node.value.slice, "panel index")
-            if isinstance(i, tuple) and len(i) == 2 and i[0] == 0:
-                i = i[1]
+            if isinstance(i, tuple) and len(i) == 2:
+                i = i[0] * state.get("cols", len(panels)) + i[1]
             if not isinstance(i, int) or not 0 <= i < len(panels):
                 raise Skip("there's no panel with that index")
             state["ax"] = panels[i]
+            state["ax2"] = None
             return
         # _t = ax.text(...), _m = ax.pcolormesh(...), _b = ax.boxplot(...), _cb = fig.colorbar(...)
         if tname in ("_t", "_m", "_b", "_cb") and isinstance(node.value, ast.Call):
@@ -246,10 +260,22 @@ def _statement(node, new, panels, state, taken, array_keys):
                 return _call(node.value, new, state, taken, array_keys)
             finally:
                 state.pop("assigning_m", None)
+        # ax2 = ax.twinx(): a second y-axis with its own data
+        if tname == "ax2" and isinstance(node.value, ast.Call) and _name(node.value.func) == "ax.twinx":
+            pnl = _panel(state)
+            pnl.p["twin"] = {k: v for k, v in (pnl.old.get("twin") or {}).items() if k not in ("ylim", "yscale")}
+            pnl.saw.add("twin")
+            state["ax2"] = pnl
+            return
         # _top = ax.secondary_xaxis('top', functions=(lambda v: a * v + b, ...))
         if tname in _SECOND_VARS and isinstance(node.value, ast.Call):
             return _second_axis(tname, node.value, state)
         raise Skip("variables aren't reflected in the figure")
+    # for _ax in axes.flat[n:]: _ax.remove()   (empty cells of a panel grid)
+    if isinstance(node, ast.For) and _name(node.target) == "_ax" and len(node.body) == 1 \
+            and isinstance(node.body[0], ast.Expr) and isinstance(node.body[0].value, ast.Call) \
+            and (_name(node.body[0].value.func) or "").endswith(".remove"):
+        return
     # for _sp in ax.spines.values(): _sp.set_linewidth(v)
     if isinstance(node, ast.For) and _name(node.iter.func if isinstance(node.iter, ast.Call) else node.iter) == "ax.spines.values" \
             and len(node.body) == 1 and isinstance(node.body[0], ast.Expr) \
@@ -346,6 +372,46 @@ def _second_axis_call(var, call, state):
     raise Skip(f"`{var}.{method}` isn't reflected in the figure")
 
 
+def _twin_call(method, call, args, kw, new, state, taken, array_keys):
+    """ax2.<method>(...): curves on the right axis and its range/label."""
+    pnl = state.get("ax2")
+    if pnl is None or pnl is not state.get("ax"):
+        raise Skip("`ax2` is used before `ax2 = ax.twinx()` for this panel")
+    p = pnl.p
+    tw = p["twin"]
+    if method in layers.BY_METHOD:
+        item = _series(method, args, kw, pnl, taken, array_keys)
+        item["axis"] = "right"
+        mapped = state.pop("assigning_m", False) and layers.KINDS[item.get("kind", "line")].get("colorbar")
+        state["last_mapped"] = item if mapped else None
+        state["colorbar"] = None
+        return
+    if method == "set_ylim":
+        lo, hi = (_lit(a, "limit") for a in args[:2])
+        tw["ylim"] = [None if v is None else _num(v, "limit") for v in (lo, hi)]
+        return
+    if method == "set_yscale":
+        val = _lit(args[0], "scale")
+        if val not in ("linear", "log"):
+            raise Skip("only linear and log scales are supported")
+        tw["yscale"] = val
+        return
+    if method == "tick_params":
+        if "labelsize" in kw:
+            _put(tw, "tick_size", _num(_lit(kw["labelsize"], "labelsize"), "labelsize"), p.get("ytick_size", 11))
+        return
+    if method == "set_ylabel":
+        item = dict(pnl.old.get("ylabel2") or {})
+        item["text"] = _lit(args[0], "label text") if args else ""
+        for k, field, default in (("fontsize", "size", 13), ("color", "color", "black")):
+            if k in kw:
+                _put(item, field, _lit(kw[k], k), default)
+        p["ylabel2"] = item
+        pnl.saw.add("ylabel2")
+        return
+    raise Skip(f"`ax2.{method}` isn't reflected in the figure")
+
+
 def _panel(state):
     if state["ax"] is None:
         raise Skip("this comes before any `ax = axes[i]` line")
@@ -385,6 +451,8 @@ def _call(call, new, state, taken, array_keys):
         if "dpi" in kw:
             _put(new, "dpi", _num(_lit(kw["dpi"], "dpi"), "dpi"), 200)
         return
+    if name and name.startswith("ax2."):
+        return _twin_call(name[4:], call, args, kw, new, state, taken, array_keys)
     if name in ("fig.colorbar", "_cb.set_label", "_cb.ax.tick_params"):
         return _colorbar_call(name, call, state)
     if name and name.split(".")[0] in _SECOND_VARS:
@@ -405,6 +473,7 @@ def _call(call, new, state, taken, array_keys):
         return _text(call, args, kw, pnl, taken)
     if method in layers.BY_METHOD:      # plot / errorbar / bar / pcolormesh / boxplot ...
         item = _series(method, args, kw, pnl, taken, array_keys)
+        item.pop("axis", None)
         # Only the curve on an `_m = ...` line can get the next fig.colorbar(_m).
         mapped = state.pop("assigning_m", False) and layers.KINDS[item.get("kind", "line")].get("colorbar")
         state["last_mapped"] = item if mapped else None
@@ -443,6 +512,50 @@ def _call(call, new, state, taken, array_keys):
             for a in ("x", "y"):
                 if axis in (a, "both"):
                     _put(p, f"{a}tick_size", size, 11)
+        return
+    if method in ("axvspan", "axhspan"):
+        if len(args) < 2:
+            raise Skip(f"ax.{method} needs where it starts and ends")
+        olds = pnl.old.get("spans") or []
+        n = len(p["spans"])
+        sp = copy.deepcopy(olds[n]) if n < len(olds) else {}
+        sp["axis"] = "x" if method == "axvspan" else "y"
+        sp["lo"], sp["hi"] = (_num(_lit(a, "span edge"), "span edge") for a in args[:2])
+        for k, default in (("color", "#cccccc"), ("alpha", 0.25)):
+            if k in kw:
+                _put(sp, k, _lit(kw[k], k), default)
+        if "label" in kw:
+            _put(sp, "label", _lit(kw["label"], "label"), "")
+        else:
+            sp.pop("label", None)
+        p["spans"].append(sp)
+        return
+    if method == "minorticks_on":
+        p["minor_ticks"] = True
+        return
+    if method == "set_axisbelow":
+        return
+    if method == "grid":
+        on = _lit(args[0], "grid") if args else True
+        which = _lit(kw["which"], "which") if "which" in kw else "major"
+        if on:
+            if which in ("minor", "both"):
+                p["grid"] = "both"
+            elif p.get("grid") != "both":
+                p["grid"] = "major"
+        return
+    if method == "ticklabel_format":
+        axis = _lit(kw["axis"], "axis") if "axis" in kw else "both"
+        if "style" in kw and _lit(kw["style"], "style") in ("sci", "scientific"):
+            for xy in ("x", "y"):
+                if axis in (xy, "both"):
+                    p.setdefault(f"{xy}fmt", {})["sci"] = True
+        return
+    if method in ("xaxis.set_major_locator", "yaxis.set_major_locator"):
+        loc = args[0] if args else None
+        if not (isinstance(loc, ast.Call) and _name(loc.func) == "MultipleLocator" and loc.args):
+            raise Skip("only MultipleLocator(step) tick spacing is reflected in the figure")
+        p.setdefault(f"{method[0]}fmt", {})["step"] = _num(_lit(loc.args[0], "tick step"), "tick step")
         return
     if method in ("axhline", "axvline"):
         pos = _num(_lit(args[0], "line position"), "line position") if args else 0
@@ -697,12 +810,13 @@ def _diff(old, new, report):
                     report["removed"].append(f"({po['id']}) {kind[:-1]} “{_describe(before[i])}”")
         for key in ("title", "xlabel", "ylabel", "xlim", "ylim", "xscale", "yscale",
                     "aspect", "xtick_size", "ytick_size", "frame_lw", "legend",
-                    "hlines", "vlines", "zero_lines", "top_axis", "right_axis"):
+                    "hlines", "vlines", "zero_lines", "top_axis", "right_axis",
+                    "spans", "grid", "minor_ticks", "xfmt", "yfmt", "twin", "ylabel2"):
             if po.get(key) != pn.get(key):
                 report["changed"].append(f"({po['id']}) {key.replace('_', ' ')}")
     if (old.get("data_edits") or {}) != (new.get("data_edits") or {}):
         report["changed"].append("numbers changed by hand")
-    for key in ("suptitle", "size_in", "rcparams", "layout", "dpi"):
+    for key in ("suptitle", "size_in", "rcparams", "layout", "dpi", "grid_shape"):
         if old.get(key) != new.get(key):
             report["changed"].append({"suptitle": "figure title", "size_in": "figure size"}
                                      .get(key, key))

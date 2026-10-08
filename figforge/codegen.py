@@ -23,6 +23,7 @@ import os
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.patches import FancyArrowPatch
+from matplotlib.ticker import MultipleLocator
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 D = np.load(os.path.join(HERE, "data", "curves.npz"))
@@ -60,7 +61,7 @@ def _coord(ref):
 
 
 
-def _series_lines(s):
+def _series_lines(s, axname="ax"):
     """One curve as matplotlib, from layers.KINDS. A colour-mapped curve with
     a colour bar is kept as _m for fig.colorbar; boxplot takes no gid, so
     its id goes on the first box."""
@@ -78,7 +79,7 @@ def _series_lines(s):
         kw = (kw + ", " if kw else "") + f"gid={_s(s['id'])}"
     cb = s.get("colorbar") if k.get("colorbar") else None
     target = "_b = " if kind == "box" else "_m = " if cb else ""
-    out = [f"{target}ax.{k['method']}({', '.join(args)}" + (f", {kw}" if kw else "") + ")"]
+    out = [f"{target}{axname}.{k['method']}({', '.join(args)}" + (f", {kw}" if kw else "") + ")"]
     if kind == "box":
         out.append(f'_b["boxes"][0].set_gid({_s(s["id"])})')
     if cb:
@@ -115,8 +116,11 @@ def generate(spec):
 
     n = len(spec["panels"])
     w, h = spec["size_in"]
-    # squeeze=False: axes is always a grid, so `axes[0, i]` works for one panel too
-    L.append(f"fig, axes = plt.subplots(1, {n}, figsize=({w}, {h}), squeeze=False)")
+    rows, cols = _grid_shape(spec)
+    # squeeze=False: axes is always a grid, so `axes[r, c]` works for one panel too
+    L.append(f"fig, axes = plt.subplots({rows}, {cols}, figsize=({w}, {h}), squeeze=False)")
+    if rows * cols > n:
+        L.append(f"for _ax in axes.flat[{n}:]: _ax.remove()")
     L.append("fig.patch.set_facecolor('white')")
     if sup.get("text"):
         L.append(f"fig.suptitle({_s(sup['text'])}, fontsize={sup.get('size', 16)}, "
@@ -124,7 +128,7 @@ def generate(spec):
     L.append("")
 
     for i, p in enumerate(spec["panels"]):
-        L.extend(_panel(p, i))
+        L.extend(_panel(p, i // cols, i % cols))
 
     layout = spec.get("layout", {})
     if layout.get("tight", True):
@@ -135,9 +139,17 @@ def generate(spec):
     return "\n".join(L) + "\n"
 
 
-def _panel(p, i):
+def _grid_shape(spec):
+    n = len(spec["panels"])
+    shape = spec.get("grid_shape")
+    if shape and len(shape) == 2 and shape[0] * shape[1] >= n:
+        return int(shape[0]), int(shape[1])
+    return 1, n
+
+
+def _panel(p, r, c):
     bar = "# " + "-" * 62 + f" ({p['id']})"
-    L = [bar, f"ax = axes[0, {i}]"]
+    L = [bar, f"ax = axes[{r}, {c}]"]
 
     for hl in p.get("hlines", []):
         L.append(f"ax.axhline({hl['y']!r}, color={_s(hl.get('color', '0.8'))}, "
@@ -149,8 +161,16 @@ def _panel(p, i):
         L.append("ax.axhline(0, color='0.88', lw=0.7)")
         L.append("ax.axvline(0, color='0.88', lw=0.7)")
 
+    for sp in p.get("spans", []):
+        fn = "axvspan" if sp.get("axis", "x") == "x" else "axhspan"
+        lbl = f", label={_s(sp['label'])}" if sp.get("label") else ""
+        L.append(f"ax.{fn}({sp['lo']!r}, {sp['hi']!r}, color={_s(sp.get('color', '#cccccc'))}, "
+                 f"alpha={sp.get('alpha', 0.25)!r}, lw=0, zorder=0.5{lbl})")
+    twin = p.get("twin")
+    if twin is not None:
+        L.append("ax2 = ax.twinx()   # a second y-axis on the right, with its own data")
     for s in p.get("series", []):
-        L += _series_lines(s)
+        L += _series_lines(s, "ax2" if twin is not None and s.get("axis") == "right" else "ax")
 
     for a in p.get("arrows", []):
         L.append("ax.add_patch(FancyArrowPatch(")
@@ -197,14 +217,37 @@ def _panel(p, i):
     L.append(f"ax.set_xlim({p['xlim'][0]!r}, {p['xlim'][1]!r})")
     L.append(f"ax.set_ylim({p['ylim'][0]!r}, {p['ylim'][1]!r})")
     if p.get("aspect", "auto") == "equal":
-        L.append("ax.set_aspect('equal', 'box')")
+        L.append("ax.set_aspect('equal', 'datalim')" if p.get("twin") is not None else "ax.set_aspect('equal', 'box')")
 
     L.append(f'ax.tick_params(axis="x", labelsize={p.get("xtick_size", 11)})')
     L.append(f'ax.tick_params(axis="y", labelsize={p.get("ytick_size", 11)})')
     L.append(f"for _sp in ax.spines.values(): _sp.set_linewidth({p.get('frame_lw', 0.8)})")
+    for xy in ("x", "y"):
+        f = p.get(f"{xy}fmt") or {}
+        if f.get("step"):
+            L.append(f"ax.{xy}axis.set_major_locator(MultipleLocator({f['step']!r}))")
+        if f.get("sci"):
+            L.append(f"ax.ticklabel_format(axis={_s(xy)}, style='sci', scilimits=(0, 0))")
+    if p.get("minor_ticks") or p.get("grid") == "both":
+        L.append("ax.minorticks_on()")
+    if p.get("grid"):
+        L.append("ax.set_axisbelow(True)")
+        L.append("ax.grid(True, which='major', color='0.85', lw=0.6)")
+        if p["grid"] == "both":
+            L.append("ax.grid(True, which='minor', color='0.93', lw=0.4)")
+    if twin is not None:
+        if twin.get("yscale", "linear") != "linear":
+            L.append(f"ax2.set_yscale({_s(twin['yscale'])})")
+        if twin.get("ylim"):
+            L.append(f"ax2.set_ylim({twin['ylim'][0]!r}, {twin['ylim'][1]!r})")
+        L.append(f'ax2.tick_params(axis="y", labelsize={twin.get("tick_size", p.get("ytick_size", 11))})')
+        lab = p.get("ylabel2") or {}
+        if lab.get("text"):
+            L.append(f"ax2.set_ylabel({_s(lab['text'])}, fontsize={lab.get('size', 13)}, "
+                     f"color={_s(lab.get('color', 'black'))})")
     for key, side, xy, var in (("top_axis", "top", "x", "_top"), ("right_axis", "right", "y", "_right")):
         sa = p.get(key)
-        if not sa:
+        if not sa or (twin is not None and key == "right_axis"):
             continue
         a, b = sa["scale"], sa["offset"]
         L.append(f"# second scale on the {side}: {side} = {a!r} * {'bottom' if xy == 'x' else 'left'} + {b!r}")
@@ -227,5 +270,9 @@ def _panel(p, i):
             L.append(f"ax.legend(loc={_s(lg.get('loc', 'best'))}, "
                      f"frameon={lg.get('frameon', False)!r}, "
                      f"fontsize={lg.get('size', 10)})")
+    if twin is not None:   # one legend for the curves on both axes
+        L = [l.replace("ax.legend(", "ax.legend(handles=ax.get_legend_handles_labels()[0] + "
+                       "ax2.get_legend_handles_labels()[0], ", 1) if l.startswith("ax.legend(") else l
+             for l in L]
     L.append("")
     return L
