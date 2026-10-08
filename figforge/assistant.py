@@ -295,6 +295,34 @@ def start(fig, files, skipped, idea):
             "created": False, "done": False, "reply": "", "log": []}
 
 
+def start_edit(fig, request):
+    """A session that changes an existing figure. The figure's data table
+    (if it has one) goes to the sandbox, for fits or extra columns."""
+    spec = fig.load_spec()
+    arrays = fig.load_arrays()
+    tables, content = {}, []
+    text = fig.load_source_csv()
+    upload = None
+    if text:
+        fig.save_table("figure_data.csv", text)
+        tables["figure_data.csv"] = {"from": "the figure's own data"}
+        upload = _client().files.upload(file=("figure_data.csv", io.BytesIO(text.encode("utf-8"))))
+    content.append({"type": "text", "text":
+        "The figure already exists; change it as asked - don't recreate it (create_figure is "
+        "off). Here is what it holds now:\n" + json.dumps(ops.describe(spec, arrays)) +
+        ("\n\nIts data table is in the sandbox and available to FigForge as figure_data.csv "
+         "(use add_curves with it, or save a new table with extra columns)." if text else
+         "\n\nThis figure has no data table; restyle and annotate it with the editing tools.")})
+    if upload:
+        content.append({"type": "container_upload", "file_id": upload.id})
+    content.append({"type": "text", "text": f"What the user wants changed:\n{request.strip()}"})
+    return {"version": 2, "model": MODEL, "idea": request.strip(), "mode": "edit",
+            "messages": [{"role": "user", "content": content}],
+            "container": None, "anthropic_files": [upload.id] if upload else [], "tables": tables,
+            "steps": 0, "views": 0, "cost_usd": 0.0,
+            "created": True, "done": False, "reply": "", "log": []}
+
+
 def step(state, fig):
     """One Claude call and the tools it asks for. Mutates and returns state.
     -> (state, spec or None if unchanged, events). Raises anthropic errors

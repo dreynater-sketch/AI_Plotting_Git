@@ -182,6 +182,25 @@ check(total <= 16, f"strict tools stay under the 16 union-parameter cap ({total}
 check(not any(t.get("strict") for t in custom),
       "no tool is strict (the API's grammar size limit); ops.py checks every argument")
 
+# Changing an existing figure: no create_figure, its data table in the sandbox.
+fig.save_source_csv(SPECTRA)
+edit_fake = FakeClient([
+    reply(tool("set_text", element_id="a__xlabel", text="Channel number")),
+    reply(Block(type="text", text="Renamed the x axis."), stop="end_turn"),
+])
+assistant._client = lambda: edit_fake
+es = assistant.start_edit(fig, "Call the x axis 'Channel number'.")
+first = " ".join(b.get("text", "") for b in es["messages"][0]["content"])
+check(es["created"] and es.get("mode") == "edit" and "figure_data.csv" in es["tables"]
+      and "Channel number" in first and '"panels"' in first,
+      "an edit session starts from the figure as it is, with its data table")
+check(any(b["type"] == "container_upload" for b in es["messages"][0]["content"]),
+      "the figure's data goes to the sandbox (for fits)")
+es, espec, _ = assistant.step(es, fig)
+check(espec and espec["panels"][0]["xlabel"]["text"] == "Channel number", "edit applied to the existing figure")
+es, _, _ = assistant.step(es, fig)
+check(es["done"] and es["reply"] == "Renamed the x axis.", "edit session ends with its reply")
+
 # Limits: a session stops itself.
 st = dict(state, done=False, steps=assistant.MAX_STEPS - 1)
 last = FakeClient([reply(tool("describe_figure"))])

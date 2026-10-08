@@ -37,8 +37,10 @@ then requires a signed-in user and works in that user's own project space:
     POST /api/admin/invite     (admins) {email} -> Supabase emails an invite link
     POST /api/admin/invite-link  (admins) {email} -> the invite link itself, no email sent
     GET  /api/admin/ai-ping    (admins) one tiny Claude request: is the key working?
-    POST /api/assistant/start  (admins) {name, idea, files, skipped} -> a new AI session
-    POST /api/assistant/step/<name>  (admins) one Claude round -> {done, events, reply, cost_usd}
+    POST /api/assistant/start  {name, idea, files, skipped} -> a new AI session
+    POST /api/assistant/edit/<name>  {request} -> an AI session that changes an existing figure
+    POST /api/assistant/step/<name>  one Claude round -> {done, events, reply, cost_usd, ai_usage}
+    (AI: signed-in users within a monthly budget, see _ai_budget; admins unlimited)
 
 Sign-up is invite-only unless FIGFORGE_OPEN_SIGNUP=1 is set.
 
@@ -307,6 +309,8 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/assistant/start":
             return self._assistant_start()
+        if path.startswith("/api/assistant/edit/"):
+            return self._assistant_edit(path[len("/api/assistant/edit/"):])
         if path.startswith("/api/assistant/step/"):
             return self._assistant_step(path[len("/api/assistant/step/"):])
 
@@ -596,8 +600,10 @@ class Handler(BaseHTTPRequestHandler):
         user = self._current_user()
         if not user:
             return self._json({"mode": "online", "user": None, "invite_only": not OPEN_SIGNUP}, 401)
+        used, cap = self._ai_budget(user)
         return self._json({"mode": "online", "user": public_user(user), "invite_only": not OPEN_SIGNUP,
-                           "assistant": assistant.configured() and is_admin(user)})
+                           "assistant": assistant.configured() and self._ai_open_to(user),
+                           "ai_usage": {"used": round(used, 4), "cap": cap}})
 
     def _require_admin(self):
         if AUTH is None:
@@ -629,16 +635,66 @@ class Handler(BaseHTTPRequestHandler):
         return self._json({"users": rows})
 
     # ------------------------------------------------------------ assistant
+    # Every AI call spends real money on the one API key, so each signed-in
+    # user gets a monthly budget (FIGFORGE_AI_MONTHLY_USD, default $5; a
+    # user's app_metadata.figforge_ai_cap overrides it). Admins and the
+    # local editor have none. FIGFORGE_AI_FOR=admins limits AI to admins.
+    def _ai_budget(self, user=None):
+        """-> (used this month in $, cap in $ or None for no cap)."""
+        if AUTH is None:
+            return 0.0, None
+        user = user or self._current_user()
+        if not user:
+            return 0.0, 0.0
+        # The user's own space, explicitly: /api/auth/me runs before _authorize.
+        raw = STORE.scoped(user["id"]).read(f".usage/{time.strftime('%Y-%m')}.json")
+        used = float(json.loads(raw).get("cost_usd", 0)) if raw else 0.0
+        if is_admin(user):
+            return used, None
+        own = (user.get("app_metadata") or {}).get("figforge_ai_cap")
+        cap = own if isinstance(own, (int, float)) else float(os.environ.get("FIGFORGE_AI_MONTHLY_USD", "5"))
+        return used, float(cap)
+
+    def _ai_charge(self, usd, figure=False):
+        """Add this step's cost to the user's month (online only)."""
+        if AUTH is None or usd <= 0:
+            return
+        user = self._current_user()
+        if not user:
+            return
+        store = STORE.scoped(user["id"])
+        rel = f".usage/{time.strftime('%Y-%m')}.json"
+        raw = store.read(rel)
+        u = json.loads(raw) if raw else {"cost_usd": 0.0, "steps": 0, "figures": 0}
+        u["cost_usd"] = round(u.get("cost_usd", 0) + usd, 5)
+        u["steps"] = u.get("steps", 0) + 1
+        u["figures"] = u.get("figures", 0) + (1 if figure else 0)
+        store.write(rel, json.dumps(u).encode("utf-8"))
+
+    def _ai_open_to(self, user):
+        return is_admin(user) or os.environ.get("FIGFORGE_AI_FOR", "everyone") != "admins"
+
     def _assistant_allowed(self):
-        """Every call spends real money on the API key: admins only when
-        hosted; locally it's the computer's owner."""
+        """Signed-in users with budget left; locally, the computer's owner."""
         from figforge import assistant
         if not assistant.configured():
             self._error(503, "the AI assistant isn't set up (ANTHROPIC_API_KEY is missing)")
             return False
         if AUTH is None:
             return True
-        return bool(self._require_admin())
+        user = self._current_user()
+        if not user:
+            self._error(401, "sign in required")
+            return False
+        if not self._ai_open_to(user):
+            self._error(403, "the AI assistant is for admins only on this site")
+            return False
+        used, cap = self._ai_budget(user)
+        if cap is not None and used >= cap:
+            self._error(402, f"you've used this month's AI budget (${used:.2f} of ${cap:.2f}); "
+                             "it resets on the 1st -- ask the site admin for more")
+            return False
+        return True
 
     def _assistant_start(self):
         """{name, idea, files: [{name, text} | {name, b64}], skipped: [...]}:
@@ -685,6 +741,29 @@ class Handler(BaseHTTPRequestHandler):
         fig.save_assistant(state)
         return self._json({"name": name, "tables": list(state["tables"])})
 
+    def _assistant_edit(self, name):
+        """A new AI session on an EXISTING figure: {request}. Its steps run
+        through /api/assistant/step/<name> like a new figure's."""
+        if not self._assistant_allowed():
+            return
+        from figforge import assistant
+        import anthropic
+        fig = self._figure(name)
+        if not fig:
+            return self._error(404, "unknown figure")
+        body = self._body()
+        request = str((body or {}).get("request") or "").strip() if isinstance(body, dict) else ""
+        if not request:
+            return self._error(400, "say what should change")
+        if len(request) > 4000:
+            return self._error(400, "please keep it under 4000 characters")
+        try:
+            state = assistant.start_edit(fig, request)
+        except anthropic.APIError as e:
+            return self._error(502, f"couldn't reach Claude: {e}")
+        fig.save_assistant(state)
+        return self._json({"name": fig.name})
+
     def _assistant_step(self, name):
         if not self._assistant_allowed():
             return
@@ -696,6 +775,16 @@ class Handler(BaseHTTPRequestHandler):
         state = fig.load_assistant()
         if state is None:
             return self._error(404, "no AI session for that project")
+        used, cap = self._ai_budget()
+        if cap is not None and used >= cap and not state["done"]:
+            state = assistant._finish(state, f"Stopped: this month's AI budget is used up (${used:.2f} of "
+                                             f"${cap:.2f}). What's done so far is kept.")
+            assistant.cleanup(state)
+            fig.save_assistant(state)
+            return self._json({"done": True, "events": [], "reply": state["reply"],
+                               "created": state["created"], "steps": state["steps"],
+                               "cost_usd": state["cost_usd"], "ai_usage": {"used": used, "cap": cap}})
+        before, was_created = state["cost_usd"], state["created"]
         try:
             state, spec, events = assistant.step(state, fig)
         except anthropic.AuthenticationError:
@@ -713,12 +802,14 @@ class Handler(BaseHTTPRequestHandler):
             payload = self._payload(fig, spec)
             fig.save_spec(spec)
             fig.write_outputs(payload["svg"], codegen.generate(spec))
+        self._ai_charge(state["cost_usd"] - before, figure=state["created"] and not was_created)
         if state["done"]:
             assistant.cleanup(state)
         fig.save_assistant(state)
+        used, cap = self._ai_budget()
         return self._json({"done": state["done"], "events": events, "reply": state["reply"],
                            "created": state["created"], "steps": state["steps"],
-                           "cost_usd": state["cost_usd"]})
+                           "cost_usd": state["cost_usd"], "ai_usage": {"used": round(used, 4), "cap": cap}})
 
     def _admin_ai_ping(self):
         # Admin-only: every call spends real (if tiny) money on the API key.

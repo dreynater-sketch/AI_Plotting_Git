@@ -729,3 +729,9 @@ sub, sup { font-size: 0.75em; line-height: 0; }
 #btn-add-label, #btn-add-arrow { padding: 3px 10px; }
 #insp-empty .subhead { margin-top: 6px; }
 #insp-empty .check { display: block; margin: 2px 0 12px; }
+
+.ai-usage { margin: 4px 0 0; font-size: 11.5px; color: var(--ink-soft); min-height: 1em; }
+#ai-edit-modal textarea {
+  width: 100%; resize: vertical; font: inherit; font-size: 13px;
+  padding: 6px 8px; border: 1px solid var(--line); border-radius: 5px;
+}

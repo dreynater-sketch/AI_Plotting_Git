@@ -457,6 +457,11 @@ def add_batch(spec, project, text, panel_id, batch):
     is rebuilt from `text` to prove it still holds together."""
     import copy
     src = copy.deepcopy(spec.get("source") or {})
+    if src.get("kind") == "csv":
+        # A New-from-CSV figure: the same recipe, in the multi-panel form.
+        src = {"kind": "csv-panels", "file": src.get("file", "data/source.csv"),
+               "filename": src.get("filename", ""), "figure_title": "",
+               "panels": [{"x": src["x"], "ys": src["ys"], "kind": src.get("plot", "line")}]}
     if src.get("kind") != "csv-panels":
         raise CSVError("curves can only be added to figures made from a table")
     ids = [p["id"] for p in spec["panels"]]

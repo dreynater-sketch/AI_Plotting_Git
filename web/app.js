@@ -1878,7 +1878,7 @@ function showXY() {
 
 document.addEventListener('keydown', (evt) => {
   if (!spec) return;  // signed out / still loading: nothing to edit yet
-  if (!$('csv-modal').hidden || !$('ai-modal').hidden) return;  // a dialog has the keyboard
+  if (!$('csv-modal').hidden || !$('ai-modal').hidden || !$('ai-edit-modal').hidden) return;  // a dialog has the keyboard
   if (evt.key === 'Escape') { setSelection([]); return; }
 
   const typing = ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName);
@@ -2947,6 +2947,59 @@ function bytesToBase64(bytes) {
   return btoa(s);
 }
 
+let aiUsage = null;   // {used, cap} this month; cap null = no cap
+
+function showAiUsage() {
+  const text = !aiUsage ? '' : aiUsage.cap === null || aiUsage.cap === undefined
+    ? (aiUsage.used ? `AI used this month: $${aiUsage.used.toFixed(2)}` : '')
+    : `AI this month: $${aiUsage.used.toFixed(2)} of $${aiUsage.cap.toFixed(2)}`;
+  for (const id of ['ai-usage', 'ai-edit-usage']) $(id).textContent = text;
+}
+
+async function aiPost(url, body) {
+  const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                               body: JSON.stringify(body ?? {}) });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw Object.assign(new Error(d.error || r.statusText), { status: r.status });
+  return d;
+}
+
+/** Ask the server for one Claude round at a time until the session is done,
+ *  listing what happened in `log`. -> the last step's answer. */
+async function aiSteps(name, log) {
+  const line = (text, cls = '') => {
+    log.querySelector('li.now')?.remove();
+    const li = document.createElement('li');
+    li.textContent = text;
+    li.className = cls;
+    log.appendChild(li);
+  };
+  let d = null, retries = 0;
+  while (!d?.done) {
+    line('Claude is working…', 'now');
+    try {
+      d = await aiPost(`/api/assistant/step/${encodeURIComponent(name)}`);
+    } catch (e) {
+      // A slow or busy step saved nothing, so it can simply run again.
+      if ([503, 504].includes(e.status) && retries++ < 2) continue;
+      log.querySelector('li.now')?.remove();
+      throw e;
+    }
+    for (const ev of d.events) line(ev);
+    if (d.ai_usage) { aiUsage = d.ai_usage; showAiUsage(); }
+  }
+  log.querySelector('li.now')?.remove();
+  return d;
+}
+
+function showAiReply(el, d) {
+  el.textContent = d.reply;
+  const cost = document.createElement('small');
+  cost.textContent = `${d.steps} step${d.steps === 1 ? '' : 's'} · about $${d.cost_usd.toFixed(2)}`;
+  el.appendChild(cost);
+  el.hidden = false;
+}
+
 async function runAi() {
   const name = $('ai-name').value.trim();
   const log = $('ai-log');
@@ -2956,13 +3009,6 @@ async function runAi() {
     li.textContent = text;
     li.className = cls;
     log.appendChild(li);
-  };
-  const post = async (url, body) => {
-    const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' },
-                                 body: JSON.stringify(body ?? {}) });
-    const d = await r.json().catch(() => ({}));
-    if (!r.ok) throw Object.assign(new Error(d.error || r.statusText), { status: r.status });
-    return d;
   };
   aiRunning = true;
   refreshAiMake();
@@ -2979,27 +3025,10 @@ async function runAi() {
       }
       return { name: f.name, b64: bytesToBase64(f.bytes) };
     });
-    await post('/api/assistant/start', { name, idea: $('ai-idea').value, files, skipped: aiSkipped });
+    await aiPost('/api/assistant/start', { name, idea: $('ai-idea').value, files, skipped: aiSkipped });
     line('Files sent');
-    let d = null, retries = 0;
-    while (!d?.done) {
-      line('Claude is working…', 'now');
-      try {
-        d = await post(`/api/assistant/step/${encodeURIComponent(name)}`);
-      } catch (e) {
-        // A slow or busy step saved nothing, so it can simply run again.
-        if ([503, 504].includes(e.status) && retries++ < 2) continue;
-        throw e;
-      }
-      for (const ev of d.events) line(ev);
-    }
-    log.querySelector('li.now')?.remove();
-    const reply = $('ai-reply');
-    reply.textContent = d.reply;
-    const cost = document.createElement('small');
-    cost.textContent = `${d.steps} step${d.steps === 1 ? '' : 's'} · about $${d.cost_usd.toFixed(2)}`;
-    reply.appendChild(cost);
-    reply.hidden = false;
+    const d = await aiSteps(name, log);
+    showAiReply($('ai-reply'), d);
     if (d.created) {
       $('ai-make').dataset.open = '1';
       $('ai-make').textContent = 'Open the figure';
@@ -3015,6 +3044,79 @@ async function runAi() {
     refreshAiMake();
   }
 }
+
+/* ✨ Change with AI: Claude edits the figure on screen. The figure as it
+ * was goes on the undo stack first, so one Ctrl+Z takes the change back. */
+let aiEditRunning = false;
+
+function openAiEdit() {
+  $('ai-edit-request').value = '';
+  $('ai-edit-run').hidden = true;
+  $('ai-edit-msg').textContent = '';
+  $('ai-edit-go').hidden = false;
+  $('ai-edit-go').disabled = false;
+  $('ai-edit-modal').hidden = false;
+  showAiUsage();
+  setTimeout(() => $('ai-edit-request').focus(), 0);
+}
+
+async function reloadFigure() {
+  const r = await fetch(`/api/figure/${FIGURE}`);
+  const data = await r.json();
+  if (!r.ok) throw new Error(data.error || r.statusText);
+  spec = data.spec;
+  renderedSpec = clone(data.spec);
+  geometry = data.geometry;
+  applySvg(data.svg);
+  buildList();
+  refreshInspector();
+  refreshFigureFields();
+}
+
+async function runAiEdit() {
+  const request = $('ai-edit-request').value.trim();
+  if (!request || aiEditRunning) return;
+  aiEditRunning = true;
+  $('ai-edit-go').disabled = true;
+  $('ai-edit-msg').textContent = '';
+  $('ai-edit-msg').className = 'csv-msg';
+  const log = $('ai-edit-log');
+  log.innerHTML = '';
+  $('ai-edit-reply').hidden = true;
+  $('ai-edit-run').hidden = false;
+  const revBefore = spec.rev;
+  try {
+    await flushPending();
+    pushHistory();                       // the figure as it was: one Ctrl+Z away
+    await aiPost(`/api/assistant/edit/${encodeURIComponent(FIGURE)}`, { request });
+    const d = await aiSteps(FIGURE, log);
+    // The changed figure first, then the reply: nothing reads or undoes
+    // the old one in between.
+    await reloadFigure();
+    if (spec.rev === revBefore) { history.pop(); refreshUndoButtons(); }   // nothing changed
+    else setStatus('Changed by AI ✓ (Ctrl+Z to undo)');
+    showAiReply($('ai-edit-reply'), d);
+    $('ai-edit-go').hidden = true;
+  } catch (e) {
+    $('ai-edit-msg').textContent = `The AI couldn't finish: ${e.message}`;
+    $('ai-edit-msg').className = 'csv-msg err';
+    try { await reloadFigure(); } catch { /* keep what's on screen */ }
+  } finally {
+    aiEditRunning = false;
+    $('ai-edit-go').disabled = false;
+  }
+}
+
+$('btn-ai-edit').onclick = openAiEdit;
+$('ai-edit-close').onclick = () => { if (!aiEditRunning) $('ai-edit-modal').hidden = true; };
+$('ai-edit-done').onclick = () => { if (!aiEditRunning) $('ai-edit-modal').hidden = true; };
+$('ai-edit-go').onclick = runAiEdit;
+$('ai-edit-request').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) runAiEdit();
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !$('ai-edit-modal').hidden && !aiEditRunning) $('ai-edit-modal').hidden = true;
+});
 
 $('btn-ai').onclick = openAiDialog;
 $('ai-close').onclick = closeAiDialog;
@@ -3312,6 +3414,9 @@ async function boot() {
   inviteOnly = me.invite_only !== false;
   assistantOn = !!me.assistant;
   $('btn-ai').hidden = !assistantOn;
+  $('btn-ai-edit').hidden = !assistantOn;
+  aiUsage = me.ai_usage ?? null;
+  showAiUsage();
   if (link?.type === 'recovery') { showAuth('reset'); return; }
   if (link?.type === 'invite') { showAuth('welcome'); return; }
   if (me.mode === 'online') {

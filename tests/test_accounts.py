@@ -15,7 +15,10 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 B, M = "http://127.0.0.1:8010", "http://127.0.0.1:8020"
 
 mock = subprocess.Popen([sys.executable, os.path.join(HERE, "mock_supabase.py"), "8020"])
-env = {**os.environ, "SUPABASE_URL": M, "SUPABASE_SECRET_KEY": "sb_secret_test", "FIGFORGE_OPEN_SIGNUP": "1"}
+# A $0 monthly AI cap: members are offered AI, and every request is refused
+# for budget before anything reaches Anthropic (so this test costs nothing).
+env = {**os.environ, "SUPABASE_URL": M, "SUPABASE_SECRET_KEY": "sb_secret_test", "FIGFORGE_OPEN_SIGNUP": "1",
+       "FIGFORGE_AI_MONTHLY_USD": "0"}
 LOG = os.path.join(OUT_DIR, "ff_accounts.log")
 srv = subprocess.Popen([sys.executable, "serve.py", "--no-browser", "--port", "8010"], cwd=ROOT, env=env,
                        stdout=subprocess.DEVNULL, stderr=open(LOG, "w"))
@@ -120,6 +123,13 @@ try:
         pg.goto(mail("bob@test.dev", "signup")); loaded()
         check(pg.inner_text("#account-name") == "Bob", "Bob signed in")
         pg.goto(B + "/?project=qcircle"); loaded()
+        me = pg.evaluate("fetch('/api/auth/me').then(r => r.json())")
+        keyed = me.get("assistant") is True
+        check(me.get("ai_usage", {}).get("cap") == 0 and (not keyed or pg.is_visible("#btn-ai-edit")),
+              f"members get AI with a monthly cap (here $0): {me.get('ai_usage')}")
+        st = pg.evaluate("""fetch('/api/assistant/edit/qcircle', {method: 'POST', headers: {'Content-Type': 'application/json'},
+                             body: JSON.stringify({request: 'bigger fonts'})}).then(r => r.status)""")
+        check(st == (402 if keyed else 503), f"over the cap, AI is refused before calling Claude ({st})")
         check(pg.evaluate("spec.panels[0].texts[0].size") == s0, "Bob does not see Ada's edit (isolated)")
         pg.evaluate("document.activeElement.blur()")
         pg.click("#btn-saveas") if False else None

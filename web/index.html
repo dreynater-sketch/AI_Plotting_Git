@@ -85,6 +85,7 @@
       <span id="zoomval">100%</span>
       <button id="btn-fit" class="link" title="Make the figure fit the window">Fit</button>
       <span class="spacer"></span>
+      <button id="btn-ai-edit" class="ai-btn" hidden title="Tell Claude what to change in this figure">✨ Change with AI</button>
       <button id="btn-add-label" title="Add a new label to the plot you're working in">+ Label</button>
       <button id="btn-add-arrow" title="Add a new arrow to the plot you're working in">+ Arrow</button>
       <div class="menu-wrap">
@@ -598,9 +599,35 @@
       <p class="ai-reply" id="ai-reply" hidden></p>
     </div>
     <p class="csv-msg" id="ai-msg" role="status"></p>
+    <p class="ai-usage" id="ai-usage"></p>
     <div class="modal-foot">
       <button id="ai-cancel">Cancel</button>
       <button class="primary" id="ai-make" disabled>✨ Make it</button>
+    </div>
+  </div>
+</div>
+
+<!-- Change the figure on screen with the AI assistant. -->
+<div class="modal" id="ai-edit-modal" hidden>
+  <div class="modal-card" role="dialog" aria-labelledby="ai-edit-title">
+    <div class="modal-head">
+      <h3 id="ai-edit-title">✨ Change this figure with AI</h3>
+      <button class="link" id="ai-edit-close" title="Close (Esc)">×</button>
+    </div>
+    <label class="field">
+      <span>What should change?</span>
+      <textarea id="ai-edit-request" rows="3" spellcheck="true"
+        placeholder="e.g. Make it fit one journal column, bigger axis labels, and add a linear fit to the measured points"></textarea>
+    </label>
+    <div class="ai-run" id="ai-edit-run" hidden>
+      <ol class="ai-log" id="ai-edit-log"></ol>
+      <p class="ai-reply" id="ai-edit-reply" hidden></p>
+    </div>
+    <p class="csv-msg" id="ai-edit-msg" role="status"></p>
+    <p class="ai-usage" id="ai-edit-usage"></p>
+    <div class="modal-foot">
+      <button id="ai-edit-done">Close</button>
+      <button class="primary" id="ai-edit-go">✨ Change it</button>
     </div>
   </div>
 </div>
