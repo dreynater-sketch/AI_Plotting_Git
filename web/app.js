@@ -3224,7 +3224,7 @@ function aiMessage(msg, cls = '') {
 
 function refreshAiMake() {
   if ($('ai-make').dataset.open) return;
-  $('ai-make').disabled = aiRunning || !(aiFiles.length && $('ai-idea').value.trim()
+  $('ai-make').disabled = aiRunning || !($('ai-idea').value.trim()
     && /^[A-Za-z0-9_-]+$/.test($('ai-name').value));
 }
 
@@ -3233,6 +3233,7 @@ function openAiDialog() {
   $('ai-files').value = '';
   $('ai-idea').value = '';
   $('ai-name').value = '';
+  delete $('ai-name').dataset.auto;
   $('ai-run').hidden = true;
   delete $('ai-make').dataset.open;
   $('ai-make').textContent = '✨ Make it';
@@ -3321,7 +3322,7 @@ async function runAi() {
   $('ai-run').hidden = false;
   aiMessage('');
   try {
-    line('Sending your files…', 'now');
+    line(aiFiles.length ? 'Sending your files…' : 'Starting…', 'now');
     const dec = new TextDecoder('utf-8', { fatal: true });
     const files = aiFiles.map((f) => {
       if (!f.binary) {
@@ -3426,8 +3427,17 @@ $('btn-ai').onclick = openAiDialog;
 $('ai-close').onclick = closeAiDialog;
 $('ai-cancel').onclick = closeAiDialog;
 $('ai-files').onchange = (e) => addAiFiles([...e.target.files]);
-$('ai-idea').addEventListener('input', refreshAiMake);
-$('ai-name').addEventListener('input', refreshAiMake);
+$('ai-idea').addEventListener('input', () => {
+  // No files to name it after: name it after the first words of the idea.
+  const nm = $('ai-name');
+  if (!aiFiles.length && (!nm.value || nm.dataset.auto)) {
+    const words = $('ai-idea').value.trim().split(/\s+/).slice(0, 4).join('_');
+    nm.value = words ? projectNameFrom(words) : '';
+    nm.dataset.auto = '1';
+  }
+  refreshAiMake();
+});
+$('ai-name').addEventListener('input', () => { delete $('ai-name').dataset.auto; refreshAiMake(); });
 $('ai-make').onclick = () => ($('ai-make').dataset.open ? openProject($('ai-name').value.trim()) : runAi());
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && !$('ai-modal').hidden && !aiRunning) closeAiDialog();

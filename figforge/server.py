@@ -729,8 +729,6 @@ class Handler(BaseHTTPRequestHandler):
             except (ValueError, TypeError):
                 return self._error(400, f"couldn't read {fname}")
             files.append({"name": fname, "data": data})
-        if not files:
-            return self._error(400, "add at least one file")
         skipped = [s for s in body.get("skipped") or [] if isinstance(s, dict)]
         fig = Figure(name, self.store)
         try:

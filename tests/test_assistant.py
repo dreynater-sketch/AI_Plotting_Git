@@ -116,6 +116,13 @@ check(any(b["type"] == "container_upload" and b["file_id"] == "file_in" for b in
 check(any(b["type"] == "image" for b in first), "an example picture is shown to Claude")
 check("notes.csv" in state["tables"] and fig.load_table("notes.csv").startswith("x,y"),
       "an uploaded tidy CSV is available as a table straight away")
+n_up = len(fake.uploads)
+bare = assistant.start(fig, [], [], "Plot sin(x) and cos(x) from 0 to 2 pi.")
+bare_text = " ".join(b.get("text", "") for b in bare["messages"][0]["content"])
+check(len(fake.uploads) == n_up and bare["anthropic_files"] == []
+      and not any(b["type"] == "container_upload" for b in bare["messages"][0]["content"])
+      and "no files" in bare_text and "sin(x)" in bare_text,
+      "no files: nothing uploaded, Claude is told to make the data from the idea")
 
 
 def run():

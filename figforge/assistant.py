@@ -104,7 +104,10 @@ needs one, make the closest honest figure and say so. For a fit, compute \
 the fitted curve in the sandbox and plot it as its own column.
 
 Rules: never invent data, values or units that aren't in the files or the \
-idea. Curves that can only come from software you can't run (e.g. a RUMP or \
+idea. With no files, the data comes from the idea itself: numbers the user \
+typed, a formula or model to evaluate, a simulation, or well-known reference \
+values - say which in your reply, and never present computed or example \
+numbers as measurements. Curves that can only come from software you can't run (e.g. a RUMP or \
 SIMNRA simulation that isn't in the files) must be left out and mentioned. \
 Don't ask the user questions - make sensible choices and say what you chose.\
 """
@@ -254,8 +257,6 @@ def start(fig, files, skipped, idea):
     sandbox (as one zip when there are several); a file that is already a
     tidy table is also kept as a FigForge table. skipped: [{"name", "size",
     "reason"}] the browser left out. Returns the state to save."""
-    if not files:
-        raise ValueError("add at least one file")
     tables, notes = {}, []
     for f in files:
         name = f["name"]
@@ -271,21 +272,30 @@ def start(fig, files, skipped, idea):
             cols = ", ".join(f"{c['name']!r}" for c in info["columns"])
             notes.append(f"- {safe} ({info['rows']} rows): columns {cols}")
 
+    uploaded = None
     if len(files) == 1:
         upload_name, payload = _safe_name(files[0]["name"]), files[0]["data"]
-    else:
+    elif files:
         buf = io.BytesIO()
         with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
             for f in files:
                 z.writestr(f["name"], f["data"])
         upload_name, payload = "inputs.zip", buf.getvalue()
-    uploaded = _client().files.upload(file=(upload_name, io.BytesIO(payload)))
+    if files:
+        uploaded = _client().files.upload(file=(upload_name, io.BytesIO(payload)))
 
     listing = "\n".join(f"- {f['name']} ({_kb(len(f['data']))})" for f in files)
     left_out = "\n".join(f"- {s['name']} ({_kb(s.get('size', 0))}): {s.get('reason', 'left out')}"
                          for s in skipped[:60])
-    text = (f"The user's files are in the sandbox as {upload_name}"
-            f"{' (a zip of the files below)' if upload_name == 'inputs.zip' else ''}:\n{listing}\n")
+    if files:
+        text = (f"The user's files are in the sandbox as {upload_name}"
+                f"{' (a zip of the files below)' if upload_name == 'inputs.zip' else ''}:\n{listing}\n")
+    else:
+        text = ("The user gave no files. Make the data yourself in the sandbox from their "
+                "description - numbers they typed, a formula or model to evaluate, a simulation, "
+                "or well-known reference values (say in your reply where the numbers came from; "
+                "never pass made-up numbers off as measurements) - and save it as a tidy CSV to "
+                "$OUTPUT_DIR as usual.\n")
     if left_out:
         text += f"\nLeft out before upload (not available):\n{left_out}\n"
     if notes:
@@ -299,12 +309,13 @@ def start(fig, files, skipped, idea):
         content.append({"type": "image", "source": {
             "type": "base64", "media_type": IMAGE_TYPES[os.path.splitext(img["name"].lower())[1]],
             "data": base64.standard_b64encode(img["data"]).decode("ascii")}})
-    content.append({"type": "container_upload", "file_id": uploaded.id})
+    if uploaded:
+        content.append({"type": "container_upload", "file_id": uploaded.id})
     content.append({"type": "text", "text": f"What the user wants:\n{idea.strip()}"})
 
     return {"version": 2, "model": MODEL, "idea": idea.strip(),
             "messages": [{"role": "user", "content": content}],
-            "container": None, "anthropic_files": [uploaded.id], "tables": tables,
+            "container": None, "anthropic_files": [uploaded.id] if uploaded else [], "tables": tables,
             "steps": 0, "views": 0, "cost_usd": 0.0,
             "created": False, "done": False, "reply": "", "log": []}
 
