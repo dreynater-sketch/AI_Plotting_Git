@@ -28,7 +28,10 @@ def admin(method, path, body=None):
 fails = []
 def check(c, m): print(("PASS " if c else "FAIL ") + m, flush=True); c or fails.append(m)
 U = {"email": "figforge-ai-test@example.com", "password": "ai-test-pass-1234"}
+# A $0 personal AI cap: the member is offered AI but refused for budget before
+# anything reaches Claude.
 uid = admin("POST", "/users", {"email": U["email"], "password": U["password"], "email_confirm": True,
+                               "app_metadata": {"figforge_ai_cap": 0, "provider": "email", "providers": ["email"]},
                                "user_metadata": {"display_name": "AI Tester"}})["id"]
 try:
     with sync_playwright() as pw:
@@ -39,11 +42,14 @@ try:
         check(ctx.get(H + "/api/admin/ai-ping").status == 401, "signed out: ai-ping refused")
         check(login().ok, "temp user logs in")
         check(ctx.get(H + "/api/admin/ai-ping").status == 403, "regular member: ai-ping refused")
-        check(ctx.get(H + "/api/auth/me").json().get("assistant") is False, "regular member: no AI box")
+        me = ctx.get(H + "/api/auth/me").json()
+        check(me.get("assistant") is True and me.get("ai_usage", {}).get("cap") == 0,
+              f"member: offered AI with their own cap ({me.get('ai_usage')})")
         r = ctx.post(H + "/api/assistant/start", headers={"Content-Type": "application/json"},
-                     data=json.dumps({"name": "zz_ai", "csv": "x,y\n1,2\n2,3\n", "idea": "plot it"}))
-        check(r.status == 403, f"regular member: can't start an AI figure ({r.status})")
-        check(ctx.post(H + "/api/assistant/step/zz_ai").status == 403, "regular member: can't run a step")
+                     data=json.dumps({"name": "zz_ai", "files": [{"name": "a.csv", "text": "x,y\n1,2\n"}],
+                                      "idea": "plot it"}))
+        check(r.status == 402, f"member over the cap: AI refused before reaching Claude ({r.status})")
+        check(ctx.post(H + "/api/assistant/step/zz_ai").status == 402, "member over the cap: no steps either")
 
         admin("PUT", f"/users/{uid}", {"app_metadata": {"figforge_admin": True,
                                                         "provider": "email", "providers": ["email"]}})
