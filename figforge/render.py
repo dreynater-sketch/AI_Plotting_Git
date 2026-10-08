@@ -203,7 +203,19 @@ def _draw_series(ax, s, arrays, preview):
             hit.set_gid(f"t_{s['id']}__cbar")
 
     if preview:
-        _draw_series_hit_target(ax, s, *_hit_path(kind, s, pos, kw))
+        if kind == "bar":
+            # Each bar is clickable all over, not just along its top.
+            from matplotlib.collections import PolyCollection
+            w = np.broadcast_to(np.asarray(kw.get("width", 0.8), dtype=float), np.shape(pos[0]))
+            x0 = np.asarray(pos[0], dtype=float) - (w / 2 if kw.get("align", "center") == "center" else 0)
+            verts = [[(a, 0), (a + ww, 0), (a + ww, h), (a, h)]
+                     for a, ww, h in zip(x0, w, np.asarray(pos[1], dtype=float)) if np.isfinite(a) and np.isfinite(h)]
+            hit = PolyCollection(verts, facecolors="white", alpha=0.001, linewidths=0)
+            ax.add_collection(hit, autolim=False)
+            hit.set_gid("t_" + s["id"])
+        else:
+            dots = kind == "scatter" or (kind in ("line", "errorbar") and kw.get("ls", kw.get("linestyle")) in ("none", "None", ""))
+            _draw_series_hit_target(ax, s, *_hit_path(kind, s, pos, kw), dots=dots)
 
 
 def _hit_path(kind, s, pos, kw):
@@ -223,7 +235,7 @@ def _hit_path(kind, s, pos, kw):
     return pos[0], pos[1]
 
 
-def _draw_series_hit_target(ax, s, xs, ys):
+def _draw_series_hit_target(ax, s, xs, ys, dots=False):
     """A generous, always-vector click target for a series, independent of
     how it's actually rendered (which may be rasterized for performance --
     confirmed empirically that set_gid() does not survive rasterization, so
@@ -237,8 +249,9 @@ def _draw_series_hit_target(ax, s, xs, ys):
     n = len(xs)
     step = max(1, n // HIT_PATH_MAX_POINTS)
     hx, hy = xs[::step], ys[::step]
-    if len(hx) >= 2:
-        (hit,) = ax.plot(hx, hy, alpha=0, lw=HIT_STROKE_WIDTH, solid_capstyle="round")
+    if len(hx) >= 2 and not dots:
+        (hit,) = ax.plot(hx, hy, alpha=0, lw=HIT_STROKE_WIDTH, solid_capstyle="round",
+                         solid_joinstyle="round")
     else:
         (hit,) = ax.plot(hx, hy, alpha=0, marker="o", ms=HIT_POINT_SIZE, ls="none")
     hit.set_gid("t_" + s["id"])
@@ -455,6 +468,10 @@ def _draw_panel(ax, p, arrays, preview=False):
     lg = p.get("legend")
     if lg and any(s.get("label") for s in p.get("series", [])):
         kw = dict(frameon=lg.get("frameon", False), fontsize=lg.get("size", 10))
+        if lg.get("ncols", 1) != 1:
+            kw["ncols"] = lg["ncols"]
+        if lg.get("title"):
+            kw.update(title=lg["title"], title_fontsize=lg.get("size", 10))
         if lg.get("xy"):
             # Dragged to a free position: xy is the legend's own upper-left
             # corner, in axes-fraction (0-1), matching how free text labels

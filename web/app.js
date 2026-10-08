@@ -506,6 +506,44 @@ function mkOutlineRect(x, y, w, h, primary) {
   return rect;
 }
 
+/** A see-through blue copy of a curve's click shape: a band along a line,
+ *  a ring on each dot, a tint over each bar. */
+function mkHalo(g, primary) {
+  const NS = 'http://www.w3.org/2000/svg';
+  const halo = g.cloneNode(true);
+  halo.removeAttribute('id');
+  halo.querySelectorAll('[id]').forEach((n) => n.removeAttribute('id'));
+  halo.setAttribute('class', 'ff-outline ff-halo');
+  halo.setAttribute('pointer-events', 'none');
+  const blue = '#1f6feb';
+  halo.querySelectorAll('path').forEach((el) => {
+    const filled = !/fill:\s*none/.test(el.getAttribute('style') || '');
+    el.style.opacity = 1;
+    el.style.stroke = blue;
+    if (filled) {   // bars and other shapes
+      el.style.fill = blue;
+      el.style.fillOpacity = primary ? 0.22 : 0.12;
+      el.style.strokeOpacity = 0.9;
+      el.style.strokeWidth = '1.2';
+    } else {        // a line: a soft band along it
+      el.style.strokeOpacity = primary ? 0.28 : 0.16;
+      el.style.strokeLinejoin = 'round';
+    }
+  });
+  halo.querySelectorAll('use').forEach((u) => {
+    const c = document.createElementNS(NS, 'circle');
+    c.setAttribute('cx', u.getAttribute('x') || 0);
+    c.setAttribute('cy', u.getAttribute('y') || 0);
+    c.setAttribute('r', 5);
+    c.setAttribute('fill', blue);
+    c.setAttribute('fill-opacity', primary ? 0.25 : 0.15);
+    c.setAttribute('stroke', blue);
+    c.setAttribute('stroke-width', 1);
+    u.replaceWith(c);
+  });
+  return halo;
+}
+
 /** Selection boxes. A label's outline is inserted as a sibling so it shares
  *  the label's own drag/resize transform; a panel's outline is drawn straight
  *  from the geometry map, since axes never move or preview-transform. */
@@ -545,6 +583,12 @@ function drawOutlines() {
         try { pb = part.getBBox(); } catch { return; }
         svgEl.appendChild(mkOutlineRect(pb.x - 3, pb.y - 3, pb.width + 6, pb.height + 6, i === 0));
       });
+      return;
+    }
+    const r0 = resolve(id);
+    if (r0?.kind === 'series') {
+      // A curve gets a glow that follows it, not a box around it.
+      g.parentNode.insertBefore(mkHalo(g, i === 0), g.nextSibling);
       return;
     }
     let bb;
@@ -965,6 +1009,9 @@ function refreshAxesInspector() {
   const zero = common((s) => !!s.obj.zero_lines);
   $('f-zero').indeterminate = zero === undefined;
   $('f-zero').checked = zero === true;
+  const lgOn = common((s) => !!s.obj.legend);
+  $('f-legend-on').indeterminate = lgOn === undefined;
+  $('f-legend-on').checked = lgOn === true;
   $('f-grid').value = common((s) => s.obj.grid ?? 'none') ?? 'none';
   $('f-minor').checked = common((s) => !!s.obj.minor_ticks) === true;
   for (const xy of ['x', 'y']) {
@@ -984,6 +1031,8 @@ function refreshAxesInspector() {
   $('axes-note').hidden = true;
 }
 
+const LEGEND_KINDS = new Set(['line', 'step', 'errorbar', 'band', 'bar', 'scatter', 'box']);
+
 function refreshLegendInspector() {
   const sel = selected();
   const size = common((s) => s.obj.size ?? 10);
@@ -994,7 +1043,48 @@ function refreshLegendInspector() {
   $('f-legend-frame').indeterminate = framed === undefined;
   $('f-legend-frame').checked = framed === true;
 
-  $('btn-legend-reset').disabled = !sel.some((s) => s.obj.xy);
+  const loc = common((s) => (s.obj.xy ? 'dragged' : s.obj.loc ?? 'best'));
+  $('f-legend-loc').value = loc ?? 'best';
+  $('f-legend-cols').value = common((s) => s.obj.ncols ?? 1) ?? '';
+  const title = common((s) => s.obj.title ?? '');
+  $('f-legend-title').value = title ?? '';
+  $('f-legend-title').placeholder = title === undefined ? 'mixed' : 'No heading';
+
+  // The names in the legend, one box each (only when one legend is picked).
+  const box = $('legend-entries');
+  box.innerHTML = '';
+  if (sel.length !== 1) return;
+  const p = panelById(sel[0].panel);
+  const curves = (p.series || []).filter((c) => LEGEND_KINDS.has(c.kind || 'line'));
+  if (!curves.length) return;
+  const head = document.createElement('div');
+  head.className = 'subhead';
+  head.textContent = 'Names in the legend';
+  box.appendChild(head);
+  for (const c of curves) {
+    const row = document.createElement('label');
+    row.className = 'field legend-entry';
+    row.innerHTML = `<span class="legend-swatch">${seriesIcon(c.style, c.kind)}</span>`;
+    const inp = document.createElement('input');
+    inp.type = 'text';
+    inp.spellcheck = false;
+    inp.value = c.label ?? '';
+    inp.placeholder = 'Not in the legend';
+    inp.dataset.series = c.id;
+    inp.addEventListener('input', () => {
+      pushHistory('legend-name:' + c.id);
+      c.label = inp.value;
+      reconcilePreviews();
+      scheduleSave(350);
+      buildList();
+    });
+    row.appendChild(inp);
+    box.appendChild(row);
+  }
+  const note = document.createElement('p');
+  note.className = 'note';
+  note.textContent = 'Empty a name to leave that one out.';
+  box.appendChild(note);
 }
 
 /** A curve's style lives under obj.style, not on obj itself (unlike every
@@ -2177,8 +2267,25 @@ $('f-legend-frame').addEventListener('change', (e) => {
   const on = e.target.checked;
   edit((o) => { o.frameon = on; });
 });
-$('btn-legend-reset').addEventListener('click', () => {
-  edit((o) => { delete o.xy; });
+$('f-legend-loc').addEventListener('change', (e) => {
+  const v = e.target.value;
+  if (v !== 'dragged') edit((o) => { delete o.xy; o.loc = v; });
+});
+$('f-legend-cols').addEventListener('change', (e) => {
+  const v = parseInt(e.target.value, 10);
+  if (v >= 1 && v <= 10) edit((o) => { if (v === 1) delete o.ncols; else o.ncols = v; });
+});
+$('f-legend-title').addEventListener('input', (e) => {
+  const v = e.target.value;
+  edit((o) => { if (v) o.title = v; else delete o.title; }, { immediate: false });
+});
+$('btn-legend-hide').addEventListener('click', () => {
+  const ids = selected().map((s) => s.panel);
+  pushHistory();
+  for (const pid of ids) panelById(pid).legend = null;
+  setSelection(ids.length === 1 ? [`panel:${ids[0]}`] : []);
+  buildList();
+  scheduleSave(0);
 });
 
 $('f-series-axis').addEventListener('change', (e) => {
@@ -2305,6 +2412,13 @@ $('f-guide-pos').addEventListener('change', (e) => {
   if (Number.isFinite(v)) edit((o, s) => { o[s.axis === 'v' ? 'x' : 'y'] = v; });
 });
 $('f-zero').addEventListener('change', (e) => edit((o) => { o.zero_lines = e.target.checked; }));
+$('f-legend-on').addEventListener('change', (e) => {
+  edit((o) => { o.legend = e.target.checked ? (o.legend || { loc: 'best', frameon: false, size: 10, xy: null }) : null; });
+  buildList();
+  if (e.target.checked && selected().some((s) => !(s.obj.series || []).some((c) => c.label))) {
+    setStatus('Give a line a name first -- only named lines show in the legend');
+  }
+});
 $('f-grid').addEventListener('change', (e) => edit((o) => {
   if (e.target.value === 'none') delete o.grid; else o.grid = e.target.value;
 }));

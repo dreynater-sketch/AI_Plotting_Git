@@ -260,16 +260,19 @@ def _panel(p, r, c):
 
     lg = p.get("legend")
     if lg and any(s.get("label") for s in p.get("series", [])):
+        more = f", ncols={lg['ncols']}" if lg.get("ncols", 1) != 1 else ""
+        if lg.get("title"):
+            more += f", title={_s(lg['title'])}, title_fontsize={lg.get('size', 10)}"
         if lg.get('xy'):
             L.append(f"ax.legend(loc='upper left', "
                      f"bbox_to_anchor=({lg['xy'][0]!r}, {lg['xy'][1]!r}), "
                      f"bbox_transform=ax.transAxes, borderaxespad=0, "
                      f"frameon={lg.get('frameon', False)!r}, "
-                     f"fontsize={lg.get('size', 10)})")
+                     f"fontsize={lg.get('size', 10)}{more})")
         else:
             L.append(f"ax.legend(loc={_s(lg.get('loc', 'best'))}, "
                      f"frameon={lg.get('frameon', False)!r}, "
-                     f"fontsize={lg.get('size', 10)})")
+                     f"fontsize={lg.get('size', 10)}{more})")
     if twin is not None:   # one legend for the curves on both axes
         L = [l.replace("ax.legend(", "ax.legend(handles=ax.get_legend_handles_labels()[0] + "
                        "ax2.get_legend_handles_labels()[0], ", 1) if l.startswith("ax.legend(") else l

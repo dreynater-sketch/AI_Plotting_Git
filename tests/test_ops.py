@@ -46,7 +46,8 @@ calls = [
     {"name": "add_label", "input": {"panel_id": "b", "text": "note", "x": 0.1, "y": 0.9, "coords": "axes", "size": None, "color": None}},
     {"name": "set_axis", "input": {"panel_id": "c", "axis": "x", "min": -30, "max": 30, "scale": None, "tick_size": 12}},
     {"name": "style_series", "input": {"series_id": "c_fit", "color": "#aa0000", "line_width": 2.5, "line_style": "--", "marker": None, "marker_size": None, "opacity": 0.8}},
-    {"name": "set_legend", "input": {"panel_id": "a", "visible": True, "location": "upper left", "font_size": 9, "frame": True}},
+    {"name": "set_legend", "input": {"panel_id": "a", "visible": True, "location": "upper left", "font_size": 9, "frame": True,
+                                     "columns": 2, "title": "Data"}},
     {"name": "delete_element", "input": {"element_id": "b_dbeta"}},
     {"name": "set_figure_size", "input": {"width_in": 15, "height_in": 5}},
 ]

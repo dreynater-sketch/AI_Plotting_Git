@@ -585,6 +585,12 @@ def _call(call, new, state, taken, array_keys):
             _put(lg, "frameon", bool(_lit(kw["frameon"], "frameon")), False)
         if "fontsize" in kw:
             _put(lg, "size", _num(_lit(kw["fontsize"], "fontsize"), "fontsize"), 10)
+        n = kw.get("ncols", kw.get("ncol"))
+        cols = _lit(n, "ncols") if n is not None else 1
+        if not isinstance(cols, int) or cols < 1:
+            raise Skip("ncols must be a whole number of columns")
+        _put(lg, "ncols", cols, 1)
+        _put(lg, "title", _lit(kw["title"], "legend title") if "title" in kw else "", "")
         p["legend"] = lg
         return
     raise Skip(f"`ax.{method}` isn't reflected in the figure")

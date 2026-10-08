@@ -143,6 +143,8 @@ TOOLS = [
                 "center left", "center right", "lower center", "upper center", "center"]),
             "font_size": _nullable({"type": "number"}),
             "frame": _nullable({"type": "boolean"}),
+            "columns": _nullable({"type": "integer", "description": "Entries side by side (1-10)."}),
+            "title": {"type": "string", "description": "Heading over the entries; \"\" for none, \"keep\" to leave it."},
         }),
     },
     {
@@ -490,6 +492,17 @@ def _set_legend(spec, a):
         lg["size"] = _num(a["font_size"], "font_size", 4, 48)
     if a["frame"] is not None:
         lg["frameon"] = bool(a["frame"])
+    if a["columns"] is not None:
+        n = int(_num(a["columns"], "columns", 1, 10))
+        if n == 1:
+            lg.pop("ncols", None)
+        else:
+            lg["ncols"] = n
+    if a["title"] != "keep":
+        if a["title"]:
+            lg["title"] = a["title"]
+        else:
+            lg.pop("title", None)
     p["legend"] = lg
     note = "" if any(s.get("label") for s in p.get("series", [])) else \
         " (no curve has a legend label yet, so nothing shows -- set_text on a curve id adds one)"

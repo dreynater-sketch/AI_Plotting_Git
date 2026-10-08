@@ -735,3 +735,9 @@ sub, sup { font-size: 0.75em; line-height: 0; }
   width: 100%; resize: vertical; font: inherit; font-size: 13px;
   padding: 6px 8px; border: 1px solid var(--line); border-radius: 5px;
 }
+
+/* Legend panel: one name box per curve, with its little line/dot picture. */
+.legend-entry { display: flex; flex-direction: row; align-items: center; gap: 8px; }
+.legend-entry .legend-swatch { flex: 0 0 22px; display: inline-flex; }
+.legend-entry .legend-swatch svg { width: 22px; height: 12px; }
+.legend-entry input { flex: 1; min-width: 0; }

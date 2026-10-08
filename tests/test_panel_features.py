@@ -59,6 +59,17 @@ s3, _, _ = csvimport.add_batch(s2, "t", txt, "a", {"x": "T", "ys": ["Q"], "kind"
 check(s2["panels"][0]["ylabel2"]["text"] == "R" and [c.get("axis") for c in s3["panels"][0]["series"]][:2] == [None, "right"],
       "builder: right_ys make a right axis that survives adding curves")
 
+# --- legend columns + heading; bars clickable all over
+lg_spec, _, _ = ops.apply(spec, [{"name": "set_legend", "input": {"panel_id": "a", "visible": True, "location": "keep",
+                                  "font_size": None, "frame": None, "columns": 2, "title": "Data"}}], arr)
+code = codegen.generate(lg_spec)
+check("ncols=2, title='Data'" in code and codesync.apply(code, lg_spec, list(arr))[0] == lg_spec,
+      "legend columns and heading go to figure.py and read back")
+bar_spec, bar_arr = csvimport.build_panels("t", txt, [{"x": "T", "ys": [], "layers": [{"kind": "bar", "y": "Rs"}]}])
+svg, _ = render.render(bar_spec, bar_arr, preview=True)
+i = svg.find('id="t_a_l0"')
+check(svg[i:svg.find("</g>", i)].count("<path") == 28, "every bar is its own click shape")
+
 # --- editor
 B = _os.environ.get("FF_BASE", "http://127.0.0.1:8765"); P = "zz_panelfeat"
 rmtree(f"figures/{P}")
@@ -103,6 +114,21 @@ with sync_playwright() as pw:
     check(pg.is_visible("#twin-fields"), "plot box shows the right-axis fields")
     pg.fill("#f-y2max", "2"); pg.press("#f-y2max", "Enter"); settle()
     check(disk()["panels"][0]["twin"].get("ylim") == [None, 2], "right axis max typed, min stays automatic")
+
+    pg.click("[id='t_a__legend']")
+    check(pg.evaluate("selection") == ["a__legend"] and pg.locator("#legend-entries input").count() >= 2,
+          "clicking the legend shows a name box per curve")
+    pg.fill("[data-series='a_fit']", "my fit"); pg.fill("#f-legend-title", "Key")
+    pg.select_option("#f-legend-loc", "lower right"); pg.fill("#f-legend-cols", "2"); pg.press("#f-legend-cols", "Enter"); settle()
+    d = disk()["panels"][0]
+    check(next(s for s in d["series"] if s["id"] == "a_fit")["label"] == "my fit" and d["legend"]["title"] == "Key"
+          and d["legend"]["ncols"] == 2 and d["legend"]["loc"] == "lower right" and not d["legend"].get("xy"),
+          "legend: rename an entry, heading, corner, side by side")
+    pg.evaluate("setSelection(['a_fit'])")
+    check(pg.locator(".ff-halo").count() == 1 and pg.locator("rect.ff-outline").count() == 0,
+          "a picked curve glows along its shape (no box)")
+    for _ in range(4):
+        pg.keyboard.press("Control+z"); settle()
 
     pg.evaluate("setSelection([])")
     pg.select_option("#f-fig-layout", "3x1"); settle()
