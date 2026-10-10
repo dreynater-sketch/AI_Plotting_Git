@@ -25,17 +25,20 @@ import json
 import os
 import re
 import tempfile
+import time
 import zipfile
 
 import anthropic
 
 from figforge import csvimport, ops, render
 
-MODEL = "claude-opus-5"
+# FIGFORGE_AI_MODEL switches the model (e.g. claude-sonnet-5 for a test);
+# a session keeps the model it started with.
+MODEL = os.environ.get("FIGFORGE_AI_MODEL", "").strip() or "claude-opus-5"
 
-# Claude Opus 5 list prices, $ per million tokens. (Sandbox time is billed
-# separately by Anthropic and isn't included in the cost shown.)
-PRICE_IN, PRICE_OUT = 5.00, 25.00
+# List prices, $ per million tokens (input, output). Sandbox time is billed
+# separately by Anthropic and isn't included in the cost shown.
+PRICES = {"claude-opus-5": (5.00, 25.00), "claude-sonnet-5": (2.00, 10.00)}
 CACHE_WRITE, CACHE_READ = 1.25, 0.10     # x the input price
 
 MAX_STEPS = 20          # Claude calls per figure
@@ -50,6 +53,11 @@ IMAGE_TYPES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
 TABLE_EXTS = (".csv", ".tsv", ".txt", ".dat")
 
 BETAS = ["server-side-fallback-2026-07-01"]
+# Models that take an effort change part-way through a conversation (a
+# system message) without losing the cached history.
+EFFORT_BETA = "mid-conversation-output-config-2026-07-01"
+PER_MESSAGE_EFFORT = {"claude-opus-5"}
+FIRST_EFFORT, TIDY_EFFORT = "medium", "low"   # making the data + figure; tidying it up
 CODE_EXECUTION = {"type": "code_execution_20260521", "name": "code_execution"}
 
 SYSTEM = """\
@@ -78,14 +86,14 @@ listed as available and you can use it directly.
 a fit or model usually belong in the same panel: give the fit its own \
 x_column (a layer or a second table column) - and if you think of a curve \
 later, add_curves adds it to the existing figure.
-4. Call view_figure, then fix what a careful scientist would: axis labels \
+4. After create_figure, and after every turn that changes the figure, FigForge sends you a picture of it - no need to call view_figure (only for an extra look). Fix what a careful scientist would: axis labels \
 with units (matplotlib mathtext works, e.g. $T_1$ ($\\mu$s)), sensible limits, \
 line styles that stay distinguishable in black and white, a legend when \
 there is more than one curve, readable sizes, nothing overlapping. Use \
 add_label for annotations such as element edges or peak names, and \
 set_second_axis for a second scale on the top or right (e.g. energy from a \
 channel calibration). describe_figure gives the ids the editing tools need.
-5. Work in few turns: make ALL the edits you have in mind in one turn (several tool calls at once - e.g. every restyle, label and axis change together), then view_figure once to check, then one more round of fixes if needed. You have about 15 turns in total. Stop when it's good.
+5. Work in few turns: look at the picture, then make ALL the edits you have in mind in one turn (several tool calls at once - every restyle, label and axis change together); the next picture shows the result. One more round of fixes if needed, then stop. You have about 15 turns in total.
 6. Finish with two or three short sentences in plain, everyday words for \
 someone who isn't an expert: what the figure shows, and anything you \
 couldn't do or had to assume.
@@ -186,8 +194,8 @@ ADD_CURVES = {
 
 VIEW_FIGURE = {
     "name": "view_figure",
-    "description": "See a picture of the figure exactly as it looks now. Use it after "
-                   "create_figure and after visible changes, to check layout and overlaps.",
+    "description": "See a picture of the figure exactly as it looks now. FigForge already "
+                   "sends one after every change; use this only for an extra look.",
     "input_schema": ops._obj({}),
 }
 
@@ -234,10 +242,21 @@ def _client():
     return anthropic.Anthropic(timeout=240.0, max_retries=1)
 
 
-def _cost(usage):
+def _cost(usage, model=MODEL):
+    price_in, price_out = PRICES.get(model, PRICES["claude-opus-5"])
     cached_in = (getattr(usage, "cache_creation_input_tokens", 0) or 0) * CACHE_WRITE \
         + (getattr(usage, "cache_read_input_tokens", 0) or 0) * CACHE_READ
-    return ((usage.input_tokens + cached_in) * PRICE_IN + usage.output_tokens * PRICE_OUT) / 1e6
+    return ((usage.input_tokens + cached_in) * price_in + usage.output_tokens * price_out) / 1e6
+
+
+def _usage_row(state, usage, cost, effort, blocks, seconds):
+    """One step's tokens and cost, kept in state["usage"] so costs can be measured."""
+    return {"step": state["steps"], "effort": effort, "seconds": round(seconds, 1),
+            "input": usage.input_tokens,
+            "cache_write": getattr(usage, "cache_creation_input_tokens", 0) or 0,
+            "cache_read": getattr(usage, "cache_read_input_tokens", 0) or 0,
+            "output": usage.output_tokens, "cost_usd": round(cost, 5),
+            "tools": [b.get("name") for b in blocks if b.get("type") in ("tool_use", "server_tool_use")]}
 
 
 def _safe_name(name):
@@ -360,24 +379,34 @@ def step(state, fig):
     wrap_up = state["steps"] >= MAX_STEPS - 1 or state["cost_usd"] >= MAX_COST_USD * 0.9
     if wrap_up:
         kw["tool_choice"] = {"type": "none"}
+    model = state.get("model") or MODEL
+    # The request's own effort never changes (that would drop the cache);
+    # tidy-up rounds lower it with a system message instead (see below).
+    effort = state.get("effort") or FIRST_EFFORT
+    t0 = time.time()
     response = _client().beta.messages.create(
-        model=MODEL,
+        model=model,
         max_tokens=16000,
-        system=SYSTEM,
+        # Tools + system are the same for every figure: their own cache
+        # breakpoint lets figures started within minutes share them.
+        system=[{"type": "text", "text": SYSTEM, "cache_control": {"type": "ephemeral"}}],
         tools=TOOLS,
         messages=state["messages"],
-        output_config={"effort": "medium"},
+        output_config={"effort": FIRST_EFFORT},
         cache_control={"type": "ephemeral"},   # tools + system + history: a cached prefix
-        betas=BETAS,
+        betas=BETAS + ([EFFORT_BETA] if model in PER_MESSAGE_EFFORT else []),
         fallbacks="default",
         **kw,
     )
     state["steps"] += 1
-    state["cost_usd"] = round(state["cost_usd"] + _cost(response.usage), 5)
+    cost = _cost(response.usage, model)
+    state["cost_usd"] = round(state["cost_usd"] + cost, 5)
     if getattr(response, "container", None):
         state["container"] = response.container.id
     blocks = [b.to_dict() for b in response.content]
     state["messages"].append({"role": "assistant", "content": blocks})
+    state.setdefault("usage", []).append(
+        _usage_row(state, response.usage, cost, effort, blocks, time.time() - t0))
 
     events = []
     if any(b["type"] == "server_tool_use" for b in blocks):
@@ -409,6 +438,19 @@ def step(state, fig):
         except _ToolError as e:
             results.append({"type": "tool_result", "tool_use_id": call.id,
                             "content": str(e), "is_error": True})
+    # Claude sees the figure after every change without spending a step on
+    # view_figure (each picture still counts toward MAX_VIEWS).
+    if changed and not any(c.name == "view_figure" for c in calls) and state["views"] < MAX_VIEWS:
+        state["views"] += 1
+        results += [{"type": "text", "text": "The figure as it looks after these changes:"},
+                    _picture(spec, arrays)]
+        events.append(PROGRESS["view_figure"])
+    # Once the figure exists and has been changed, the rest is tidying up:
+    # cheaper, shorter thinking from here on.
+    if changed and effort != TIDY_EFFORT and model in PER_MESSAGE_EFFORT:
+        state["effort"] = TIDY_EFFORT
+        state["messages"].append({"role": "system", "content": [],
+                                  "output_config": {"effort": TIDY_EFFORT}})
     state["messages"].append({"role": "user", "content": results})
     state["log"] += events
     return _check_limits(state), (spec if changed else None), events
@@ -538,6 +580,16 @@ def _add_curves(state, fig, args, spec):
             "use set_axis if the new curves need more room."), new_spec, new_arrays
 
 
+def _picture(spec, arrays):
+    """An image block of the figure as it is drawn now."""
+    with tempfile.TemporaryDirectory() as d:
+        path = os.path.join(d, "view.png")
+        render.render_png(spec, arrays, path, dpi=VIEW_DPI)
+        with open(path, "rb") as f:
+            data = base64.standard_b64encode(f.read()).decode("ascii")
+    return {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": data}}
+
+
 def _run_tool(state, fig, call, spec, arrays):
     """-> (tool_result content, spec, arrays, changed)."""
     args = call.input or {}
@@ -586,12 +638,7 @@ def _run_tool(state, fig, call, spec, arrays):
         if state["views"] >= MAX_VIEWS:
             raise _ToolError("No more pictures this session - finish up with what you know.")
         state["views"] += 1
-        with tempfile.TemporaryDirectory() as d:
-            path = os.path.join(d, "view.png")
-            render.render_png(spec, arrays, path, dpi=VIEW_DPI)
-            data = base64.standard_b64encode(open(path, "rb").read()).decode("ascii")
-        return [{"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": data}},
-                {"type": "text", "text": "The figure as it looks now."}], spec, arrays, False
+        return [_picture(spec, arrays), {"type": "text", "text": "The figure as it looks now."}],             spec, arrays, False
 
     new_spec, results, changed = ops.apply(spec, [{"name": call.name, "input": args}], arrays)
     result = results[0]

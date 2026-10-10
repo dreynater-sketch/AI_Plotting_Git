@@ -155,12 +155,23 @@ check(fig.load_source_csv() == SPECTRA and spec["source"]["kind"] == "csv-panels
       "the table is kept so Start over can rebuild")
 check(fake.seen[-1].get("container") == "cntr_1", "later requests reuse the container")
 
+created = state["messages"][-1]["content"]
+check(created[0]["type"] == "tool_result" and created[-1]["type"] == "image" and state["views"] == 1,
+      "a picture of the new figure comes back by itself (no view_figure step)")
+check(state["messages"][-2] == {"role": "system", "content": [], "output_config": {"effort": "low"}}
+      and state["effort"] == "low", "after the figure is made, effort drops to low via a system message")
+check(fake.seen[-1]["output_config"] == {"effort": "medium"}
+      and assistant.EFFORT_BETA in fake.seen[-1]["betas"], "the request's own effort stays fixed (cache kept)")
+
 spec, ev = run()
 again, view = state["messages"][-1]["content"]
 check(again.get("is_error") and "already exists" in again["content"], "a second create_figure is refused")
-check(view["content"][0]["type"] == "image", "view_figure returns a PNG picture")
+check(view["content"][0]["type"] == "image" and state["views"] == 2, "view_figure returns a PNG picture")
 
 spec, ev = run()
+check(state["messages"][-1]["content"][-1]["type"] == "image" and state["views"] == 3,
+      "edits come back with a picture too")
+check(sum(m["role"] == "system" for m in state["messages"]) == 1, "effort is lowered only once")
 p = spec["panels"][0]
 check(p["top_axis"]["text"] == "Energy (MeV)" and p["top_axis"]["scale"] == 0.00191758,
       "set_second_axis adds the energy scale")
