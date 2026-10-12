@@ -196,6 +196,31 @@ equal. Sonnet's output tokens were similar to Opus's, not much higher. Single
 runs vary (Opus circle cost $0.23 one run, $0.30 the next). Opus 5 stays the
 default.
 
+## How this was made (2026-10-12)
+
+A finished AI figure gets a "📖 How this was made" panel: the idea as Claude
+understood it, the formulas (drawn by matplotlib's mathtext as SVG, plain
+Unicode if one can't be drawn), the steps in plain words, one clean commented
+Python script that redoes the sandbox work (numpy + csv), the exact commands
+Claude typed (failed ones greyed), and 2-3 things to try. "Open it in the code
+editor" opens the script as `how_it_was_made.py` (`code.html?howto=1`): Run
+works in the browser (Pyodide now loads pandas/scipy when a script imports
+them), Save is off, figure.py is never touched.
+
+It comes from one structured-output call after the figure is made
+(`assistant.how_made`, saved as `howto.json`; older AI figures make it on
+first click). Same two figures, same prompt:
+
+| explainer | circle | RBS zip |
+|---|---|---|
+| Opus 5 (low effort) | $0.064, 26 s | $0.085, 27 s |
+| Sonnet 5.5 | $0.026, 15 s | $0.031, 14 s |
+| Haiku 5.5 | $0.001, 7 s | $0.0015, 10 s |
+
+All three were accurate; Opus listed a few more formulas. Haiku 5.5 is the
+default (`FIGFORGE_HOWTO_MODEL` switches). Edits made with "Change with AI"
+don't rewrite the panel.
+
 ## Verification discipline, throughout
 
 Every feature above was checked against the real thing, not assumed:
