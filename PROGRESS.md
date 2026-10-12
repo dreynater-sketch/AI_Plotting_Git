@@ -166,6 +166,36 @@ dispatcher returning one result per call (bad arguments come back as errors
 the model can correct). `POST /api/ops/<project>` applies a batch, saves it
 only if it renders, and makes it one undo step.
 
+## AI cost per figure (2026-10-10)
+
+Measured with `tools/ai_bench.py` (same prompts, real calls, per-step usage
+now kept in `assistant.json` → `usage`). Changes: a picture of the figure goes
+back after every change (no `view_figure` steps), effort drops to low once the
+figure exists (a per-message effort system message, so the cache survives),
+and tools + system have their own cache breakpoint (shared by figures started
+within 5 minutes).
+
+| Opus 5 | before | after |
+|---|---|---|
+| circle (user's own idea) | 7 steps, 74 s, $0.271 | 4 steps, 54 s, $0.230 |
+| damped oscillator | 5 steps, 54 s, $0.228 | 3 steps, 52 s, $0.187 |
+
+Sonnet 5 vs Opus 5 (after the changes; `FIGFORGE_AI_MODEL` switches):
+
+| prompt | Opus 5 | Sonnet 5 |
+|---|---|---|
+| circle | 5 steps, 101 s, $0.297 | 4 steps, 60 s, $0.109 |
+| damped | 3 steps, 57 s, $0.134 | 5 steps, 43 s, $0.071 |
+| RBS zip (56 files) | 5 steps, 117 s, $0.480 | 6 steps, 115 s, $0.234 |
+| total | $0.911 | $0.413 |
+
+Quality: Opus is more ambitious (circle: 3 panels with the polygons drawn,
+inscribed + circumscribed, error vs n; RBS: edge lines), Sonnet cleaner but
+plainer (circle panel 2 repeats panel 1; RBS x range not cropped). Damped:
+equal. Sonnet's output tokens were similar to Opus's, not much higher. Single
+runs vary (Opus circle cost $0.23 one run, $0.30 the next). Opus 5 stays the
+default.
+
 ## Verification discipline, throughout
 
 Every feature above was checked against the real thing, not assumed:
