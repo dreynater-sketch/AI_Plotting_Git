@@ -40,6 +40,8 @@ then requires a signed-in user and works in that user's own project space:
     POST /api/assistant/start  {name, idea, files, skipped} -> a new AI session
     POST /api/assistant/edit/<name>  {request} -> an AI session that changes an existing figure
     POST /api/assistant/step/<name>  one Claude round -> {done, events, reply, cost_usd, ai_usage}
+    POST /api/assistant/howto/<name>  "How this was made" for a finished AI figure (made once)
+    GET  /api/howto/<name>       -> {howto or null, can_make}
     (AI: signed-in users within a monthly budget, see _ai_budget; admins unlimited)
 
 Sign-up is invite-only unless FIGFORGE_OPEN_SIGNUP=1 is set.
@@ -191,6 +193,16 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/assistant/tools":
             return self._json({"model": "claude-opus-5", "tools": ops.TOOLS})
 
+        if path.startswith("/api/howto/"):
+            fig = self._figure(path[len("/api/howto/"):])
+            if not fig:
+                return self._error(404, "unknown figure")
+            howto = fig.load_howto()
+            if howto:
+                return self._json({"howto": howto, "can_make": False})
+            from figforge import assistant
+            return self._json({"howto": None, "can_make": assistant.can_explain(fig.load_assistant())})
+
         if path.startswith("/api/describe/"):
             fig = self._figure(path[len("/api/describe/"):])
             if not fig:
@@ -313,6 +325,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._assistant_edit(path[len("/api/assistant/edit/"):])
         if path.startswith("/api/assistant/step/"):
             return self._assistant_step(path[len("/api/assistant/step/"):])
+        if path.startswith("/api/assistant/howto/"):
+            return self._assistant_howto(path[len("/api/assistant/howto/"):])
 
         if path.startswith("/api/ops/"):
             fig = self._figure(path[len("/api/ops/"):])
@@ -809,6 +823,36 @@ class Handler(BaseHTTPRequestHandler):
         return self._json({"done": state["done"], "events": events, "reply": state["reply"],
                            "created": state["created"], "steps": state["steps"],
                            "cost_usd": state["cost_usd"], "ai_usage": {"used": round(used, 4), "cap": cap}})
+
+    def _assistant_howto(self, name):
+        """"How this was made" for a finished AI figure: one cheap Claude
+        call, saved as howto.json (made once; later calls return it)."""
+        if not self._assistant_allowed():
+            return
+        from figforge import assistant
+        import anthropic
+        fig = self._figure(name)
+        if not fig:
+            return self._error(404, "unknown figure")
+        howto = fig.load_howto()
+        if howto:
+            return self._json({"howto": howto})
+        state = fig.load_assistant()
+        if not assistant.can_explain(state):
+            return self._error(409, "this figure wasn't made with AI")
+        try:
+            howto, cost = assistant.how_made(state)
+        except anthropic.RateLimitError:
+            return self._error(503, "Claude is busy (rate limited) - try again in a minute")
+        except anthropic.APITimeoutError:
+            return self._error(504, "Claude took too long - try again")
+        except anthropic.APIError as e:
+            return self._error(502, f"Claude error: {getattr(e, 'message', e)}")
+        except ValueError as e:
+            return self._error(502, str(e))
+        self._ai_charge(cost)
+        fig.save_howto(howto)
+        return self._json({"howto": howto})
 
     def _admin_ai_ping(self):
         # Admin-only: every call spends real (if tiny) money on the API key.

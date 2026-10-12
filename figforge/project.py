@@ -361,6 +361,18 @@ class Figure:
         self.store.write(self._rel("assistant.json"),
                          json.dumps(state, ensure_ascii=False).encode("utf-8"))
 
+    def load_howto(self):
+        """"How this was made" for an AI figure (assistant.how_made), if any."""
+        raw = self.store.read(self._rel("howto.json"))
+        try:
+            return json.loads(raw) if raw else None
+        except ValueError:
+            return None
+
+    def save_howto(self, howto):
+        self.store.write(self._rel("howto.json"),
+                         json.dumps(howto, ensure_ascii=False).encode("utf-8"))
+
     def save_table(self, name, text):
         """A table the assistant's sandbox produced (or an uploaded CSV)."""
         self.store.write(self._rel(f"data/tables/{name}"), text.encode("utf-8"))

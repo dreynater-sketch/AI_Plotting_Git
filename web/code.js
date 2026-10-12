@@ -14,6 +14,10 @@ const channel = 'BroadcastChannel' in window ? new BroadcastChannel('figforge') 
 
 const $ = (id) => document.getElementById(id);
 const PROJECT = new URLSearchParams(location.search).get('project') || '';
+// code.html?project=X&howto=1: the script Claude used to make an AI figure's
+// numbers ("How this was made"), to read and Run -- never saved over figure.py.
+const HOWTO = new URLSearchParams(location.search).get('howto') === '1';
+const FILE = HOWTO ? 'how_it_was_made.py' : 'figure.py';
 
 let generated = '';      // code generated from the figure's current spec
 let rev = null;          // that spec's revision
@@ -66,8 +70,9 @@ function setStatus(msg, cls = '') {
 function refreshDirty() {
   const dirty = cm.getValue() !== savedValue;
   $('tab').classList.toggle('dirty', dirty);
-  document.title = `${dirty ? '● ' : ''}figure.py — ${PROJECT}`;
-  $('status-source').textContent = hasCustom || dirty ? 'Your edited version' : 'Generated from the figure';
+  document.title = `${dirty ? '● ' : ''}${FILE} — ${PROJECT}`;
+  $('status-source').textContent = HOWTO ? (dirty ? 'Your changes (not saved)' : 'The script Claude used')
+    : hasCustom || dirty ? 'Your edited version' : 'Generated from the figure';
 }
 
 cm.on('change', () => { refreshDirty(); scheduleMinimap(); });
@@ -110,6 +115,7 @@ async function load() {
     block('No project given. Open the code from the <b>figure.py</b> menu in <a href="/">FigForge</a>.');
     return;
   }
+  if (HOWTO) return loadHowto();
   const r = await fetch(`/api/script/${PROJECT}`);
   if (r.status === 401) {
     block('You’re signed out. <a href="/" target="_blank">Log in to FigForge</a>, then reload this tab.');
@@ -139,6 +145,37 @@ async function load() {
   cm.focus();
 }
 
+async function loadHowto() {
+  const r = await fetch(`/api/howto/${PROJECT}`);
+  if (r.status === 401) {
+    block('You’re signed out. <a href="/" target="_blank">Log in to FigForge</a>, then reload this tab.');
+    return;
+  }
+  const d = r.ok ? await r.json() : {};
+  if (!d.howto) {
+    block(`There’s no “How this was made” for this figure yet. <a href="/?project=${encodeURIComponent(PROJECT)}">Back to FigForge</a>`);
+    return;
+  }
+  savedValue = d.howto.code;
+  cm.setValue(savedValue);
+  cm.clearHistory();
+  document.querySelectorAll('.tab-name, .tree-file.active').forEach((el) => { el.textContent = FILE; });
+  $('btn-save').hidden = true;
+  $('tree-project').textContent = PROJECT;
+  const b = $('banner');
+  b.textContent = 'This is the Python Claude used to make this figure’s numbers. Press ▶ Run to try it ' +
+    'in your browser, change a number and run it again. Your changes here aren’t saved.' +
+    (d.howto.needs_files ? ' It reads your own data files, which aren’t in the browser, so to run it, ' +
+      'download it and put your files in a folder called “inputs” next to it.' : '');
+  b.hidden = false;
+  $('side-note').innerHTML = `Run executes this script <b>in your browser</b> (Python via Pyodide); ` +
+    `nothing runs on the server. <br><br><a href="/?project=${encodeURIComponent(PROJECT)}">` +
+    `← Back to the figure editor</a>`;
+  refreshDirty();
+  drawMinimap();
+  cm.focus();
+}
+
 function loadGenerated() {
   cm.setValue(generated);
   baseRev = rev;
@@ -149,6 +186,7 @@ function loadGenerated() {
 /* ------------------------------------------------------ save / reset */
 
 async function save() {
+  if (HOWTO) { setStatus('This script isn’t saved with the figure. Use Download to keep a copy.'); return; }
   const code = cm.getValue();
   try {
     const r = await fetch(`/api/script/${PROJECT}`, {
@@ -213,6 +251,7 @@ $('console').addEventListener('click', (e) => {
 });
 
 async function resetToGenerated() {
+  if (HOWTO) return;
   if (hasCustom && !confirm('Discard your edited figure.py and go back to the generated code?')) return;
   const r = await fetch(`/api/script/${PROJECT}/reset`, { method: 'POST' });
   if (!r.ok) { setStatus('Reset failed', 'err'); return; }
@@ -228,7 +267,7 @@ async function resetToGenerated() {
 function download() {
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([cm.getValue()], { type: 'text/x-python' }));
-  a.download = `${PROJECT}_figure.py`;
+  a.download = `${PROJECT}_${FILE}`;
   a.click();
   URL.revokeObjectURL(a.href);
 }
@@ -288,6 +327,7 @@ async function run() {
   $('figures').innerHTML = '';
   markError(null);
   try {
+    if (HOWTO) npz = npz || new ArrayBuffer(0);   // Claude's script makes its own data
     if (!npz) {
       panelState('Fetching data/curves.npz…', 'run');
       const r = await fetch(`/api/npz/${PROJECT}`);

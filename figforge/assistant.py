@@ -38,7 +38,8 @@ MODEL = os.environ.get("FIGFORGE_AI_MODEL", "").strip() or "claude-opus-5"
 
 # List prices, $ per million tokens (input, output). Sandbox time is billed
 # separately by Anthropic and isn't included in the cost shown.
-PRICES = {"claude-opus-5": (5.00, 25.00), "claude-sonnet-5": (2.00, 10.00)}
+PRICES = {"claude-opus-5": (5.00, 25.00), "claude-sonnet-5": (2.00, 10.00),
+          "claude-sonnet-5-5": (2.00, 10.00), "claude-haiku-5-5": (0.10, 0.50)}
 CACHE_WRITE, CACHE_READ = 1.25, 0.10     # x the input price
 
 MAX_STEPS = 20          # Claude calls per figure
@@ -651,6 +652,140 @@ def _run_tool(state, fig, call, spec, arrays):
             raise _ToolError(f"That change broke the drawing ({type(e).__name__}: {e}); "
                              "it was not applied.")
     return result["content"], new_spec, arrays, changed
+
+
+# ------------------------------------------------------ how this was made
+
+HOWTO_SYSTEM = """\
+You explain how a FigForge figure was made by an AI, for someone curious \
+who is not an expert - write as if to a bright child: short sentences, \
+everyday words, no jargon without a two-word explanation. You get the \
+user's idea, the commands the AI ran in its Python sandbox (with a bit of \
+their output), and the AI's closing note. Only describe what really \
+happened in those commands; never invent steps, numbers or sources."""
+
+HOWTO_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "idea": {"type": "string", "description":
+                 "The idea as the AI understood it, 1-2 plain sentences."},
+        "math": {"type": "array", "description":
+                 "The formulas the numbers came from (0-5); empty if the data was only "
+                 "read and rearranged.", "items": {
+                     "type": "object",
+                     "properties": {
+                         "name": {"type": "string", "description": "2-5 plain words"},
+                         "tex": {"type": "string", "description":
+                                 "The formula in matplotlib mathtext (LaTeX subset), "
+                                 "without surrounding dollar signs, e.g. A = \\pi r^2"},
+                         "plain": {"type": "string", "description":
+                                   "The same formula in plain Unicode, e.g. A = π r²"},
+                         "why": {"type": "string", "description":
+                                 "One plain sentence: what it gives and why it was used"},
+                     },
+                     "required": ["name", "tex", "plain", "why"],
+                     "additionalProperties": False}},
+        "code": {"type": "string", "description":
+                 "ONE clean, self-contained Python script that redoes what the sandbox "
+                 "commands did to make the table, with a short plain-words comment above "
+                 "each part. Use numpy and the csv module; scipy only for fits it really needs; no pandas. Read "
+                 "the user's files from os.environ.get('INPUT_DIR', 'inputs'); write the "
+                 "table to 'ai_table.csv'; end with a small matplotlib plot of the table "
+                 "so running it shows a picture. Leave out the exploring (ls, head, cat)."},
+        "needs_files": {"type": "boolean", "description":
+                        "True if the script reads the user's files."},
+        "steps": {"type": "array", "items": {"type": "string"}, "description":
+                  "3-7 steps the AI took, each one plain sentence saying what and why."},
+        "try_it": {"type": "array", "items": {"type": "string"}, "description":
+                   "2-3 small changes to try in the script, each naming the line or "
+                   "number to change and what will happen."},
+    },
+    "required": ["idea", "math", "code", "needs_files", "steps", "try_it"],
+    "additionalProperties": False,
+}
+# Explaining a finished figure is an easy job: Haiku 5.5 does it well for
+# about $0.001 (Opus 5: ~$0.07, Sonnet 5.5: ~$0.03; measured 2026-10-12).
+HOWTO_MODEL = os.environ.get("FIGFORGE_HOWTO_MODEL", "").strip() or "claude-haiku-5-5"
+HOWTO_MAX_CHARS = 24000     # sandbox commands sent to the explainer
+
+
+def sandbox_commands(state):
+    """[{"command", "ok", "output"}] -- what Claude ran in its sandbox, in order."""
+    out, by_id = [], {}
+    for m in state.get("messages", []):
+        if m.get("role") != "assistant":
+            continue
+        for b in m.get("content") or []:
+            if b.get("type") == "server_tool_use":
+                cmd = (b.get("input") or {}).get("command") or (b.get("input") or {}).get("code")
+                if cmd:
+                    by_id[b.get("id")] = len(out)
+                    out.append({"command": cmd, "ok": True, "output": ""})
+            elif b.get("type") == "bash_code_execution_tool_result" and b.get("tool_use_id") in by_id:
+                r = b.get("content") or {}
+                row = out[by_id[b["tool_use_id"]]]
+                row["ok"] = r.get("return_code", 0) == 0
+                row["output"] = ((r.get("stdout") or "") + (r.get("stderr") or ""))[:400]
+    return out
+
+
+def can_explain(state):
+    return bool(state and state.get("done") and state.get("created") and state.get("mode") != "edit")
+
+
+def how_made(state, model=None):
+    """One cheap Claude call that explains an AI figure: the idea, the math,
+    a clean commented script, the steps and things to try. -> (howto, cost)."""
+    commands = sandbox_commands(state)
+    parts, used = [], 0
+    for i, c in enumerate(commands, 1):
+        piece = (f"--- command {i}{'' if c['ok'] else ' (failed; fixed later)'}\n{c['command']}\n"
+                 f"output: {c['output'] or '(none)'}\n")
+        if used + len(piece) > HOWTO_MAX_CHARS:
+            parts.append(f"--- ({len(commands) - i + 1} later commands left out for length)\n")
+            break
+        parts.append(piece)
+        used += len(piece)
+    first = state["messages"][0]["content"]
+    given = next((b["text"] for b in first if b.get("type") == "text"), "")
+    text = (f"The user's idea:\n{state.get('idea', '')}\n\nWhat the AI was given:\n{given}\n\n"
+            f"Sandbox commands, in order:\n{''.join(parts) or '(none - the data came from a table the user gave)'}\n"
+            f"The AI's closing note:\n{state.get('reply', '')}")
+    model = model or HOWTO_MODEL
+    # Haiku has no server-side refusal fallback.
+    fb = {} if "haiku" in model else {"betas": BETAS, "fallbacks": "default"}
+    response = _client().beta.messages.create(
+        model=model,
+        max_tokens=8000,
+        system=HOWTO_SYSTEM,
+        messages=[{"role": "user", "content": text}],
+        output_config={"effort": "low", "format": {"type": "json_schema", "schema": HOWTO_SCHEMA}},
+        **fb,
+    )
+    cost = _cost(response.usage, model)
+    if response.stop_reason in ("refusal", "max_tokens"):
+        raise ValueError("Claude couldn't write the explanation this time.")
+    howto = json.loads(next(b.text for b in response.content if b.type == "text"))
+    for m in howto["math"]:
+        m["svg"] = math_svg(m["tex"])
+    howto["commands"] = commands
+    howto["cost_usd"] = round(cost, 5)
+    howto["model"] = model
+    return howto, cost
+
+
+def math_svg(tex):
+    """A formula drawn by matplotlib's mathtext as a small SVG, or None if
+    it can't be drawn (the page then shows the plain version)."""
+    from matplotlib import mathtext
+    from matplotlib.font_manager import FontProperties
+    buf = io.BytesIO()
+    try:
+        mathtext.math_to_image(f"${tex.strip().strip('$')}$", buf, prop=FontProperties(size=15),
+                               dpi=72, format="svg")
+    except Exception:
+        return None
+    return buf.getvalue().decode("utf-8")
 
 
 # ----------------------------------------------------------- connection check

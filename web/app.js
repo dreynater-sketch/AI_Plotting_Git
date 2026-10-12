@@ -3335,6 +3335,11 @@ async function runAi() {
     const d = await aiSteps(name, log);
     showAiReply($('ai-reply'), d);
     if (d.created) {
+      // The "How this was made" notes: a tiny extra call. If it fails, the
+      // figure's 📖 button can still make them later.
+      line('Writing down how it was made…', 'now');
+      try { await makeHowto(name); line('Wrote down how it was made'); }
+      catch { log.querySelector('li.now')?.remove(); }
       $('ai-make').dataset.open = '1';
       $('ai-make').textContent = 'Open the figure';
       $('ai-make').disabled = false;
@@ -3421,6 +3426,77 @@ $('ai-edit-request').addEventListener('keydown', (e) => {
 });
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && !$('ai-edit-modal').hidden && !aiEditRunning) $('ai-edit-modal').hidden = true;
+});
+
+/* 📖 How this was made: for a figure made with AI -- the idea, the math,
+ * the steps, the code Claude used (to open and Run in the code editor) and
+ * things to try. Written once by a small extra AI call (howto.json). */
+let howto = null;          // this figure's explanation, once loaded or made
+let howtoCanMake = false;  // an AI figure without one yet: the button makes it
+
+async function checkHowto() {
+  try {
+    const r = await fetch(`/api/howto/${FIGURE}`);
+    if (!r.ok) return;
+    const d = await r.json();
+    howto = d.howto;
+    howtoCanMake = !howto && d.can_make && assistantOn;
+    $('btn-howto').hidden = !(howto || howtoCanMake);
+  } catch { /* no button */ }
+}
+
+/** Ask for a figure's explanation (made once, kept with the project). */
+async function makeHowto(name) {
+  return (await aiPost(`/api/assistant/howto/${encodeURIComponent(name)}`)).howto;
+}
+
+async function openHowto() {
+  $('howto-modal').hidden = false;
+  $('howto-body').hidden = !howto;
+  $('howto-msg').className = 'csv-msg';
+  if (howto) { showHowto(howto); return; }
+  $('howto-msg').textContent = 'Claude is writing down how it made this figure…';
+  try {
+    howto = await makeHowto(FIGURE);
+    howtoCanMake = false;
+    showHowto(howto);
+  } catch (e) {
+    $('howto-msg').textContent = `Couldn't write it down: ${e.message}`;
+    $('howto-msg').className = 'csv-msg err';
+  }
+}
+
+function showHowto(h) {
+  $('howto-msg').textContent = '';
+  $('howto-idea').textContent = h.idea;
+  const svgUrl = (svg) => 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svg)));
+  $('howto-math-box').hidden = !h.math.length;
+  $('howto-math').innerHTML = h.math.map((m) => `<li><b>${escapeHtml(m.name)}</b>
+    <span class="formula">${m.svg ? `<img src="${svgUrl(m.svg)}" alt="${escapeHtml(m.plain)}">`
+                                  : `<code>${escapeHtml(m.plain)}</code>`}</span>${escapeHtml(m.why)}</li>`).join('');
+  $('howto-steps').innerHTML = h.steps.map((t) => `<li>${escapeHtml(t)}</li>`).join('');
+  $('howto-code-note').textContent = h.needs_files
+    ? 'This Python makes the numbers from your files, with a note above each part. It reads your own data files, so to run it, put them in a folder called “inputs” next to it.'
+    : 'This Python makes the numbers, with a note above each part. Open it in the code editor and press ▶ Run to try it.';
+  $('howto-code').textContent = h.code;
+  $('howto-raw').hidden = !h.commands.length;
+  $('howto-commands').innerHTML = h.commands.map((c) =>
+    `<pre class="${c.ok ? '' : 'failed'}" title="${c.ok ? '' : 'This one failed; Claude fixed it next'}">${escapeHtml(c.command)}</pre>`).join('');
+  $('howto-try').innerHTML = h.try_it.map((t) => `<li>${escapeHtml(t)}</li>`).join('');
+  $('howto-body').hidden = false;
+}
+
+$('btn-howto').onclick = openHowto;
+$('howto-close').onclick = $('howto-done').onclick = () => { $('howto-modal').hidden = true; };
+$('howto-open-code').onclick = () =>
+  window.open(`code.html?project=${encodeURIComponent(FIGURE)}&howto=1`, '_blank');
+$('howto-copy').onclick = async () => {
+  try { await navigator.clipboard.writeText(howto.code); $('howto-copy').textContent = 'Copied ✓'; }
+  catch { $('howto-copy').textContent = 'Couldn’t copy'; }
+  setTimeout(() => { $('howto-copy').textContent = 'Copy'; }, 1500);
+};
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !$('howto-modal').hidden) $('howto-modal').hidden = true;
 });
 
 $('btn-ai').onclick = openAiDialog;
@@ -3779,6 +3855,7 @@ async function startEditor() {
     fit();
     setStatus('');
     $('status').dataset.ready = '1';  // "the figure is on screen" (tests wait on it)
+    checkHowto();
   } catch (e) {
     setStatus(e.message, 'err');
     canvas.innerHTML = `<div style="padding:40px;font:14px sans-serif;color:#b4392b">

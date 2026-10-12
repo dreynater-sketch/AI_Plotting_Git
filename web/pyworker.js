@@ -76,6 +76,9 @@ onmessage = async (e) => {
   try {
     ready = ready || boot();
     const py = await ready;
+    // pandas, scipy... when the script imports them (Pyodide fetches them once).
+    status('Loading Python packages…');
+    await py.loadPackagesFromImports(msg.code);
     status('Running…');
     py.FS.writeFile('/project/data/curves.npz', new Uint8Array(msg.npz));
     py.FS.writeFile('/project/figure.py', msg.code);

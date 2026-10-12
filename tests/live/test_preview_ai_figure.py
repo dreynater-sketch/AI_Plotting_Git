@@ -80,6 +80,18 @@ try:
         check(abs(top.get("scale", 0) - 7.5) < 1e-6 and abs(top.get("offset", 0) - 20) < 1e-6,
               f"energy axis from the calibration ({top.get('scale')}, {top.get('offset')})")
         check(any(t.get("text") for t in p.get("texts", [])), "a peak label was added")
+        check(ctx.get(H + "/api/howto/ai_live").json() == {"howto": None, "can_make": True},
+              "an AI figure can get a 'How this was made'")
+        t = time.time()
+        r = post("/api/assistant/howto/ai_live", timeout=120000)
+        h = r.json().get("howto") or {} if r.ok else {}
+        print(f"   how it was made: {time.time() - t:.0f}s, ${h.get('cost_usd')}, {h.get('model')}")
+        print("   idea:", h.get("idea"))
+        check(r.ok and h.get("code") and h.get("steps") and h.get("commands")
+              and all(m.get("svg") or m.get("plain") for m in h.get("math", [])),
+              f"'How this was made' written ({r.status})")
+        check((h.get("cost_usd") or 1) < 0.02, f"and it's cheap (${h.get('cost_usd')})")
+        check(ctx.get(H + "/api/howto/ai_live").json().get("howto") == h, "saved with the project")
         ctx.dispose()
 finally:
     keys = store._walk(f"users/{uid}")

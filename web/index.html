@@ -85,6 +85,7 @@
       <span id="zoomval">100%</span>
       <button id="btn-fit" class="link" title="Make the figure fit the window">Fit</button>
       <span class="spacer"></span>
+      <button id="btn-howto" class="ai-btn" hidden title="The idea, the math, the code and the steps behind this AI figure">📖 How this was made</button>
       <button id="btn-ai-edit" class="ai-btn" hidden title="Tell Claude what to change in this figure">✨ Change with AI</button>
       <button id="btn-add-label" title="Add a new label to the plot you're working in">+ Label</button>
       <button id="btn-add-arrow" title="Add a new arrow to the plot you're working in">+ Arrow</button>
@@ -755,6 +756,43 @@
     <div class="modal-foot">
       <button id="ai-edit-done">Close</button>
       <button class="primary" id="ai-edit-go">✨ Change it</button>
+    </div>
+  </div>
+</div>
+
+<!-- "How this was made": what the AI did to make this figure, to learn from. -->
+<div class="modal" id="howto-modal" hidden>
+  <div class="modal-card howto-card" role="dialog" aria-labelledby="howto-title">
+    <div class="modal-head">
+      <h3 id="howto-title">📖 How this figure was made</h3>
+      <button class="link" id="howto-close" title="Close (Esc)">×</button>
+    </div>
+    <p class="csv-msg" id="howto-msg" role="status"></p>
+    <div id="howto-body" hidden>
+      <h4>The idea</h4>
+      <p id="howto-idea"></p>
+      <div id="howto-math-box">
+        <h4>The math</h4>
+        <ul class="howto-math" id="howto-math"></ul>
+      </div>
+      <h4>What Claude did, step by step</h4>
+      <ol class="howto-steps" id="howto-steps"></ol>
+      <h4>The code</h4>
+      <p class="howto-note" id="howto-code-note"></p>
+      <pre class="howto-code" id="howto-code"></pre>
+      <div class="howto-actions">
+        <button id="howto-open-code">Open it in the code editor</button>
+        <button id="howto-copy">Copy</button>
+      </div>
+      <details class="howto-raw" id="howto-raw">
+        <summary>Exactly what Claude typed in its sandbox</summary>
+        <div id="howto-commands"></div>
+      </details>
+      <h4>Try it yourself</h4>
+      <ul class="howto-try" id="howto-try"></ul>
+    </div>
+    <div class="modal-foot">
+      <button id="howto-done">Close</button>
     </div>
   </div>
 </div>
