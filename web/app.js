@@ -2924,14 +2924,19 @@ $('btn-add-arrow').onclick = () => {
   setStatus('Arrow added: drag the middle to move it, an end to stretch it');
 };
 
+/** Something picked in a plot: that plot's legend. Nothing picked: every
+ *  plot's legend (the ones with lines), so all of them change together. */
 $('menu-add-legend').onclick = () => {
-  const p = workingPanel();
-  if (!p.legend) {
-    setSelection([`panel:${p.id}`]);
+  const panels = selection.length ? [workingPanel()]
+    : spec.panels.filter((p) => p.series?.length);
+  if (!panels.length) panels.push(workingPanel());
+  const off = panels.filter((p) => !p.legend);
+  if (off.length) {
+    setSelection(off.map((p) => `panel:${p.id}`));
     $('f-legend-on').checked = true;
     $('f-legend-on').dispatchEvent(new Event('change'));
   }
-  setSelection([`${p.id}__legend`]);
+  setSelection(panels.map((p) => `${p.id}__legend`));
 };
 
 $('menu-add-grid').onclick = () => {

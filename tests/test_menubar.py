@@ -84,6 +84,14 @@ try:
         pg.click("#menu-insert"); pg.click("#menu-add-legend"); settle()
         check(panel("c").get("legend") and ev("selection[0]") == "c__legend",
               "Insert > Legend brings it back and picks it so its settings show")
+        ev("document.getElementById('f-legend-on').checked = false;"
+           "document.getElementById('f-legend-on').dispatchEvent(new Event('change'))"); settle()
+        ev("setSelection([])"); pg.click("#tool-legend"); settle()
+        with_lines = [p["id"] for p in disk()["panels"] if p.get("series")]
+        check(len(with_lines) > 1 and all(panel(i).get("legend") for i in with_lines)
+              and sorted(ev("selection")) == sorted(f"{i}__legend" for i in with_lines),
+              f"nothing picked: Legend picks every graph's legend, showing hidden ones ({ev('selection')})")
+        ev("setSelection([])")
 
         # --- View: numbers of a line without the list; the list; the side panel
         ev("setSelection(['a_meas'])")
