@@ -38,7 +38,14 @@ try:
         br = pw.chromium.launch(channel="msedge"); ctx = br.new_context(viewport={"width": 1400, "height": 850})
         pg = ctx.new_page(); errs = []; pg.on("pageerror", lambda e: errs.append(str(e)))
         pg.goto(f"{H}/?_vercel_share={SHARE}")
-        pg.wait_for_selector("#auth-screen:not([hidden])", timeout=60000)
+        try:
+            pg.wait_for_selector("#auth-screen:not([hidden])", timeout=30000)
+        except Exception:
+            # The first use of a fresh share link can stall on Vercel's redirect.
+            print("   (first load stalled at", pg.url[:80], "-- loading once more)")
+            pg.screenshot(path=sys.argv[3].replace(".png", "_stall.png"))
+            pg.goto(f"{H}/")
+            pg.wait_for_selector("#auth-screen:not([hidden])", timeout=60000)
         check(pg.evaluate("spec") is None, "preview: signed-out visitors get the log-in screen")
         for path in ("/api/figures", "/api/figure/qcircle", "/api/png/qcircle", "/api/history/qcircle"):
             check(ctx.request.get(H + path).status == 401, f"preview: {path} is 401 when signed out")
