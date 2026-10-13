@@ -261,3 +261,12 @@ figure → saved-code sync; a phone layout; photo-to-data-points.
   plot's own numbers, the figure size (click: whole-figure settings), zoom, and ▴ List
   (opens/closes the list of everything).
 - test_menubar.py now 39 checks.
+
+## Faster opening (2026-10-13)
+- The page asks for who you are, the project list, the figure and its undo history all at once
+  instead of one after another.
+- Online storage: one kept-alive connection per thread; the project list is checked side by side
+  (11 projects: ~4.9 s -> ~1.1 s measured from this PC); the spec is downloaded once per request.
+- A figure drawn a moment ago (reopened, or undone back to) comes from memory (~0.5 s saved).
+- The page's own files carry an ETag and are cached by Vercel until the next deploy.
+- Several requests with an expired sign-in share one renewal.
