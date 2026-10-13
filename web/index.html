@@ -10,36 +10,105 @@
 
 <header class="topbar">
   <div class="brand">FigForge <span class="sub" id="storage-badge">local</span></div>
-  <div class="project">
-    <select id="project-select" title="Open another figure"></select>
-    <button id="btn-new" title="Make a new figure from a spreadsheet (CSV) file">New from CSV…</button>
-    <button id="btn-ai" class="ai-btn" hidden title="Give Claude your data files and describe the figure you want">✨ New with AI</button>
-    <button id="btn-saveas" title="Save a copy with a new name">Save a copy…</button>
-    <button id="btn-rename" title="Give this figure a new name">Rename</button>
-    <button id="btn-delete-project" class="danger" title="Delete this figure and everything in it">Delete</button>
-  </div>
+  <!-- The menu bar. Everything you can do lives in a menu, so the screen
+       stays clear for the figure. -->
+  <nav class="menubar" id="menubar" role="menubar">
+    <div class="menu-wrap">
+      <button class="menu-title" id="menu-file" aria-haspopup="menu" aria-expanded="false">File</button>
+      <div class="menu" role="menu" hidden>
+        <button role="menuitem" id="btn-new" title="Make a new figure from a spreadsheet (CSV) file">New from a spreadsheet (CSV)…</button>
+        <button role="menuitem" id="btn-ai" class="ai-item" hidden title="Give Claude your data files and describe the figure you want">✨ New with AI…</button>
+        <button role="menuitem" id="menu-open" title="Open another of your figures">Open another figure…</button>
+        <hr>
+        <button role="menuitem" id="btn-saveas" title="Save a copy with a new name">Save a copy…</button>
+        <button role="menuitem" id="btn-rename" title="Give this figure a new name">Rename…</button>
+        <hr>
+        <div class="menu-label">Download the figure</div>
+        <button role="menuitem" id="dl-pdf">PDF <span class="hint">for papers and LaTeX</span></button>
+        <button role="menuitem" id="dl-svg">SVG <span class="hint">for Illustrator, Inkscape</span></button>
+        <button role="menuitem" id="btn-png">PNG picture <span class="hint">for slides and the web</span></button>
+        <hr>
+        <button role="menuitem" id="btn-delete-project" class="danger" title="Delete this figure and everything in it">Delete this figure…</button>
+      </div>
+    </div>
+    <div class="menu-wrap">
+      <button class="menu-title" id="menu-edit" aria-haspopup="menu" aria-expanded="false">Edit</button>
+      <div class="menu" role="menu" hidden>
+        <button role="menuitem" id="menu-undo">Undo <span class="hint">Ctrl+Z</span></button>
+        <button role="menuitem" id="menu-redo">Redo <span class="hint">Ctrl+Y</span></button>
+        <hr>
+        <button role="menuitem" id="btn-rebuild" class="danger" title="Throw away every change (moves, styles, numbers you changed) and draw the figure fresh from your data">Start over from my data…</button>
+      </div>
+    </div>
+    <div class="menu-wrap">
+      <button class="menu-title" id="menu-insert" aria-haspopup="menu" aria-expanded="false">Insert</button>
+      <div class="menu" role="menu" hidden>
+        <button role="menuitem" id="btn-add-label" title="Add a new label to the plot you're working in">Label</button>
+        <button role="menuitem" id="btn-add-arrow" title="Add a new arrow to the plot you're working in">Arrow</button>
+        <button role="menuitem" id="menu-add-span" title="Shade a stretch of the plot">Shaded range</button>
+        <hr>
+        <button role="menuitem" id="menu-add-legend" title="Show which line is which">Legend</button>
+        <button role="menuitem" id="menu-add-grid" title="Faint lines across the plot at the numbers">Grid lines</button>
+        <button role="menuitem" id="menu-add-twin" title="Measure a line on its own scale, on the right side">Second scale on the right</button>
+      </div>
+    </div>
+    <div class="menu-wrap">
+      <button class="menu-title" id="menu-view" aria-haspopup="menu" aria-expanded="false">View</button>
+      <div class="menu" role="menu" hidden>
+        <button role="menuitem" id="menu-zoom-in">Bigger <span class="hint">zoom in</span></button>
+        <button role="menuitem" id="menu-zoom-out">Smaller <span class="hint">zoom out</span></button>
+        <button role="menuitem" id="menu-fit">Fit to the window</button>
+        <hr>
+        <button role="menuitemcheckbox" id="menu-view-list" aria-checked="false">List of everything in the figure</button>
+        <button role="menuitemcheckbox" id="menu-view-side" aria-checked="true">"Change it" panel</button>
+      </div>
+    </div>
+    <div class="menu-wrap">
+      <button class="menu-title" id="btn-py" aria-haspopup="menu" aria-expanded="false" title="See or download the Python code that draws this figure">Code</button>
+      <div class="menu" id="py-menu" role="menu" hidden>
+        <button role="menuitem" id="py-view"><b>See and change the code</b><span>Opens a code editor in a new tab. Run it in your browser.</span></button>
+        <button role="menuitem" id="py-download"><b>Download figure.py</b><span>Made from the figure as it is now.</span></button>
+        <button role="menuitem" id="py-download-edited" hidden><b>Download my changed version</b><span>The code you saved in the editor.</span></button>
+      </div>
+    </div>
+    <div class="menu-wrap" id="menu-ai-wrap" hidden>
+      <button class="menu-title ai-title" id="menu-ai" aria-haspopup="menu" aria-expanded="false">✨ AI</button>
+      <div class="menu" role="menu" hidden>
+        <button role="menuitem" id="btn-ai-edit" hidden title="Tell Claude what to change in this figure">✨ Change this figure with AI…</button>
+        <button role="menuitem" id="btn-howto" hidden title="The idea, the math, the code and the steps behind this AI figure">📖 How this was made</button>
+        <button role="menuitem" id="menu-ai-new" hidden title="Give Claude your data files and describe the figure you want">✨ New figure with AI…</button>
+      </div>
+    </div>
+    <div class="menu-wrap">
+      <button class="menu-title" id="btn-help" aria-haspopup="menu" aria-expanded="false" title="How to use the editor">Help</button>
+      <div class="menu help-pop" id="help-pop" role="dialog" aria-label="How to use the editor" hidden>
+        <h3>How to use it</h3>
+        <ul>
+          <li><b>Click</b> anything to pick it. Change it on the right.</li>
+          <li><b>Drag</b> it to move it.</li>
+          <li><b>Double-click</b> words to type new ones.</li>
+          <li>Hold <kbd>Ctrl</kbd> and click to pick more than one.</li>
+          <li>Drag across an empty spot to pick everything inside.</li>
+          <li>Add things from the <b>Insert</b> menu.</li>
+        </ul>
+        <h3>Keys</h3>
+        <table>
+          <tr><td><kbd>←</kbd><kbd>↑</kbd><kbd>→</kbd><kbd>↓</kbd></td><td>Move a little (hold <kbd>Shift</kbd> for more)</td></tr>
+          <tr><td><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>&gt;</kbd> / <kbd>&lt;</kbd></td><td>Bigger / smaller words</td></tr>
+          <tr><td><kbd>Del</kbd></td><td>Delete it</td></tr>
+          <tr><td><kbd>Ctrl</kbd><kbd>Z</kbd></td><td>Undo</td></tr>
+          <tr><td><kbd>Ctrl</kbd><kbd>Y</kbd></td><td>Redo</td></tr>
+          <tr><td><kbd>Esc</kbd></td><td>Let go</td></tr>
+        </table>
+      </div>
+    </div>
+  </nav>
   <div class="spacer"></div>
   <div class="status" id="status" role="status"></div>
+  <select id="project-select" title="Open another figure"></select>
   <div class="tools">
-    <button id="btn-undo" title="Undo (Ctrl+Z)">Undo</button>
-    <button id="btn-redo" title="Redo (Ctrl+Y or Ctrl+Shift+Z)">Redo</button>
-    <div class="menu-wrap">
-      <button id="btn-py" aria-haspopup="menu" title="See or download the Python code that draws this figure">Code ▾</button>
-      <div class="py-menu" id="py-menu" role="menu" hidden>
-        <button role="menuitem" id="py-view"><b>View &amp; edit code</b><span>Opens a code editor in a new tab. Run it in your browser.</span></button>
-        <button role="menuitem" id="py-download"><b>Download figure.py</b><span>Generated from the figure as it is now.</span></button>
-        <button role="menuitem" id="py-download-edited" hidden><b>Download my edited version</b><span>The code you saved in the editor.</span></button>
-      </div>
-    </div>
-    <div class="menu-wrap">
-      <button id="btn-dl" aria-haspopup="menu" title="Download the figure">Download ▾</button>
-      <div class="py-menu" id="dl-menu" role="menu" hidden>
-        <button role="menuitem" id="dl-pdf"><b>PDF</b><span>For papers and LaTeX. Sharp at any size; text stays text.</span></button>
-        <button role="menuitem" id="dl-svg"><b>SVG</b><span>To keep editing in Illustrator or Inkscape.</span></button>
-        <button role="menuitem" id="btn-png"><b>PNG picture</b><span>For slides, posters and the web.</span></button>
-      </div>
-    </div>
-    <button id="btn-rebuild" class="danger" title="Throw away every change (moves, styles, numbers you changed) and draw the figure fresh from your data">Start over</button>
+    <button id="btn-undo" class="icon" title="Undo (Ctrl+Z)" aria-label="Undo">↶</button>
+    <button id="btn-redo" class="icon" title="Redo (Ctrl+Y)" aria-label="Redo">↷</button>
   </div>
   <div class="account" id="account" hidden>
     <button id="btn-account" title="Your profile"><span class="avatar" id="account-avatar"></span><span id="account-name"></span></button>
@@ -79,41 +148,17 @@
 
 <main>
   <section class="stage" id="stage">
-    <div class="zoombar">
-      <label for="zoom">Zoom</label>
-      <input type="range" id="zoom" min="40" max="220" value="100" step="5">
-      <span id="zoomval">100%</span>
-      <button id="btn-fit" class="link" title="Make the figure fit the window">Fit</button>
-      <span class="spacer"></span>
-      <button id="btn-howto" class="ai-btn" hidden title="The idea, the math, the code and the steps behind this AI figure">📖 How this was made</button>
-      <button id="btn-ai-edit" class="ai-btn" hidden title="Tell Claude what to change in this figure">✨ Change with AI</button>
-      <button id="btn-add-label" title="Add a new label to the plot you're working in">+ Label</button>
-      <button id="btn-add-arrow" title="Add a new arrow to the plot you're working in">+ Arrow</button>
-      <div class="menu-wrap">
-        <button id="btn-help" aria-haspopup="dialog" aria-expanded="false" title="How to use the editor">? Help</button>
-        <div class="help-pop" id="help-pop" role="dialog" aria-label="How to use the editor" hidden>
-          <h3>How to use it</h3>
-          <ul>
-            <li><b>Click</b> anything to pick it. Change it on the right.</li>
-            <li><b>Drag</b> it to move it.</li>
-            <li><b>Double-click</b> words to type new ones.</li>
-            <li>Hold <kbd>Ctrl</kbd> and click to pick more than one.</li>
-            <li>Drag across an empty spot to pick everything inside.</li>
-          </ul>
-          <h3>Keys</h3>
-          <table>
-            <tr><td><kbd>←</kbd><kbd>↑</kbd><kbd>→</kbd><kbd>↓</kbd></td><td>Move a little (hold <kbd>Shift</kbd> for more)</td></tr>
-            <tr><td><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>&gt;</kbd> / <kbd>&lt;</kbd></td><td>Bigger / smaller words</td></tr>
-            <tr><td><kbd>Del</kbd></td><td>Delete it</td></tr>
-            <tr><td><kbd>Ctrl</kbd><kbd>Z</kbd></td><td>Undo</td></tr>
-            <tr><td><kbd>Ctrl</kbd><kbd>Y</kbd></td><td>Redo</td></tr>
-            <tr><td><kbd>Esc</kbd></td><td>Let go</td></tr>
-          </table>
-        </div>
+    <div class="canvas-area">
+      <div class="canvas-wrap" id="canvas-wrap">
+        <div class="canvas" id="canvas"></div>
       </div>
-    </div>
-    <div class="canvas-wrap" id="canvas-wrap">
-      <div class="canvas" id="canvas"></div>
+      <div class="zoomctl" title="How big the figure looks on screen">
+        <button id="zoom-out" class="icon" aria-label="Smaller">−</button>
+        <input type="range" id="zoom" min="40" max="220" value="100" step="5" aria-label="Zoom">
+        <button id="zoom-in" class="icon" aria-label="Bigger">+</button>
+        <span id="zoomval">100%</span>
+        <button id="btn-fit" class="link" title="Make the figure fit the window">Fit</button>
+      </div>
     </div>
     <!-- The bottom bar: every part of the figure, and the numbers behind a
          picked line. Drag its top edge to make it taller or shorter. -->
@@ -546,7 +591,7 @@
               <input type="text" id="f-cbar-label" spellcheck="false">
             </label>
           </div>
-          <p class="note" id="series-note">Its numbers are listed under the figure, on the right.</p>
+          <p class="note" id="series-note">Its numbers are listed under the figure. Click one to change it.</p>
         </div>
 
         <div id="guide-fields" hidden>

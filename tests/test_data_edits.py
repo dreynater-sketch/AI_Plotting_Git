@@ -31,6 +31,7 @@ with sync_playwright() as pw:
     pg.goto(f"{B}/?project={P}")
     pg.wait_for_function("document.getElementById('status').dataset.ready === '1'")
     settle = lambda: pg.wait_for_function("!savePending && !inFlight && !needsSave", timeout=30000)
+    pg.click("#menu-view"); pg.click("#menu-view-list")  # the list is off until asked for
     pg.locator("#element-list button", has_text="circle fit").first.click()
     pg.wait_for_selector("#data-table-body td")
     cell = pg.locator('#data-table-body td[data-i="3"][data-c="1"]')

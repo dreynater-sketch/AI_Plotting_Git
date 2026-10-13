@@ -63,8 +63,8 @@ function pushHistory(coalesceKey = null) {
 }
 
 function refreshUndoButtons() {
-  $('btn-undo').disabled = !history.length;
-  $('btn-redo').disabled = !future.length;
+  $('btn-undo').disabled = $('menu-undo').disabled = !history.length;
+  $('btn-redo').disabled = $('menu-redo').disabled = !future.length;
 }
 
 /* The undo stack is persisted per project (history.json) so undo still works
@@ -2441,9 +2441,9 @@ for (const xy of ['x', 'y']) {
     tidy(o);
   }));
 }
-$('btn-add-span').addEventListener('click', () => {
-  const pid = selected()[0]?.panel;
-  const p = panelById(pid);
+$('btn-add-span').addEventListener('click', () => addSpan(panelById(selected()[0]?.panel)));
+$('menu-add-span').onclick = () => addSpan(workingPanel());
+function addSpan(p) {
   if (!p) return;
   const m = middleOf(p);
   pushHistory();
@@ -2451,7 +2451,7 @@ $('btn-add-span').addEventListener('click', () => {
   buildList();
   setSelection([`${p.id}__span_${p.spans.length - 1}`]);
   scheduleSave(0);
-});
+}
 $('f-span-color').addEventListener('input', (e) => {
   $('f-span-color-hex').value = e.target.value;
   edit((o) => { o.color = e.target.value; }, { immediate: false });
@@ -2610,49 +2610,116 @@ if ('BroadcastChannel' in window) {
   };
 }
 
-/* figure.py: a small menu -- open the code editor (code.html, a new tab) or
- * download. "Download my edited version" only shows once one is saved. */
-$('btn-py').onclick = async () => {
-  const menu = $('py-menu');
-  if (!menu.hidden) { menu.hidden = true; return; }
-  menu.hidden = false;
+/* ------------------------------------------------------------ menu bar */
+/* File, Edit, Insert, View, Code, AI, Help. Click a name to open its menu;
+ * with one open, pointing at another name switches to it. A click on a
+ * choice runs it and closes the menu; Esc or a click elsewhere closes it.
+ * The arrow keys walk the choices. */
+let openMenu = null;   // the menu title whose list is showing
+const menuOf = (title) => title.nextElementSibling;
+const menuTitles = () => [...document.querySelectorAll('.menubar .menu-wrap:not([hidden]) > .menu-title')];
+const menuItems = (title) => [...menuOf(title).querySelectorAll(':scope > button')]
+  .filter((b) => !b.hidden && !b.disabled);
+
+function closeMenus() {
+  if (!openMenu) return;
+  menuOf(openMenu).hidden = true;
+  openMenu.setAttribute('aria-expanded', 'false');
+  openMenu = null;
+}
+function showMenu(title) {
+  if (openMenu === title) return;
+  closeMenus();
+  menuOf(title).hidden = false;
+  title.setAttribute('aria-expanded', 'true');
+  openMenu = title;
+  title.dispatchEvent(new Event('menuopen'));
+}
+for (const t of document.querySelectorAll('.menubar .menu-title')) {
+  t.addEventListener('click', () => { if (openMenu === t) closeMenus(); else showMenu(t); });
+  t.addEventListener('pointerenter', () => { if (openMenu && openMenu !== t) showMenu(t); });
+}
+// Runs after the choice's own handler (it bubbles up here last).
+document.addEventListener('click', (e) => {
+  if (e.target.closest('.menubar .menu > button')) closeMenus();
+});
+document.addEventListener('pointerdown', (e) => {
+  if (openMenu && !openMenu.parentElement.contains(e.target)) closeMenus();
+});
+// Capture phase, so the arrow keys move through the menu instead of
+// nudging whatever is picked in the figure.
+window.addEventListener('keydown', (e) => {
+  if (!openMenu) return;
+  const titles = menuTitles();
+  const items = menuItems(openMenu);
+  const at = items.indexOf(document.activeElement);
+  const step = { ArrowDown: 1, ArrowUp: -1 }[e.key];
+  const side = { ArrowRight: 1, ArrowLeft: -1 }[e.key];
+  if (e.key === 'Escape') {
+    const t = openMenu; closeMenus(); t.focus();
+  } else if (step && items.length) {
+    items[(at + step + items.length + (at < 0 && step < 0 ? 1 : 0)) % items.length].focus();
+  } else if (side) {
+    const next = titles[(titles.indexOf(openMenu) + side + titles.length) % titles.length];
+    showMenu(next); next.focus();
+  } else {
+    return;
+  }
+  e.preventDefault();
+  e.stopPropagation();
+}, true);
+
+/* View: the list of everything (bottom) and the "Change it" panel (right).
+ * Remembered per browser. */
+const VIEW_KEY = 'figforge.view';
+const view = { list: false, side: true };
+try { Object.assign(view, JSON.parse(localStorage.getItem(VIEW_KEY) || '{}')); } catch { /* defaults */ }
+function applyView() {
+  $('dock').classList.toggle('list-on', view.list);
+  document.body.classList.toggle('no-side', !view.side);
+  $('menu-view-list').setAttribute('aria-checked', String(view.list));
+  $('menu-view-side').setAttribute('aria-checked', String(view.side));
+}
+function toggleView(key) {
+  view[key] = !view[key];
+  try { localStorage.setItem(VIEW_KEY, JSON.stringify(view)); } catch { /* fine */ }
+  applyView();
+  if (geometry) fit();
+}
+applyView();
+$('menu-view-list').onclick = () => toggleView('list');
+$('menu-view-side').onclick = () => toggleView('side');
+$('menu-zoom-in').onclick = $('zoom-in').onclick = () => setZoom(zoom + 10);
+$('menu-zoom-out').onclick = $('zoom-out').onclick = () => setZoom(zoom - 10);
+$('menu-fit').onclick = () => fit();
+$('menu-undo').onclick = () => undo();
+$('menu-redo').onclick = () => redo();
+$('menu-open').onclick = () => {
+  const sel = $('project-select');
+  sel.focus();
+  try { sel.showPicker(); } catch { /* older browsers: the list is focused */ }
+};
+
+/* Code: open the code editor (code.html, a new tab) or download.
+ * "Download my changed version" only shows once one is saved. */
+$('btn-py').addEventListener('menuopen', async () => {
   $('py-download-edited').hidden = true;
   try {
     const r = await fetch(`/api/script/${FIGURE}`);
     if (r.ok) $('py-download-edited').hidden = !(await r.json()).custom;
-  } catch { /* the menu still works without the edited-version entry */ }
-};
-document.addEventListener('pointerdown', (e) => {
-  if (!$('btn-py').parentElement.contains(e.target)) $('py-menu').hidden = true;
-  if (!$('btn-help').parentElement.contains(e.target)) showHelp(false);
-  if (!$('btn-dl').parentElement.contains(e.target)) $('dl-menu').hidden = true;
-});
-
-/* "? Help": the how-to and the keyboard keys, out of the way until asked. */
-function showHelp(on) {
-  $('help-pop').hidden = !on;
-  $('btn-help').setAttribute('aria-expanded', String(on));
-}
-$('btn-help').onclick = () => showHelp($('help-pop').hidden);
-document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') showHelp(false);
+  } catch { /* the menu still works without the changed-version entry */ }
 });
 $('py-view').onclick = async () => {
-  $('py-menu').hidden = true;
   await flushPending();  // the code is generated from what's saved
   window.open(`code.html?project=${encodeURIComponent(FIGURE)}`, '_blank');
 };
 $('py-download').onclick = () => {
-  $('py-menu').hidden = true;
   download(`/api/code/${FIGURE}`, `${FIGURE}.py`);
 };
 $('py-download-edited').onclick = () => {
-  $('py-menu').hidden = true;
   download(`/api/code/${FIGURE}?edited=1`, `${FIGURE}_edited.py`);
 };
-$('btn-dl').onclick = () => { $('dl-menu').hidden = !$('dl-menu').hidden; };
 const exportAs = (fmt) => {
-  $('dl-menu').hidden = true;
   download(`/api/export/${FIGURE}?format=${fmt}`, `${FIGURE}.${fmt}`);
 };
 $('btn-png').onclick = () => exportAs('png');
@@ -2807,6 +2874,43 @@ $('btn-add-arrow').onclick = () => {
   setStatus('Arrow added: drag the middle to move it, an end to stretch it');
 };
 
+$('menu-add-legend').onclick = () => {
+  const p = workingPanel();
+  if (!p.legend) {
+    setSelection([`panel:${p.id}`]);
+    $('f-legend-on').checked = true;
+    $('f-legend-on').dispatchEvent(new Event('change'));
+  }
+  setSelection([`${p.id}__legend`]);
+};
+
+$('menu-add-grid').onclick = () => {
+  const p = workingPanel();
+  setSelection([`panel:${p.id}`]);
+  if (!p.grid) {
+    $('f-grid').value = 'major';
+    $('f-grid').dispatchEvent(new Event('change'));
+  }
+  $('f-grid').focus();
+  setStatus('Grid lines on. Change them under "Grid lines" on the right');
+};
+
+$('menu-add-twin').onclick = () => {
+  const p = workingPanel();
+  const picked = selected().filter((s) => s.kind === 'series');
+  const line = picked[0] ? null : [...(p.series || [])].reverse().find((c) => c.axis !== 'right');
+  if (!picked.length && !line) {
+    setStatus(p.series?.length ? 'Every line already uses the right side'
+                               : 'This plot has no lines to put on a second scale', 'err');
+    return;
+  }
+  if (line) setSelection([line.id]);
+  $('f-series-axis').value = 'right';
+  $('f-series-axis').dispatchEvent(new Event('change'));
+  $('f-series-axis').focus();
+  setStatus('That line now has its own scale on the right. Pick another line to move it too');
+};
+
 $('btn-delete-project').onclick = async () => {
   if (!confirm(`Delete "${FIGURE}" and everything in it? This can't be undone.`)) return;
   await flushPending();
@@ -2822,20 +2926,9 @@ $('btn-delete-project').onclick = async () => {
   } catch (e) { setStatus(e.message, 'err'); }
 };
 
-// Two-step confirm rather than a modal dialog.
-let rebuildArmed = false;
 $('btn-rebuild').onclick = async () => {
-  const btn = $('btn-rebuild');
-  if (!rebuildArmed) {
-    rebuildArmed = true;
-    btn.textContent = 'Sure? Click again';
-    setTimeout(() => {
-      if (rebuildArmed) { rebuildArmed = false; btn.textContent = 'Start over'; }
-    }, 4000);
-    return;
-  }
-  rebuildArmed = false;
-  btn.textContent = 'Start over';
+  if (!confirm('Start over? Every change you made (moves, styles, numbers) goes, and the '
+               + 'figure is drawn fresh from your data.')) return;
   setStatus('Starting over…', 'busy');
   try {
     const r = await fetch(`/api/rebuild/${FIGURE}`, { method: 'POST' });
@@ -2856,11 +2949,14 @@ $('btn-rebuild').onclick = async () => {
   }
 };
 
-$('zoom').addEventListener('input', (e) => {
-  zoom = parseInt(e.target.value, 10);
+$('zoom').addEventListener('input', (e) => setZoom(parseInt(e.target.value, 10)));
+
+function setZoom(z) {
+  zoom = Math.max(40, Math.min(220, Math.round(z)));
+  $('zoom').value = zoom;
   $('zoomval').textContent = zoom + '%';
   applyZoom();
-});
+}
 
 $('btn-fit').onclick = fit;
 
@@ -2868,10 +2964,7 @@ function fit() {
   const w = $('canvas-wrap').clientWidth - 40;
   const h = $('canvas-wrap').clientHeight - 40;
   const scale = Math.min(w / geometry.width, h / geometry.height);
-  zoom = Math.max(40, Math.min(220, Math.round(scale * 100)));
-  $('zoom').value = zoom;
-  $('zoomval').textContent = zoom + '%';
-  applyZoom();
+  setZoom(scale * 100);
 }
 
 /* The bottom bar's height: drag its top edge. Remembered per browser. */
@@ -3442,6 +3535,7 @@ async function checkHowto() {
     howto = d.howto;
     howtoCanMake = !howto && d.can_make && assistantOn;
     $('btn-howto').hidden = !(howto || howtoCanMake);
+    refreshAiMenu();
   } catch { /* no button */ }
 }
 
@@ -3500,6 +3594,10 @@ document.addEventListener('keydown', (e) => {
 });
 
 $('btn-ai').onclick = openAiDialog;
+$('menu-ai-new').onclick = openAiDialog;
+function refreshAiMenu() {
+  $('menu-ai-wrap').hidden = ['btn-ai-edit', 'btn-howto', 'menu-ai-new'].every((id) => $(id).hidden);
+}
 $('ai-close').onclick = closeAiDialog;
 $('ai-cancel').onclick = closeAiDialog;
 $('ai-files').onchange = (e) => addAiFiles([...e.target.files]);
@@ -3805,6 +3903,8 @@ async function boot() {
   assistantOn = !!me.assistant;
   $('btn-ai').hidden = !assistantOn;
   $('btn-ai-edit').hidden = !assistantOn;
+  $('menu-ai-new').hidden = !assistantOn;
+  refreshAiMenu();
   aiUsage = me.ai_usage ?? null;
   showAiUsage();
   if (link?.type === 'recovery') { showAuth('reset'); return; }

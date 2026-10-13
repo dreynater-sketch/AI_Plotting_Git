@@ -63,9 +63,7 @@ body {
   margin-left: 2px;
 }
 
-.project { display: flex; align-items: center; gap: 6px; }
-.project button { white-space: nowrap; }
-.project select {
+#project-select {
   font: inherit;
   font-size: 13px;
   padding: 4px 6px;
@@ -88,7 +86,9 @@ body {
 .status.busy { color: var(--accent-ink); }
 .status.err  { color: var(--danger); }
 
-.tools { display: flex; gap: 6px; }
+.tools { display: flex; gap: 4px; }
+button.icon { padding: 2px 9px; font-size: 18px; line-height: 1.2; }
+.tools button.icon { color: var(--ink); }
 
 button {
   font: inherit;
@@ -110,6 +110,43 @@ button.link {
   padding: 2px 4px; text-decoration: underline;
 }
 
+/* ------------------------------------------------------------ menu bar */
+.menubar { display: flex; align-items: center; gap: 2px; margin-left: 6px; }
+.menu-wrap { position: relative; }
+.menu-title {
+  border: none; background: none; padding: 5px 10px; font-size: 13px;
+  border-radius: 5px; color: var(--ink);
+}
+.menu-title:hover:not(:disabled), .menu-title[aria-expanded="true"] { background: #eceef1; border: none; }
+.menu-title.ai-title { color: #6b3fc4; }
+.menu {
+  position: absolute; left: 0; top: calc(100% + 4px); z-index: 60;
+  min-width: 230px; padding: 5px;
+  background: var(--surface); color: var(--ink);
+  border: 1px solid var(--line); border-radius: var(--radius);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.14);
+}
+.menu > button {
+  display: flex; align-items: baseline; gap: 16px; width: 100%; text-align: left;
+  border: none; background: none; padding: 7px 10px; font-size: 12.5px; border-radius: 5px;
+  white-space: nowrap;
+}
+.menu > button:hover:not(:disabled), .menu > button:focus-visible { background: #eef3fd; outline: none; }
+.menu > button.danger:hover:not(:disabled) { background: #fdf2f0; }
+.menu .hint { margin-left: auto; color: var(--ink-soft); font-size: 11.5px; }
+.menu hr { border: none; border-top: 1px solid var(--line-soft); margin: 4px 2px; }
+.menu-label {
+  padding: 6px 10px 2px; font-size: 10.5px; font-weight: 650; text-transform: uppercase;
+  letter-spacing: 0.07em; color: var(--ink-soft);
+}
+.menu > button[role="menuitemcheckbox"]::before { content: ""; width: 14px; flex: none; }
+.menu > button[aria-checked="true"]::before { content: "✓"; color: var(--sel); }
+/* the Code menu keeps a line of explanation under each choice */
+#py-menu { width: 290px; }
+#py-menu > button { display: block; white-space: normal; padding: 8px 10px; }
+#py-menu b { display: block; font-weight: 600; font-size: 12.5px; }
+#py-menu span { display: block; color: var(--ink-soft); font-size: 11.5px; margin-top: 1px; }
+
 /* -------------------------------------------------------------- layout */
 main {
   flex: 1;
@@ -124,20 +161,10 @@ main {
   min-width: 0;
 }
 
-.zoombar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 14px;
-  font-size: 12px;
-  color: var(--ink-soft);
-  border-bottom: 1px solid var(--line-soft);
-}
-.zoombar input[type=range] { width: 150px; }
-.zoombar span { font-variant-numeric: tabular-nums; }
-
+.canvas-area { flex: 1; min-height: 0; position: relative; display: flex; }
 .canvas-wrap {
   flex: 1;
+  min-width: 0;
   overflow: auto;
   padding: 18px;
   min-height: 0;
@@ -154,7 +181,26 @@ main {
 
 .canvas svg { display: block; }
 
-/* ------------------------------------------------------------ data panel */
+/* zoom: a small control floating in the figure area's corner */
+.zoomctl {
+  position: absolute; right: 14px; bottom: 12px; z-index: 20;
+  display: flex; align-items: center; gap: 4px;
+  padding: 3px 6px; font-size: 12px; color: var(--ink-soft);
+  background: rgba(255, 255, 255, 0.92); border: 1px solid var(--line);
+  border-radius: 999px; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+.zoomctl input[type=range] { width: 90px; }
+.zoomctl #zoomval { font-variant-numeric: tabular-nums; min-width: 36px; text-align: right; }
+.zoomctl button.icon { border: none; background: none; padding: 0 6px; font-size: 15px; }
+
+/* View menu: the list of everything shows only when asked for; the numbers
+   of a picked line still open on their own. */
+.dock:not(.list-on) .dock-list { display: none; }
+.dock:not(.list-on):has(.data-panel[hidden]) { display: none; }
+.dock:not(.list-on) .data-panel { flex: 1; width: auto; border-left: none; }
+.dock:not(.list-on) .data-table { width: auto; min-width: 360px; }
+body.no-side .sidebar { display: none; }
+
 /* ------------------------------------------------------ the bottom bar */
 .dock {
   flex: none;
@@ -240,13 +286,8 @@ main {
 .data-table tbody tr:nth-child(even) { background: var(--line-soft); }
 
 /* ------------------------------------------------------ "? Help" popover */
-#btn-help { padding: 3px 10px; }
 .help-pop {
-  position: absolute; right: 0; top: calc(100% + 6px); z-index: 60;
   width: 330px; padding: 12px 14px;
-  background: var(--surface); color: var(--ink);
-  border: 1px solid var(--line); border-radius: var(--radius);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
   font-size: 12.5px;
 }
 .help-pop h3 { margin: 0 0 6px; font-size: 12.5px; font-weight: 650; }
@@ -613,23 +654,6 @@ input:focus, textarea:focus, select:focus {
 .auth-msg { min-height: 1.3em; margin: 12px 0 0; font-size: 12.5px; text-align: center; color: var(--ink-soft); }
 button.primary { background: var(--sel); border-color: var(--sel); color: #fff; font-weight: 600; }
 button.primary:hover:not(:disabled) { background: #1a5fcc; border-color: #1a5fcc; }
-
-/* ----------------------------------------------------- figure.py menu */
-.menu-wrap { position: relative; }
-.py-menu {
-  position: absolute; right: 0; top: calc(100% + 6px); z-index: 60;
-  width: 280px; padding: 5px;
-  background: var(--surface);
-  border: 1px solid var(--line); border-radius: var(--radius);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
-}
-.py-menu button {
-  display: block; width: 100%; text-align: left;
-  border: none; background: none; padding: 8px 10px;
-}
-.py-menu button:hover { background: #f0f1f3; }
-.py-menu b { display: block; font-weight: 600; font-size: 12.5px; }
-.py-menu span { display: block; color: var(--ink-soft); font-size: 11.5px; margin-top: 1px; }
 
 /* ------------------------------------------------- new from CSV dialog */
 .modal {

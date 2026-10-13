@@ -54,7 +54,7 @@ try:
         pg.keyboard.press("Escape")
         pg.mouse.click(5, 300)
 
-        pg.click("#btn-new"); pg.set_input_files("#csv-file", csv_path)
+        pg.click("#menu-file"); pg.click("#btn-new"); pg.set_input_files("#csv-file", csv_path)
         pg.wait_for_selector("#csv-pick:not([hidden])", timeout=30000)
         pg.click("#csv-create")
         pg.wait_for_url("**/?project=decay", timeout=60000)

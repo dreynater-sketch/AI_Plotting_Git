@@ -48,14 +48,14 @@ with sync_playwright() as pw:
 
     # --- add a label / an arrow
     pg.evaluate("setSelection(['panel:b'])")
-    pg.click("#btn-add-label")
+    pg.click("#menu-insert"); pg.click("#btn-add-label")
     lid = pg.evaluate("selection[0]")
     check(lid == "b_label1" and pg.evaluate("document.activeElement.id") == "f-text",
           "+ Label adds a label to the plot you're in, picked, cursor in its text")
     pg.keyboard.type("Nb3Sn edge"); settle()
     t = next(x for x in disk()["panels"][1]["texts"] if x["id"] == "b_label1")
     check(t["text"] == "Nb3Sn edge", "typing names it; saved")
-    pg.click("#btn-add-arrow"); settle()
+    pg.click("#menu-insert"); pg.click("#btn-add-arrow"); settle()
     aid = pg.evaluate("selection[0]")
     arrows = disk()["panels"][1]["arrows"]
     check(aid == "b_arrow1" and any(a["id"] == "b_arrow1" for a in arrows), "+ Arrow adds a picked arrow")
@@ -82,7 +82,7 @@ with sync_playwright() as pw:
     pg.goto(f"{B}/?project={P2}")
     pg.wait_for_function("document.getElementById('status').dataset.ready === '1'")
     pg.once("dialog", lambda dlg: dlg.accept())
-    pg.click("#btn-delete-project")
+    pg.click("#menu-file"); pg.click("#btn-delete-project")
     pg.wait_for_function("document.getElementById('status').dataset.ready === '1' && FIGURE !== 'zz_quickwins_gone'")
     check(not os.path.exists(f"figures/{P2}"), "Delete removes the project and opens another")
     pg.screenshot(path=_os.path.join(OUT_DIR, "quickwins.png"))

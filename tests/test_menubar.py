@@ -1,0 +1,122 @@
+"""The menu bar (File, Edit, Insert, View, Code, AI, Help): menus open and
+close by click, pointing and keys; Insert adds a legend, grid lines, a second
+scale on the right and a shaded range; View shows or hides the list of
+everything and the "Change it" panel (remembered); zoom from the corner
+control; Start over asks first."""
+import os as _os
+ROOT_DIR = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+import json, os, sys, urllib.request
+from _cleanup import rmtree
+sys.path.insert(0, ROOT_DIR)
+os.chdir(ROOT_DIR)
+from playwright.sync_api import sync_playwright
+
+B = _os.environ.get("FF_BASE", "http://127.0.0.1:8765"); P = "zz_menubar"
+rmtree(f"figures/{P}")
+urllib.request.urlopen(urllib.request.Request(B + "/api/project/duplicate",
+    data=json.dumps({"from": "qcircle", "name": P}).encode(), method="POST",
+    headers={"Content-Type": "application/json"}))
+if os.path.exists(f"figures/{P}/history.json"):
+    os.remove(f"figures/{P}/history.json")  # start with nothing to undo
+fails = []
+def check(c, m): print(("PASS " if c else "FAIL ") + m); c or fails.append(m)
+disk = lambda: json.load(open(f"figures/{P}/spec.json", encoding="utf-8"))
+panel = lambda pid: next(p for p in disk()["panels"] if p["id"] == pid)
+
+try:
+    with sync_playwright() as pw:
+        br = pw.chromium.launch(channel="msedge")
+        ctx = br.new_context(viewport={"width": 1400, "height": 850})
+        pg = ctx.new_page(); errs = []; pg.on("pageerror", lambda e: errs.append(str(e)))
+        pg.goto(f"{B}/?project={P}")
+        pg.wait_for_function("document.getElementById('status').dataset.ready === '1'")
+        settle = lambda: pg.wait_for_function("!savePending && !inFlight && !needsSave", timeout=30000)
+        ev = pg.evaluate
+        shown = lambda sel: ev(f"!!document.querySelector('{sel}')?.checkVisibility()")
+
+        # --- a clean screen: no list, no menus, no extra button rows
+        check(not shown("#dock") and not shown(".menu"), "starts clean: no list under the figure, no menu open")
+        loose = ev("[...document.querySelectorAll('header button:not(.menu-title)')]"
+                   ".filter((b) => b.checkVisibility()).map((b) => b.id)")
+        check(set(loose) <= {"btn-undo", "btn-redo", "btn-account"},
+              f"only the menu names, undo/redo and the profile show in the top bar ({loose})")
+        check(ev("document.querySelector('.canvas-area').clientHeight") > 700, "the figure gets almost the whole height")
+
+        # --- open, switch by pointing, close
+        pg.click("#menu-file")
+        check(shown("#btn-new") and pg.get_attribute("#menu-file", "aria-expanded") == "true", "File opens its menu")
+        pg.hover("#menu-insert")
+        check(shown("#btn-add-label") and not shown("#btn-new"), "pointing at Insert switches to its menu")
+        pg.mouse.click(700, 500)
+        check(not shown(".menu"), "a click elsewhere closes it")
+        pg.click("#menu-edit"); pg.keyboard.press("Escape")
+        check(not shown(".menu"), "Esc closes it")
+
+        # --- keys walk the menu and don't nudge the picked element
+        ev("setSelection(['a_title'])"); before = ev("JSON.stringify(spec.panels[0].title)")
+        pg.click("#menu-view"); pg.keyboard.press("ArrowDown")
+        check(ev("document.activeElement.id") == "menu-zoom-in", "↓ goes to the first choice")
+        pg.keyboard.press("ArrowRight")
+        check(shown("#py-view"), "→ goes to the next menu (Code)")
+        check(ev("JSON.stringify(spec.panels[0].title)") == before, "the arrow keys didn't move the picked title")
+        pg.keyboard.press("Escape"); ev("setSelection([])")
+
+        # --- Edit: undo/redo follow history
+        check(ev("document.getElementById('menu-undo').disabled"), "Edit > Undo is greyed out with nothing to undo")
+
+        # --- Insert
+        pg.click("#menu-insert"); pg.click("#menu-add-grid"); settle()
+        check(panel("a").get("grid") == "major" and not shown(".menu"), "Insert > Grid lines turns them on and closes the menu")
+        check(not ev("document.getElementById('menu-undo').disabled"), "Edit > Undo is ready after a change")
+        ev("setSelection(['b_meas'])")
+        pg.click("#menu-insert"); pg.click("#menu-add-twin"); settle()
+        check(next(c for c in panel("b")["series"] if c["id"] == "b_meas").get("axis") == "right"
+              and "twin" in panel("b"), "Insert > Second scale puts the picked line on its own right-side scale")
+        ev("setSelection(['panel:c'])")
+        pg.click("#menu-insert"); pg.click("#menu-add-span"); settle()
+        check(len(panel("c").get("spans") or []) == 1, "Insert > Shaded range adds one to the plot you're in")
+        ev("setSelection(['panel:c'])")
+        ev("document.getElementById('f-legend-on').checked = false;"
+           "document.getElementById('f-legend-on').dispatchEvent(new Event('change'))"); settle()
+        check(panel("c").get("legend") is None, "(legend hidden to start)")
+        pg.click("#menu-insert"); pg.click("#menu-add-legend"); settle()
+        check(panel("c").get("legend") and ev("selection[0]") == "c__legend",
+              "Insert > Legend brings it back and picks it so its settings show")
+
+        # --- View: numbers of a line without the list; the list; the side panel
+        ev("setSelection(['a_meas'])")
+        pg.wait_for_selector("#data-panel:not([hidden])")
+        check(shown("#data-panel") and not shown("#element-list"), "picking a line shows its numbers, not the whole list")
+        ev("setSelection([])")
+        check(not shown("#dock"), "letting go hides them again")
+        pg.click("#menu-view"); pg.click("#menu-view-list")
+        check(shown("#element-list") and pg.get_attribute("#menu-view-list", "aria-checked") == "true",
+              "View > List of everything shows it, with a tick")
+        pg.click("#menu-view"); pg.click("#menu-view-side")
+        check(not shown(".sidebar"), "View > \"Change it\" panel hides the right side")
+        pg.reload(); pg.wait_for_function("document.getElementById('status').dataset.ready === '1'")
+        check(shown("#element-list") and not shown(".sidebar"), "both choices are remembered after a reload")
+        pg.click("#menu-view"); pg.click("#menu-view-side")
+        pg.click("#menu-view"); pg.click("#menu-view-list")
+
+        # --- zoom from the corner
+        z = ev("zoom"); pg.click("#zoom-in")
+        check(ev("zoom") == min(220, z + 10) and pg.inner_text("#zoomval") == f"{ev('zoom')}%", "+ makes it bigger")
+        pg.click("#menu-view"); pg.click("#menu-zoom-out")
+        check(ev("zoom") == z, "View > Smaller makes it smaller again")
+
+        # --- Start over asks first; saying no keeps everything
+        pg.once("dialog", lambda d: d.dismiss())
+        pg.click("#menu-edit"); pg.click("#btn-rebuild"); pg.wait_for_timeout(500)
+        check(panel("a").get("grid") == "major", "Start over asks first; No keeps the changes")
+
+        # --- Help
+        pg.click("#btn-help")
+        check(shown("#help-pop") and "Insert" in pg.inner_text("#help-pop"), "Help shows how to use it")
+        pg.keyboard.press("Escape")
+        check(not errs, f"no page errors {errs}")
+        br.close()
+finally:
+    rmtree(f"figures/{P}")
+print(len(fails), "failure(s)")
+sys.exit(1 if fails else 0)

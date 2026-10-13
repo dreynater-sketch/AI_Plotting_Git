@@ -241,3 +241,15 @@ never committed.)
 The assistant's chat loop (its tools are ready, see above); deleting a
 project; editing data-table values or adding curves to an existing figure;
 figure → saved-code sync; a phone layout; photo-to-data-points.
+
+## Menu bar (2026-10-13)
+- The two rows of buttons are replaced by a menu bar: File (new, open, save a copy,
+  rename, download PDF/SVG/PNG, delete), Edit (undo, redo, start over), Insert (label,
+  arrow, shaded range, legend, grid lines, second scale on the right), View (zoom, fit,
+  list of everything, "Change it" panel), Code, AI (only when there's something in it), Help.
+  Menus open by click, switch by pointing, walk with the arrow keys, close with Esc.
+- The top bar keeps only the figure picker, undo/redo and the profile. Zoom is a small
+  control in the figure's corner.
+- The list of everything is off until View turns it on (remembered per browser); picking a
+  line still shows its numbers. "Start over" asks with a confirm box.
+- tests/test_menubar.py (27 checks); test_accounts waits for the login screen to close.

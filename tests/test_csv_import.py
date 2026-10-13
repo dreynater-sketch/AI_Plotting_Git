@@ -33,7 +33,7 @@ with sync_playwright() as pw:
     pg.goto(f"{B}/?project=qcircle")
     pg.wait_for_function("document.getElementById('status').dataset.ready === '1'")
 
-    pg.click("#btn-new")
+    pg.click("#menu-file"); pg.click("#btn-new")
     check(pg.is_visible("#csv-modal"), "New from CSV opens the dialog")
     pg.set_input_files("#csv-file", csv_path)
     pg.wait_for_selector("#csv-pick:not([hidden])")
@@ -69,7 +69,7 @@ with sync_playwright() as pw:
     check(pg.evaluate("document.querySelectorAll('#data-table-body tr').length") == 40, "data table shows the curve's 40 rows")
 
     # rebuild from the CSV
-    pg.click("#btn-rebuild"); pg.click("#btn-rebuild")
+    pg.once("dialog", lambda d: d.accept()); pg.click("#menu-edit"); pg.click("#btn-rebuild")
     pg.wait_for_function("document.getElementById('status').textContent.startsWith('Started over')", timeout=30000)
     check(disk()["panels"][0]["xlabel"]["text"] == "time (h)", "Rebuild regenerates from the saved CSV + column picks")
 
@@ -89,7 +89,7 @@ with sync_playwright() as pw:
     code.close()
 
     # bad file
-    pg.click("#btn-new")
+    pg.click("#menu-file"); pg.click("#btn-new")
     bad = os.path.join(os.path.dirname(csv_path), "notes.txt")
     open(bad, "w").write("just some words\nand more words\n")
     pg.set_input_files("#csv-file", bad)

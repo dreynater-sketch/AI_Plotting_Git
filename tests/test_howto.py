@@ -116,8 +116,8 @@ try:
 
         json.dump(howto, open(f"figures/{P}/howto.json", "w", encoding="utf-8"), ensure_ascii=False)
         pg.reload()
-        pg.wait_for_selector("#btn-howto:not([hidden])", timeout=15000)
-        pg.click("#btn-howto")
+        pg.wait_for_selector("#btn-howto:not([hidden])", state="attached", timeout=15000)
+        pg.click("#menu-ai"); pg.click("#btn-howto")
         pg.wait_for_selector("#howto-body:not([hidden])")
         check(pg.inner_text("#howto-idea") == ANSWER["idea"], "the idea is shown")
         check(pg.locator("#howto-math img").count() == 1 and "x = 1" in pg.inner_text("#howto-math")

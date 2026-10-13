@@ -37,7 +37,7 @@ try:
         br = pw.chromium.launch(channel="msedge")
         ctx = br.new_context(viewport={"width": 1500, "height": 850})
         pg = ctx.new_page(); errs = []; pg.on("pageerror", lambda e: errs.append(str(e)))
-        loaded = lambda: pg.wait_for_function("document.getElementById('status').dataset.ready === '1'", timeout=30000)
+        loaded = lambda: pg.wait_for_function("document.getElementById('status').dataset.ready === '1' && document.getElementById('auth-screen').hidden", timeout=30000)
         settle = lambda: pg.wait_for_function("!savePending && !inFlight && !needsSave && !historyPending", timeout=30000)
         msg = lambda: pg.inner_text("#auth-msg")
         def signup(name, email, pw_):
@@ -125,7 +125,7 @@ try:
         pg.goto(B + "/?project=qcircle"); loaded()
         me = pg.evaluate("fetch('/api/auth/me').then(r => r.json())")
         keyed = me.get("assistant") is True
-        check(me.get("ai_usage", {}).get("cap") == 0 and (not keyed or pg.is_visible("#btn-ai-edit")),
+        check(me.get("ai_usage", {}).get("cap") == 0 and (not keyed or pg.evaluate("!document.getElementById('btn-ai-edit').hidden")),
               f"members get AI with a monthly cap (here $0): {me.get('ai_usage')}")
         st = pg.evaluate("""fetch('/api/assistant/edit/qcircle', {method: 'POST', headers: {'Content-Type': 'application/json'},
                              body: JSON.stringify({request: 'bigger fonts'})}).then(r => r.status)""")
