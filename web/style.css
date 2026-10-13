@@ -181,13 +181,53 @@ main {
 
 .canvas svg { display: block; }
 
-/* zoom: a small control floating in the figure area's corner */
+/* ------------------------------------------------- left tool strip */
+.toolstrip {
+  flex: none; width: 48px; display: flex; flex-direction: column; gap: 2px;
+  padding: 8px 6px; background: var(--surface); border-right: 1px solid var(--line);
+  overflow-y: auto; overflow-x: hidden; transition: width 0.12s;
+}
+.toolstrip.wide { width: 128px; }
+.toolstrip .tool {
+  display: flex; align-items: center; gap: 9px; width: 100%; height: 34px;
+  padding: 0 7px; border: none; background: none; border-radius: 6px; color: var(--ink-soft);
+}
+.toolstrip .tool:hover:not(:disabled) { background: #eef3fd; color: var(--sel); border: none; }
+.toolstrip .ti {
+  flex: none; width: 20px; height: 20px; fill: none; stroke: currentColor;
+  stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round;
+}
+.toolstrip .ti .fill { fill: currentColor; fill-opacity: 0.18; }
+.toolstrip .tl { font-size: 12.5px; color: var(--ink); white-space: nowrap; }
+.toolstrip:not(.wide) .tl { display: none; }
+.toolstrip hr { width: 100%; border: none; border-top: 1px solid var(--line-soft); margin: 4px 0; }
+.toolstrip .spacer { flex: 1; }
+#tool-ai { color: #6b3fc4; }
+#tool-expand .ti { transition: transform 0.12s; }
+.toolstrip.wide #tool-expand .ti { transform: rotate(180deg); }
+
+/* ------------------------------------------------- bottom status bar */
+.statusbar {
+  flex: none; display: flex; align-items: center; gap: 4px; height: 30px;
+  padding: 0 8px 0 12px; background: var(--surface); border-top: 1px solid var(--line);
+  font-size: 12px; color: var(--ink-soft); white-space: nowrap; overflow: hidden;
+}
+.statusbar .status { min-width: 0; text-align: left; margin-right: 10px; overflow: hidden; text-overflow: ellipsis; }
+.sb-item { padding: 0 10px; border-left: 1px solid var(--line-soft); }
+.sb-item:first-of-type { border-left: none; }
+.sb-xy { font-variant-numeric: tabular-nums; font-family: var(--mono); font-size: 11.5px; min-width: 150px; }
+.sb-xy:empty { display: none; }
+#sb-picked { overflow: hidden; text-overflow: ellipsis; max-width: 320px; }
+#sb-picked em { font-style: normal; color: var(--ink-soft); }
+.sb-btn {
+  border: none; border-left: 1px solid var(--line-soft); border-radius: 0; background: none;
+  color: var(--ink-soft); font-size: 12px; height: 22px; padding: 0 10px;
+}
+.sb-btn:hover:not(:disabled) { background: #eef3fd; color: var(--sel); border-color: var(--line-soft); }
+#sb-list[aria-expanded="true"] { color: var(--sel); }
 .zoomctl {
-  position: absolute; right: 14px; bottom: 12px; z-index: 20;
-  display: flex; align-items: center; gap: 4px;
-  padding: 3px 6px; font-size: 12px; color: var(--ink-soft);
-  background: rgba(255, 255, 255, 0.92); border: 1px solid var(--line);
-  border-radius: 999px; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  display: flex; align-items: center; gap: 4px; padding: 0 8px;
+  border-left: 1px solid var(--line-soft);
 }
 .zoomctl input[type=range] { width: 90px; }
 .zoomctl #zoomval { font-variant-numeric: tabular-nums; min-width: 36px; text-align: right; }

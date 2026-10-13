@@ -403,6 +403,7 @@ function clientToSvg(evt) {
 function applySvg(svgText) {
   canvas.innerHTML = svgText;
   svgEl = canvas.querySelector('svg');
+  refreshSizeLabel();
   svgEl.removeAttribute('width');
   svgEl.removeAttribute('height');
   applyZoom();
@@ -819,6 +820,7 @@ function setSelection(ids) {
   refreshPeerBar();
   markList();
   drawOutlines();
+  refreshPickedLabel();
 }
 
 function toggleSelection(id) {
@@ -2672,13 +2674,18 @@ window.addEventListener('keydown', (e) => {
 /* View: the list of everything (bottom) and the "Change it" panel (right).
  * Remembered per browser. */
 const VIEW_KEY = 'figforge.view';
-const view = { list: false, side: true };
+const view = { list: false, side: true, wide: false };
 try { Object.assign(view, JSON.parse(localStorage.getItem(VIEW_KEY) || '{}')); } catch { /* defaults */ }
 function applyView() {
   $('dock').classList.toggle('list-on', view.list);
   document.body.classList.toggle('no-side', !view.side);
   $('menu-view-list').setAttribute('aria-checked', String(view.list));
   $('menu-view-side').setAttribute('aria-checked', String(view.side));
+  $('sb-list').setAttribute('aria-expanded', String(view.list));
+  $('sb-list').textContent = view.list ? '▾ List' : '▴ List';
+  $('toolstrip').classList.toggle('wide', view.wide);
+  $('tool-expand').setAttribute('aria-expanded', String(view.wide));
+  $('tool-expand').title = view.wide ? 'Hide the names' : 'Show the names';
 }
 function toggleView(key) {
   view[key] = !view[key];
@@ -2689,6 +2696,49 @@ function toggleView(key) {
 applyView();
 $('menu-view-list').onclick = () => toggleView('list');
 $('menu-view-side').onclick = () => toggleView('side');
+
+/* Left tool strip: the most-used things, one click each. The bottom button
+ * shows or hides their names. */
+const toolFor = { 'tool-label': 'btn-add-label', 'tool-arrow': 'btn-add-arrow', 'tool-span': 'menu-add-span',
+                  'tool-legend': 'menu-add-legend', 'tool-grid': 'menu-add-grid', 'tool-ai': 'btn-ai-edit',
+                  'tool-code': 'py-view', 'tool-pdf': 'dl-pdf' };
+for (const [tool, target] of Object.entries(toolFor)) $(tool).onclick = () => $(target).click();
+$('tool-expand').onclick = () => toggleView('wide');
+
+/* Bottom bar: the list of everything, the figure size, what's picked and
+ * where the pointer is in the plot's own numbers. */
+$('sb-list').onclick = () => toggleView('list');
+$('sb-size').onclick = () => {
+  setSelection([]);   // the whole-figure settings show when nothing is picked
+  if (!view.side) toggleView('side');
+  $('f-fig-preset').focus();
+};
+function refreshSizeLabel() {
+  if (spec?.size_in) $('sb-size').textContent = `${spec.size_in[0]} × ${spec.size_in[1]} in`;
+}
+function refreshPickedLabel() {
+  const sel = selected();
+  $('sb-picked').innerHTML = !sel.length ? 'Nothing picked'
+    : sel.length === 1 ? `Picked: ${chipLabel(sel[0])}` : `${sel.length} things picked`;
+}
+/** A number shown to about 1/1000 of what the axis spans. */
+function shortNumber(v, lim, scale) {
+  if (scale === 'log') return Number(v.toPrecision(4)).toString();
+  const range = Math.abs(lim[1] - lim[0]) || 1;
+  const d = Math.min(8, Math.max(0, Math.ceil(-Math.log10(range / 1000))));
+  return v.toFixed(d);
+}
+$('canvas-wrap').addEventListener('pointermove', (e) => {
+  if (!geometry || !svgEl) return;
+  const pt = clientToSvg(e);
+  const pid = panelAt(pt);
+  if (!pid) { $('sb-xy').textContent = ''; return; }
+  const g = geometry.panels[pid];
+  const [x, y] = svgToData(pid, pt.x, pt.y);
+  const where = Object.keys(geometry.panels).length > 1 ? `(${pid})  ` : '';
+  $('sb-xy').textContent = `${where}x ${shortNumber(x, g.xlim, g.xscale)}   y ${shortNumber(y, g.ylim, g.yscale)}`;
+});
+$('canvas-wrap').addEventListener('pointerleave', () => { $('sb-xy').textContent = ''; });
 $('menu-zoom-in').onclick = $('zoom-in').onclick = () => setZoom(zoom + 10);
 $('menu-zoom-out').onclick = $('zoom-out').onclick = () => setZoom(zoom - 10);
 $('menu-fit').onclick = () => fit();
@@ -3903,6 +3953,7 @@ async function boot() {
   assistantOn = !!me.assistant;
   $('btn-ai').hidden = !assistantOn;
   $('btn-ai-edit').hidden = !assistantOn;
+  $('tool-ai').hidden = !assistantOn;
   $('menu-ai-new').hidden = !assistantOn;
   refreshAiMenu();
   aiUsage = me.ai_usage ?? null;

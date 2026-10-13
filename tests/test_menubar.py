@@ -1,8 +1,10 @@
 """The menu bar (File, Edit, Insert, View, Code, AI, Help): menus open and
 close by click, pointing and keys; Insert adds a legend, grid lines, a second
 scale on the right and a shaded range; View shows or hides the list of
-everything and the "Change it" panel (remembered); zoom from the corner
-control; Start over asks first."""
+everything and the "Change it" panel (remembered); zoom from the bottom bar;
+Start over asks first. The left tool strip (one-click tools, names shown or
+hidden) and the bottom bar (what's picked, the pointer's x/y in the plot's
+numbers, the figure size, the list)."""
 import os as _os
 ROOT_DIR = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
 import json, os, sys, urllib.request
@@ -109,6 +111,45 @@ try:
         pg.once("dialog", lambda d: d.dismiss())
         pg.click("#menu-edit"); pg.click("#btn-rebuild"); pg.wait_for_timeout(500)
         check(panel("a").get("grid") == "major", "Start over asks first; No keeps the changes")
+
+        # --- left tool strip
+        n = len(panel("a").get("texts") or [])
+        ev("setSelection(['panel:a'])"); pg.click("#tool-label"); settle()
+        check(len(panel("a").get("texts") or []) == n + 1, "tool strip: Label adds one")
+        check(not ev("document.getElementById('toolstrip').classList.contains('wide')")
+              and not shown("#tool-label .tl"), "tool strip starts as icons only")
+        pg.click("#tool-expand")
+        check(shown("#tool-label .tl") and pg.inner_text("#tool-label") == "Label", "the bottom button shows the names")
+        pg.reload(); pg.wait_for_function("document.getElementById('status').dataset.ready === '1'")
+        check(shown("#tool-label .tl"), "…and it's remembered")
+        pg.click("#tool-expand")
+        check(not shown("#tool-label .tl"), "…and hides them again")
+
+        # --- bottom bar
+        size = disk()["size_in"]
+        check(pg.inner_text("#sb-size") == f"{size[0]:g} × {size[1]:g} in", f"bottom bar shows the size ({pg.inner_text('#sb-size')})")
+        ev("setSelection(['a_meas'])")
+        check(pg.inner_text("#sb-picked").startswith("Picked:"), "…and what's picked")
+        ev("setSelection([])")
+        check(pg.inner_text("#sb-picked") == "Nothing picked", "…or that nothing is")
+        box = ev("(() => { const g = geometry.panels.a; const r = svgEl.getBoundingClientRect();"
+                 " const k = r.width / geometry.width; return [r.left + (g.bbox[0] + g.bbox[2] / 2) * k,"
+                 " r.top + (g.bbox[1] + g.bbox[3] / 2) * k]; })()")
+        pg.mouse.move(box[0], box[1])
+        xy = pg.inner_text("#sb-xy"); g = ev("geometry.panels.a")
+        try:
+            parts = xy.split(); x, y = float(parts[parts.index("x") + 1]), float(parts[parts.index("y") + 1])
+            mid_ok = (abs(x - sum(g["xlim"]) / 2) < abs(g["xlim"][1] - g["xlim"][0]) * 0.02
+                      and abs(y - sum(g["ylim"]) / 2) < abs(g["ylim"][1] - g["ylim"][0]) * 0.02)
+        except (ValueError, IndexError):
+            mid_ok = False
+        check(mid_ok, f"pointer in the middle of plot (a) reads the middle of its axes ({xy})")
+        pg.mouse.move(5, 5)
+        check(pg.inner_text("#sb-xy") == "", "…and clears when the pointer leaves")
+        pg.click("#sb-list")
+        check(shown("#element-list") and pg.inner_text("#sb-list") == "▾ List", "▴ List opens the list of everything")
+        pg.click("#sb-list")
+        check(not shown("#dock"), "…and closes it")
 
         # --- Help
         pg.click("#btn-help")

@@ -253,3 +253,11 @@ figure → saved-code sync; a phone layout; photo-to-data-points.
 - The list of everything is off until View turns it on (remembered per browser); picking a
   line still shows its numbers. "Start over" asks with a confirm box.
 - tests/test_menubar.py (27 checks); test_accounts waits for the login screen to close.
+
+## Tool strip + status bar (2026-10-13)
+- Left tool strip (like Photoshop): Label, Arrow, Shade, Legend, Grid, Ask AI, Code, PDF.
+  Icons only by default; the bottom button shows/hides the names (remembered).
+- Bottom status bar (like Origin): status message, what's picked, the pointer's x/y in the
+  plot's own numbers, the figure size (click: whole-figure settings), zoom, and ▴ List
+  (opens/closes the list of everything).
+- test_menubar.py now 39 checks.

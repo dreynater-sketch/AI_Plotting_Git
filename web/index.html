@@ -104,7 +104,6 @@
     </div>
   </nav>
   <div class="spacer"></div>
-  <div class="status" id="status" role="status"></div>
   <select id="project-select" title="Open another figure"></select>
   <div class="tools">
     <button id="btn-undo" class="icon" title="Undo (Ctrl+Z)" aria-label="Undo">↶</button>
@@ -147,17 +146,25 @@
 </header>
 
 <main>
+  <!-- Left: the tools used most. The bottom button opens it wider (with
+       names) or closes it to icons only. -->
+  <nav class="toolstrip" id="toolstrip" aria-label="Tools">
+    <button id="tool-label" class="tool" title="Add a label"><svg class="ti" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 6V4h14v2M12 4v16M9 20h6"/></svg><span class="tl">Label</span></button>
+    <button id="tool-arrow" class="tool" title="Add an arrow"><svg class="ti" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 19 19 5M10 5h9v9"/></svg><span class="tl">Arrow</span></button>
+    <button id="tool-span" class="tool" title="Shade a range of the plot"><svg class="ti" viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="3" width="8" height="18" rx="1" class="fill"/><path d="M3 21h18"/></svg><span class="tl">Shade</span></button>
+    <button id="tool-legend" class="tool" title="Show which line is which"><svg class="ti" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h4M4 12h4M4 17h4M11 7h9M11 12h9M11 17h9"/></svg><span class="tl">Legend</span></button>
+    <button id="tool-grid" class="tool" title="Grid lines across the plot"><svg class="ti" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16v16H4zM4 12h16M12 4v16"/></svg><span class="tl">Grid</span></button>
+    <hr>
+    <button id="tool-ai" class="tool" title="Tell Claude what to change" hidden><svg class="ti" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8zM18 15l.8 2.2L21 18l-2.2.8L18 21l-.8-2.2L15 18l2.2-.8z"/></svg><span class="tl">Ask AI</span></button>
+    <button id="tool-code" class="tool" title="See and change the Python code"><svg class="ti" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 7l-5 5 5 5M15 7l5 5-5 5"/></svg><span class="tl">Code</span></button>
+    <button id="tool-pdf" class="tool" title="Download the figure as a PDF"><svg class="ti" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg><span class="tl">PDF</span></button>
+    <span class="spacer"></span>
+    <button id="tool-expand" class="tool" title="Show the names" aria-expanded="false"><svg class="ti" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg><span class="tl">Hide names</span></button>
+  </nav>
   <section class="stage" id="stage">
     <div class="canvas-area">
       <div class="canvas-wrap" id="canvas-wrap">
         <div class="canvas" id="canvas"></div>
-      </div>
-      <div class="zoomctl" title="How big the figure looks on screen">
-        <button id="zoom-out" class="icon" aria-label="Smaller">−</button>
-        <input type="range" id="zoom" min="40" max="220" value="100" step="5" aria-label="Zoom">
-        <button id="zoom-in" class="icon" aria-label="Bigger">+</button>
-        <span id="zoomval">100%</span>
-        <button id="btn-fit" class="link" title="Make the figure fit the window">Fit</button>
       </div>
     </div>
     <!-- The bottom bar: every part of the figure, and the numbers behind a
@@ -700,6 +707,23 @@
 
   </aside>
 </main>
+<!-- Bottom: what is going on, what is picked, where the pointer is in
+     the plot, the figure size, zoom, and the list of everything. -->
+<footer class="statusbar" id="statusbar">
+  <div class="status" id="status" role="status"></div>
+  <span class="sb-item" id="sb-picked" title="What is picked">Nothing picked</span>
+  <span class="sb-item sb-xy" id="sb-xy" title="Where the pointer is, in the plot's own numbers"></span>
+  <span class="spacer"></span>
+  <button class="sb-item sb-btn" id="sb-size" title="The figure's size when printed. Click to change it"></button>
+  <div class="zoomctl" title="How big the figure looks on screen">
+    <button id="zoom-out" class="icon" aria-label="Smaller">−</button>
+    <input type="range" id="zoom" min="40" max="220" value="100" step="5" aria-label="Zoom">
+    <button id="zoom-in" class="icon" aria-label="Bigger">+</button>
+    <span id="zoomval">100%</span>
+    <button id="btn-fit" class="link" title="Make the figure fit the window">Fit</button>
+  </div>
+  <button class="sb-item sb-btn" id="sb-list" aria-expanded="false" title="Show or hide the list of everything in the figure">▴ List</button>
+</footer>
 
 <!-- New project from a CSV: pick the file, then the x and y columns. -->
 <div class="modal" id="csv-modal" hidden>
