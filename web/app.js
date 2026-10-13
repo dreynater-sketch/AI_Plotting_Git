@@ -2739,8 +2739,8 @@ $('canvas-wrap').addEventListener('pointermove', (e) => {
   $('sb-xy').textContent = `${where}x ${shortNumber(x, g.xlim, g.xscale)}   y ${shortNumber(y, g.ylim, g.yscale)}`;
 });
 $('canvas-wrap').addEventListener('pointerleave', () => { $('sb-xy').textContent = ''; });
-$('menu-zoom-in').onclick = $('zoom-in').onclick = () => setZoom(zoom + 10);
-$('menu-zoom-out').onclick = $('zoom-out').onclick = () => setZoom(zoom - 10);
+$('menu-zoom-in').onclick = $('zoom-in').onclick = () => setZoom(zoom + 10, true);
+$('menu-zoom-out').onclick = $('zoom-out').onclick = () => setZoom(zoom - 10, true);
 $('menu-fit').onclick = () => fit();
 $('menu-undo').onclick = () => undo();
 $('menu-redo').onclick = () => redo();
@@ -2999,9 +2999,16 @@ $('btn-rebuild').onclick = async () => {
   }
 };
 
-$('zoom').addEventListener('input', (e) => setZoom(parseInt(e.target.value, 10)));
+$('zoom').addEventListener('input', (e) => setZoom(parseInt(e.target.value, 10), true));
 
-function setZoom(z) {
+/* While the zoom is "fit to the window", the figure follows the space it
+ * has: picking a curve opens the numbers under it and the figure shrinks to
+ * stay whole; letting go gives the room back. A zoom set by hand stays. */
+let zoomFits = true;
+new ResizeObserver(() => { if (zoomFits && geometry) fit(); }).observe($('canvas-wrap'));
+
+function setZoom(z, byHand = false) {
+  if (byHand) zoomFits = false;
   zoom = Math.max(40, Math.min(220, Math.round(z)));
   $('zoom').value = zoom;
   $('zoomval').textContent = zoom + '%';
@@ -3015,6 +3022,7 @@ function fit() {
   const h = $('canvas-wrap').clientHeight - 40;
   const scale = Math.min(w / geometry.width, h / geometry.height);
   setZoom(scale * 100);
+  zoomFits = true;
 }
 
 /* The bottom bar's height: drag its top edge. Remembered per browser. */

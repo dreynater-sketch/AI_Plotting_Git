@@ -101,6 +101,22 @@ try:
         pg.click("#menu-view"); pg.click("#menu-view-side")
         pg.click("#menu-view"); pg.click("#menu-view-list")
 
+        # --- the figure follows its space while the zoom is "fit"
+        pg.set_viewport_size({"width": 1400, "height": 600}); pg.wait_for_timeout(400)  # height-bound
+        ev("setSelection([])"); pg.wait_for_timeout(300); z0 = ev("zoom")
+        ev("setSelection(['a_meas'])"); pg.wait_for_selector("#data-panel:not([hidden])"); pg.wait_for_timeout(400)
+        z1 = ev("zoom")
+        fits = ev("(() => { const w = document.getElementById('canvas-wrap'); const r = svgEl.getBoundingClientRect();"
+                  " const b = w.getBoundingClientRect(); return r.bottom <= b.bottom + 1; })()")
+        check(z1 < z0 and fits, f"picking a curve opens its numbers and the figure shrinks to stay whole ({z0}% -> {z1}%)")
+        ev("setSelection([])"); pg.wait_for_timeout(400)
+        check(ev("zoom") == z0, f"letting go gives the room back ({ev('zoom')}%)")
+        pg.click("#zoom-in"); z2 = ev("zoom")
+        ev("setSelection(['a_meas'])"); pg.wait_for_selector("#data-panel:not([hidden])"); pg.wait_for_timeout(400)
+        check(ev("zoom") == z2, "a zoom set by hand stays put")
+        ev("setSelection([])"); pg.click("#btn-fit")
+        pg.set_viewport_size({"width": 1400, "height": 850}); pg.wait_for_timeout(300)
+
         # --- zoom from the corner
         z = ev("zoom"); pg.click("#zoom-in")
         check(ev("zoom") == min(220, z + 10) and pg.inner_text("#zoomval") == f"{ev('zoom')}%", "+ makes it bigger")
@@ -132,6 +148,7 @@ try:
         check(pg.inner_text("#sb-picked").startswith("Picked:"), "…and what's picked")
         ev("setSelection([])")
         check(pg.inner_text("#sb-picked") == "Nothing picked", "…or that nothing is")
+        pg.wait_for_timeout(400)  # the figure re-fits once the numbers close
         box = ev("(() => { const g = geometry.panels.a; const r = svgEl.getBoundingClientRect();"
                  " const k = r.width / geometry.width; return [r.left + (g.bbox[0] + g.bbox[2] / 2) * k,"
                  " r.top + (g.bbox[1] + g.bbox[3] / 2) * k]; })()")
