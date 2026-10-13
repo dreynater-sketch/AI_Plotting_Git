@@ -3706,7 +3706,7 @@ window.addEventListener('beforeunload', (e) => {
 /* --------------------------------------------------------------- boot */
 
 async function pickProject() {
-  const r = await fetch('/api/figures');
+  const r = await earlyOr('figures', '/api/figures');
   const listing = await r.json();
   const names = listing.figures || [];
   // Only worth a badge when running on this computer; online is the norm.
@@ -3941,6 +3941,7 @@ window.fetch = async (...args) => {
 /** Who's here, before anything else loads: local mode needs no account;
  *  hosted mode shows the editor only to a signed-in user. */
 async function boot() {
+  startEarlyLoad();
   const link = takeAuthFragment();
   if (link?.error_description) {
     showAuth('login', link.error_description.replace(/\+/g, ' '), 'err');
@@ -3975,6 +3976,31 @@ async function boot() {
   startEditor();
 }
 
+/** Opening a figure means asking the server four things: who you are,
+ *  your projects, the figure and its undo history. They don't depend on
+ *  each other, so all four go out at once; startEditor() takes the ones
+ *  it can use. (Signed out, or a different figure picked: they're dropped.) */
+let early = null;
+function startEarlyLoad() {
+  if (location.hash.includes('access_token')) return;  // signing in first
+  const name = new URLSearchParams(location.search).get('project') || readLastProject();
+  early = { figures: fetch('/api/figures') };
+  if (name && /^[A-Za-z0-9_-]+$/.test(name)) {
+    early.name = name;
+    early.figure = fetch(`/api/figure/${name}`);
+    early.history = fetch(`/api/history/${name}`);
+  }
+  for (const k of ['figures', 'figure', 'history']) early[k]?.catch(() => {});
+}
+
+/** One of the early requests, if it worked; otherwise ask again now. */
+async function earlyOr(key, url) {
+  const p = early?.[key];
+  if (early) early[key] = null;  // each is used once
+  const r = p && await p.catch(() => null);
+  return r && r.status !== 401 ? r : fetch(url);
+}
+
 // An email link opened in a tab that already shows FigForge only changes the
 // fragment -- no page load, so boot() wouldn't see it. Reload to run it.
 window.addEventListener('hashchange', () => {
@@ -3995,9 +4021,10 @@ async function startEditor() {
     // `history` in this file is the undo stack; the browser's is window.history.
     window.history.replaceState(null, '', '?project=' + encodeURIComponent(FIGURE));
 
+    if (early && early.name !== FIGURE) early.figure = early.history = null;
     const [r, hr] = await Promise.all([
-      fetch(`/api/figure/${FIGURE}`),
-      fetch(`/api/history/${FIGURE}`),
+      earlyOr('figure', `/api/figure/${FIGURE}`),
+      earlyOr('history', `/api/history/${FIGURE}`),
     ]);
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || r.statusText);

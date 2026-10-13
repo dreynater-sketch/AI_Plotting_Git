@@ -17,6 +17,7 @@ email; Supabase sends the invite and the link lets them pick a password.
 
 import base64
 import json
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -43,11 +44,14 @@ def _jwt_exp(token):
 
 class SupabaseAuth:
     CACHE_SECONDS = 300  # re-check a token with Supabase at least this often
+    REFRESH_SHARE_SECONDS = 30
 
     def __init__(self, url, key):
         self.base = url.rstrip("/") + "/auth/v1"
         self.key = key
         self._cache = {}  # access token -> (user, valid until)
+        self._refreshed = {}  # refresh token -> (new session, shared until)
+        self._refresh_lock = threading.Lock()
 
     # ------------------------------------------------------------ transport
     def _call(self, method, path, body=None, token=None, query=None):
@@ -89,8 +93,19 @@ class SupabaseAuth:
                           query={"grant_type": "password"})
 
     def refresh(self, refresh_token):
-        return self._call("POST", "/token", {"refresh_token": refresh_token},
-                          query={"grant_type": "refresh_token"})
+        """A page opening sends several requests at once, each carrying the
+        same expired session. Supabase hands out a new refresh token per use,
+        so the first renews it and the rest, for a short while, share that."""
+        with self._refresh_lock:
+            hit = self._refreshed.get(refresh_token)
+            if hit and hit[1] > time.time():
+                return hit[0]
+            sess = self._call("POST", "/token", {"refresh_token": refresh_token},
+                              query={"grant_type": "refresh_token"})
+            if len(self._refreshed) > 1000:
+                self._refreshed.clear()
+            self._refreshed[refresh_token] = (sess, time.time() + self.REFRESH_SHARE_SECONDS)
+            return sess
 
     def user(self, access_token):
         """The user a token belongs to, verified by Supabase (cached briefly)."""

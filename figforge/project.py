@@ -30,11 +30,13 @@ Where the folders live depends on where FigForge runs:
 
 import contextlib
 import copy
+import http.client
 import io
 import json
 import os
 import shutil
 import tempfile
+import threading
 
 import numpy as np
 
@@ -44,6 +46,8 @@ FIGURES = os.path.join(ROOT, "figures")
 # What makes up a project in storage: its spec, its data, and its undo stacks.
 # (Seeding copies only the first three; history starts empty.)
 PROJECT_FILES = ("spec.json", "data/curves.npz", "data/vna_sweep.csv", "history.json")
+
+_LOCAL = threading.local()  # per-thread storage connection (SupabaseStore._conn)
 
 
 class LocalStore:
@@ -126,25 +130,47 @@ class SupabaseStore:
         self._ready = False
 
     # ------------------------------------------------------------ transport
+    def _conn(self, fresh=False):
+        """One kept-alive connection per thread: a new HTTPS handshake costs
+        about as much as the read itself, and opening a figure takes several."""
+        from urllib.parse import urlsplit
+        conn = getattr(_LOCAL, "supabase", None)
+        if fresh or conn is None:
+            if conn is not None:
+                conn.close()
+            u = urlsplit(self.base)
+            cls = http.client.HTTPSConnection if u.scheme == "https" else http.client.HTTPConnection
+            conn = _LOCAL.supabase = cls(u.netloc, timeout=30)
+        return conn
+
     def _call(self, method, path, body=None, headers=None, ok404=False):
-        import urllib.error
-        import urllib.request
+        from urllib.parse import urlsplit
         if isinstance(body, (dict, list)):
             body = json.dumps(body).encode("utf-8")
             headers = {"Content-Type": "application/json", **(headers or {})}
-        req = urllib.request.Request(self.base + path, data=body, method=method,
-                                     headers={**self.headers, **(headers or {})})
-        try:
-            with urllib.request.urlopen(req, timeout=30) as r:
-                return r.read()
-        except urllib.error.HTTPError as e:
-            detail = e.read()[:300].decode("utf-8", "replace")
-            # Storage reports a missing object as 400 {"statusCode":"404"} as
-            # well as a plain 404.
-            if ok404 and (e.code == 404 or '"404"' in detail or "not_found" in detail
-                          or "not found" in detail.lower()):
-                return None
-            raise RuntimeError(f"Supabase storage {method} {path}: {e.code} {detail}") from None
+        url = urlsplit(self.base).path + path
+        hdrs = {**self.headers, **(headers or {})}
+        for attempt in (0, 1):
+            conn = self._conn(fresh=attempt == 1)
+            try:
+                conn.request(method, url, body=body, headers=hdrs)
+                r = conn.getresponse()
+                data = r.read()
+                break
+            except (OSError, http.client.HTTPException):
+                # A kept-alive connection the server has since dropped: once more on a new one.
+                conn.close()
+                if attempt:
+                    raise
+        if r.status < 400:
+            return data
+        detail = data[:300].decode("utf-8", "replace")
+        # Storage reports a missing object as 400 {"statusCode":"404"} as
+        # well as a plain 404.
+        if ok404 and (r.status == 404 or '"404"' in detail or "not_found" in detail
+                      or "not found" in detail.lower()):
+            return None
+        raise RuntimeError(f"Supabase storage {method} {path}: {r.status} {detail}") from None
 
     def _obj(self, key):
         from urllib.parse import quote
@@ -217,7 +243,11 @@ class SupabaseStore:
         if not names:
             self._seed()
             _, names = self._list(self.PREFIX.rstrip("/"))
-        return sorted(n for n in names if self.has(f"{n}/spec.json"))
+        # Only folders that hold a figure -- checked side by side, not one by one.
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max(1, min(8, len(names)))) as pool:
+            real = list(pool.map(lambda n: self.has(f"{n}/spec.json"), names))
+        return sorted(n for n, ok in zip(names, real) if ok)
 
     def project_exists(self, name):
         return bool(self._walk(self.PREFIX + name))
@@ -296,9 +326,13 @@ class Figure:
 
     # ---------------------------------------------------------------- spec
     def load_spec(self):
-        return json.loads(self.store.read(self._rel("spec.json")).decode("utf-8"))
+        data, self._spec_bytes = getattr(self, "_spec_bytes", None), None
+        if data is None:
+            data = self.store.read(self._rel("spec.json"))
+        return json.loads(data.decode("utf-8"))
 
     def save_spec(self, spec):
+        self._spec_bytes = None
         self.store.write(self._rel("spec.json"),
                     json.dumps(spec, indent=2, ensure_ascii=False).encode("utf-8"))
 
@@ -430,7 +464,10 @@ class Figure:
             yield path
 
     def exists(self):
-        return self.store.has(self._rel("spec.json"))
+        # Online, finding out means downloading it: keep it for the
+        # load_spec() that nearly always comes next.
+        self._spec_bytes = self.store.read(self._rel("spec.json"))
+        return self._spec_bytes is not None
 
 
 def list_figures(store=None):

@@ -86,6 +86,14 @@ try:
         check(cookies["ff_at"]["httpOnly"] and cookies["ff_rt"]["httpOnly"], "session cookies are HttpOnly")
         check(pg.evaluate("document.cookie").find("ff_") == -1, "page scripts can't read the session")
 
+        # --- an hour later the short sign-in is gone; the page's requests all
+        # go out at once, and the one renewal they share keeps Ada signed in
+        keep = [c for c in ctx.cookies() if c["name"] != "ff_at"]
+        ctx.clear_cookies(); ctx.add_cookies(keep)
+        pg.reload(); loaded()
+        check(pg.inner_text("#account-name") == "Ada" and pg.evaluate("spec") is not None,
+              "expired sign-in: renewed once for all of the page's requests, still signed in")
+
         # --- Ada edits her figure (the Q-circle one; other starter projects
         # depend on what's in the local figures/ folder)
         pg.goto(B + "/?project=qcircle"); loaded()

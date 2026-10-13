@@ -56,7 +56,9 @@ gzipped (X-Body-Encoding: gzip up, Content-Encoding: gzip down).
 """
 
 import base64
+import copy
 import gzip
+import hashlib
 import http.cookies
 import io
 import json
@@ -64,6 +66,7 @@ import mimetypes
 import os
 import posixpath
 import re
+import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlparse
@@ -79,6 +82,9 @@ OPEN_SIGNUP = os.environ.get("FIGFORGE_OPEN_SIGNUP") == "1"
 SCRIPT_MAX = 512 * 1024  # a hand-edited figure.py; the generated one is ~6 KB
 SESSION_MAX_AGE = 30 * 24 * 3600  # cookies; Supabase's refresh token outlives the 1 h access token
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+RENDER_CACHE_MAX = 16  # drawn figures kept in memory, newest last
+_RENDER_CACHE = {}
+_RENDER_LOCK = threading.Lock()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -95,7 +101,8 @@ class Handler(BaseHTTPRequestHandler):
         for c in getattr(self, "_cookies", []):
             self.send_header("Set-Cookie", c)
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
+        if "Cache-Control" not in (extra or {}):
+            self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(body)
 
@@ -964,8 +971,21 @@ class Handler(BaseHTTPRequestHandler):
 
     # -------------------------------------------------------------- parts
     def _payload(self, fig, spec):
-        svg, geom = render.render(spec, fig.load_arrays(), preview=True)
-        return {"spec": spec, "svg": svg, "geometry": geom}
+        # Drawing takes about half a second; the same figure opened again (or
+        # undone back to) on this server is handed back from memory instead.
+        arrays = fig.load_arrays()
+        key = (fig.store.cache_key + fig.name,
+               hashlib.sha1(json.dumps(spec, sort_keys=True).encode("utf-8")).hexdigest())
+        with _RENDER_LOCK:
+            hit = _RENDER_CACHE.pop(key, None)
+        if hit is None or hit[0] is not arrays:  # new data since: draw again
+            hit = (arrays, *render.render(spec, arrays, preview=True))
+        with _RENDER_LOCK:
+            _RENDER_CACHE[key] = hit
+            while len(_RENDER_CACHE) > RENDER_CACHE_MAX:
+                _RENDER_CACHE.pop(next(iter(_RENDER_CACHE)))
+        _, svg, geom = hit
+        return {"spec": spec, "svg": svg, "geometry": copy.deepcopy(geom)}
 
     def _static(self, path):
         if path in ("/", ""):
@@ -979,7 +999,20 @@ class Handler(BaseHTTPRequestHandler):
             return self._error(404, "not found")
         ctype = mimetypes.guess_type(full)[0] or "application/octet-stream"
         with open(full, "rb") as f:
-            return self._send(200, f.read(), ctype)
+            body = f.read()
+        # The page's own files: the browser keeps them and only checks they're
+        # unchanged; online, Vercel's servers keep them until the next deploy.
+        etag = '"' + hashlib.sha1(body).hexdigest()[:16] + '"'
+        extra = {"Cache-Control": "no-cache", "ETag": etag}
+        if os.environ.get("VERCEL"):
+            extra["Vercel-CDN-Cache-Control"] = "max-age=86400"
+        if self.headers.get("If-None-Match") == etag:
+            self.send_response(304)
+            for k, v in extra.items():
+                self.send_header(k, v)
+            self.end_headers()
+            return
+        return self._send(200, body, ctype, extra)
 
 
 def serve(host="127.0.0.1", port=8000):
