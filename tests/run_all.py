@@ -37,6 +37,7 @@ SUITES = [
     ("test_howto.py", True),
     ("test_menubar.py", True),
     ("test_fast_open.py", True),
+    ("test_names.py", True),
     ("test_layers.py", False),
     ("test_undo_delete.py", True),
     ("test_box.py", True),

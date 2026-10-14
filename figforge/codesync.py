@@ -703,6 +703,12 @@ def _series(method, args, kw, pnl, taken, array_keys):
     item.update(lrefs)
     # Style keys codegen doesn't write (not matplotlib kwargs) survive.
     style = {key: v for key, v in (item.get("style") or {}).items() if key not in layers.ALL_STYLE}
+    if isinstance(kw.get("levels"), ast.Call):
+        # levels=np.geomspace(...): the log-even bands codegen writes for a
+        # log colour scale -- worked out again from the data, so not stored.
+        kw = {key: v for key, v in kw.items() if key != "levels"}
+        if (item.get("style") or {}).get("levels") is not None:
+            style["levels"] = item["style"]["levels"]
     style.update(layers.style_from_kwargs(kind, {key: _lit(v, key) for key, v in kw.items()
                                                  if key in k["style"] and key not in as_data}))
     if style or "style" in item:

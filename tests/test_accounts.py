@@ -149,6 +149,17 @@ try:
         check(r.ok and r.json()["figures"] == sorted(seeded + ["bobs"]), "Bob's Save as lands in his space")
         ada_id = ada[0].split("/")[1]
         check(not any(o.startswith(f"users/{ada_id}/bobs") for o in objects()), "…not in Ada's")
+        r = ctx.request.post(B + "/api/project/rename", data=json.dumps({"from": "bobs", "name": "bobs plot"}),
+                             headers={"Content-Type": "application/json"})
+        pg.goto(B + "/?project=bobs%20plot"); loaded()
+        tid = pg.evaluate("spec.panels[0].texts[0].id")
+        pg.evaluate(f"setSelection(['{tid}'])"); pg.click("#f-size-up"); settle()
+        bob_id = next(o for o in objects() if "/bobs plot/" in o).split("/")[1]
+        sp = ctx.request.get(B + "/api/figure/bobs%20plot").json()["spec"]
+        check(r.ok and pg.evaluate("FIGURE") == "bobs plot" and sp["panels"][0]["texts"][0]["size"] == s0 + 1
+              and f"users/{bob_id}/bobs plot/spec.json" in objects(),
+              "online: a name with a space can be renamed to, opened and saved")
+        pg.goto(B + "/?project=qcircle"); loaded()
 
         # --- expired access token: refreshed transparently
         get(M + "/_expire")

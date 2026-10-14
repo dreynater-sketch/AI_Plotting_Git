@@ -111,7 +111,7 @@ function showBanner() {
 }
 
 async function load() {
-  if (!/^[A-Za-z0-9_-]+$/.test(PROJECT)) {
+  if (!/^[A-Za-z0-9_-]+( [A-Za-z0-9_-]+)*$/.test(PROJECT)) {
     block('No project given. Open the code from the <b>figure.py</b> menu in <a href="/">FigForge</a>.');
     return;
   }

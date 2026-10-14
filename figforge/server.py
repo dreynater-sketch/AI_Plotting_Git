@@ -76,7 +76,10 @@ from figforge.auth import AuthError, is_admin, public_user
 from figforge.project import AUTH, ROOT, STORE, Figure, list_figures
 
 WEB = os.path.join(ROOT, "web")
-NAME_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+# Project names: words of letters, digits, - and _, with single spaces between
+# (none at either end: Windows folders and links trip over those).
+NAME_RE = re.compile(r"^[A-Za-z0-9_-]+( [A-Za-z0-9_-]+)*$")
+ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")  # ids inside a figure (curves, labels)
 HISTORY_MAX = 100  # per stack; matches the editor's HISTORY_MAX
 OPEN_SIGNUP = os.environ.get("FIGFORGE_OPEN_SIGNUP") == "1"
 SCRIPT_MAX = 512 * 1024  # a hand-edited figure.py; the generated one is ~6 KB
@@ -239,7 +242,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._error(400, "expected /api/data/<figure>/<series id>")
         fig_name, series_id = parts
         fig = self._figure(fig_name)
-        if not fig or not NAME_RE.match(series_id):
+        if not fig or not ID_RE.match(series_id):
             return self._error(404, "unknown figure or series")
 
         spec = fig.load_spec()
@@ -392,7 +395,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._error(400, "expected {name, csv, x, ys}")
         name = str(body.get("name") or "")
         if not NAME_RE.match(name):
-            return self._error(400, "names may use letters, digits, - and _ only")
+            return self._error(400, "names may use letters, digits, spaces, - and _ only")
         if self.store.project_exists(name):
             return self._error(409, f"a project named '{name}' already exists")
         try:
@@ -467,7 +470,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._error(404, "unknown project")
         name = body.get("name") or ""
         if not NAME_RE.match(name):
-            return self._error(400, "names may use letters, digits, - and _ only")
+            return self._error(400, "names may use letters, digits, spaces, - and _ only")
         if self.store.project_exists(name):
             return self._error(409, f"a project named '{name}' already exists")
         if op == "duplicate":
@@ -732,7 +735,7 @@ class Handler(BaseHTTPRequestHandler):
         name = str(body.get("name") or "")
         idea = str(body.get("idea") or "").strip()
         if not NAME_RE.match(name):
-            return self._error(400, "names may use letters, digits, - and _ only")
+            return self._error(400, "names may use letters, digits, spaces, - and _ only")
         if self.store.project_exists(name):
             return self._error(409, f"a project named '{name}' already exists")
         if not idea:

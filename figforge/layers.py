@@ -20,6 +20,8 @@ for plain lines, so figures made before kinds existed are unchanged.
     words      what the editor calls it
 """
 
+import numpy as np
+
 LINE_STYLE = {"color", "lw", "linewidth", "ls", "linestyle", "marker", "ms",
               "markersize", "mew", "markeredgewidth", "mfc", "markerfacecolor",
               "mec", "markeredgecolor", "alpha", "zorder", "drawstyle"}
@@ -148,6 +150,30 @@ def style_for(series):
         if series.get(field) is not None:
             st.pop(kwname, None)
     return st
+
+
+def log_levels(series):
+    """Contours on a log colour scale: how many bands, spread evenly in log
+    (matplotlib would space them evenly in plain numbers, so a map spanning
+    decades came out nearly one colour). None when not needed: not a
+    contour, not log, or the levels are given as a list."""
+    if kind_of(series) not in ("contour", "contourf"):
+        return None
+    st = series.get("style") or {}
+    if st.get("norm") != "log" or isinstance(st.get("levels"), (list, tuple)):
+        return None
+    return int(st.get("levels") or 12)
+
+
+def geomspace_levels(z, vmin, vmax, n):
+    """n log-even bands over vmin..vmax (or the positive values of z)."""
+    z = np.asarray(z, dtype=float)
+    z = z[np.isfinite(z) & (z > 0)]
+    lo = vmin if vmin and vmin > 0 else (z.min() if z.size else 1.0)
+    hi = vmax if vmax and vmax > 0 else (z.max() if z.size else 10.0)
+    if not hi > lo:
+        hi = lo * 10
+    return np.geomspace(lo, hi, n + 1)
 
 
 def style_from_kwargs(kind, kwargs):

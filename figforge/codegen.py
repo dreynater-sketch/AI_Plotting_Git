@@ -23,7 +23,7 @@ import os
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.patches import FancyArrowPatch
-from matplotlib.ticker import MultipleLocator
+from matplotlib.ticker import LogLocator, MultipleLocator
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 D = np.load(os.path.join(HERE, "data", "curves.npz"))
@@ -72,7 +72,15 @@ def _series_lines(s, axname="ax"):
     args += [f"{kw}={_coord(s[f])}" for kw, f in k["data_kw"].items() if s.get(f) is not None]
     style = dict(k.get("fixed", {}))
     style.update(layers.style_for(s))
+    n = layers.log_levels(s)
+    if n:
+        # Bands spaced evenly in log, like the editor draws them.
+        style.pop("levels", None)
     kw = _kw(style)
+    if n:
+        lev = (f"levels=np.geomspace({style.get('vmin') or f'np.nanmin(np.where({args[2]} > 0, {args[2]}, np.nan))'}, "
+               f"{style.get('vmax') or f'np.nanmax({args[2]})'}, {n + 1})")
+        kw = (kw + ", " if kw else "") + lev
     if kind in layers.LEGEND_KINDS and s.get("label"):
         kw = (kw + ", " if kw else "") + f"label={_s(s['label'])}"
     if kind != "box":
@@ -83,7 +91,7 @@ def _series_lines(s, axname="ax"):
     if kind == "box":
         out.append(f'_b["boxes"][0].set_gid({_s(s["id"])})')
     if cb:
-        out.append("_cb = fig.colorbar(_m, ax=ax)")
+        out.append("_cb = fig.colorbar(_m, ax=ax" + (", ticks=LogLocator())" if n else ")"))
         out.append(f"_cb.ax.tick_params(labelsize={cb.get('tick_size', 10)})")
         if cb.get("label"):
             out.append(f"_cb.set_label({_s(cb['label'])}, fontsize={cb.get('size', 12)}, "

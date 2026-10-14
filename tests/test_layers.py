@@ -154,4 +154,28 @@ new2, res2, _ = ops.apply(k2, [{"name": "style_colormap", "input": {
     "colorbar": "keep", "colorbar_label": "I (a.u.)"}}], a2)
 check(not res2[0]["is_error"] and new2["panels"][0]["series"][0]["style"]["cmap"] == "magma"
       and new2["panels"][0]["series"][0]["colorbar"]["label"] == "I (a.u.)", "style_colormap restyles a heatmap")
+
+# --- filled contours on a log colour scale: bands spread evenly in log, so a
+# map spanning decades shows them all (matplotlib alone spaces them evenly in
+# plain numbers and nearly everything lands in the bottom band)
+import numpy as np
+import matplotlib.pyplot as plt
+LT = "x,y,z" + NL + NL.join(f"{i},{j},{10 ** (5 * (i + j) / 38):.6g}" for i in range(20) for j in range(20)) + NL
+k3, a3 = csvimport.build_panels("g", LT, [{"x": "x", "ys": [], "layers": [{"kind": "contourf", "y": "y", "extra": "z"}]}])
+cf = k3["panels"][0]["series"][0]
+k3, res3, _ = ops.apply(k3, [{"name": "style_colormap", "input": {
+    "series_id": cf["id"], "colormap": "keep", "min": None, "max": None, "log_scale": "on",
+    "colorbar": "show", "colorbar_label": "keep"}}], a3)
+cf = k3["panels"][0]["series"][0]
+_f, _ax = plt.subplots()
+render._draw_series(_ax, cf, a3, False)
+lev = np.asarray(_ax.collections[-1].levels)
+ratios = lev[1:] / lev[:-1]
+check(len(lev) == 13 and np.allclose(ratios, ratios[0]) and lev[0] <= 1.01 and lev[-1] >= 0.99e5,
+      f"log colour scale: 12 bands, evenly spaced in log across all five decades ({lev[0]:.3g} .. {lev[-1]:.3g})")
+plt.close(_f)
+code3 = codegen.generate(k3)
+check("levels=np.geomspace(" in code3, "the exported code spaces the bands the same way")
+back4, rep4 = codesync.apply(code3, k3, list(a3))
+check(back4["panels"] == k3["panels"] and not rep4["skipped"], "…and reads back from the code unchanged")
 print(len(fails), "failure(s)")

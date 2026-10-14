@@ -42,7 +42,7 @@ with sync_playwright() as pw:
     names = pg.eval_on_selector_all("#csv-cols tr td:first-child", "els => els.map(e => e.textContent)")
     check(names == ["time (h)", "OD600 wt", "OD600 mutant", "label"], f"columns listed: {names}")
     check(pg.is_disabled('input[name="csv-x"][value="3"]'), "text column can't be chosen")
-    check(pg.input_value("#csv-name") == "growth_curve", f"project name suggested from the file ({pg.input_value('#csv-name')})")
+    check(pg.input_value("#csv-name") == "growth curve", f"project name suggested from the file, space kept ({pg.input_value('#csv-name')})")
     pg.check('input[name="csv-y"][value="2"]')           # add the mutant curve too
     pg.select_option("#csv-plot", "line+markers")
     pg.fill("#csv-name", NAME)

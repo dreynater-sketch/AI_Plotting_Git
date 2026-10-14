@@ -3096,11 +3096,16 @@ async function projectOp(op, name) {
   return data.name;
 }
 
+/** Project names: words of letters, numbers, - and _ with single spaces
+ *  between. tidyName() trims the ends and squeezes runs of spaces. */
+const NAME_OK = /^[A-Za-z0-9_-]+( [A-Za-z0-9_-]+)*$/;
+const tidyName = (s) => s.trim().replace(/\s+/g, ' ');
+
 function askName(message, initial) {
-  const name = (prompt(message, initial) || '').trim();
+  const name = tidyName(prompt(message, initial) || '');
   if (!name) return null;
-  if (!/^[A-Za-z0-9_-]+$/.test(name)) {
-    setStatus('Names can only use letters, numbers, - and _', 'err');
+  if (!NAME_OK.test(name)) {
+    setStatus('Names can only use letters, numbers, spaces, - and _', 'err');
     return null;
   }
   return name;
@@ -3137,8 +3142,8 @@ function openCsvDialog() {
 function closeCsvDialog() { $('csv-modal').hidden = true; }
 
 function projectNameFrom(filename) {
-  let base = filename.replace(/\.[^.]+$/, '').replace(/[^A-Za-z0-9_-]+/g, '_')
-    .replace(/^_+|_+$/g, '').slice(0, 40) || 'figure';
+  let base = tidyName(filename.replace(/\.[^.]+$/, '').replace(/[^A-Za-z0-9_ -]+/g, ' ')
+    .slice(0, 40)) || 'figure';
   const taken = new Set([...$('project-select').options].map((o) => o.value));
   let name = base, n = 2;
   while (taken.has(name)) name = `${base}_${n++}`;
@@ -3193,7 +3198,7 @@ function csvChoice() {
 
 function refreshCsvCreate() {
   const { x, ys } = csvChoice();
-  $('csv-create').disabled = !(csvText && x !== null && ys.length && /^[A-Za-z0-9_-]+$/.test($('csv-name').value));
+  $('csv-create').disabled = !(csvText && x !== null && ys.length && NAME_OK.test(tidyName($('csv-name').value)));
 }
 
 $('btn-new').onclick = openCsvDialog;
@@ -3220,7 +3225,7 @@ drop.addEventListener('drop', (e) => loadCsvFile(e.dataTransfer.files[0]));
 
 async function createFromCsv() {
   const { x, ys } = csvChoice();
-  const name = $('csv-name').value.trim();
+  const name = tidyName($('csv-name').value);
   $('csv-create').disabled = true;
   csvMessage('Building the figure…');
   try {
@@ -3381,7 +3386,7 @@ function aiMessage(msg, cls = '') {
 function refreshAiMake() {
   if ($('ai-make').dataset.open) return;
   $('ai-make').disabled = aiRunning || !($('ai-idea').value.trim()
-    && /^[A-Za-z0-9_-]+$/.test($('ai-name').value));
+    && NAME_OK.test(tidyName($('ai-name').value)));
 }
 
 function openAiDialog() {
@@ -3462,7 +3467,7 @@ function showAiReply(el, d) {
 }
 
 async function runAi() {
-  const name = $('ai-name').value.trim();
+  const name = tidyName($('ai-name').value);
   const log = $('ai-log');
   const line = (text, cls = '') => {
     log.querySelector('li.now')?.remove();
@@ -3668,14 +3673,14 @@ $('ai-idea').addEventListener('input', () => {
   // No files to name it after: name it after the first words of the idea.
   const nm = $('ai-name');
   if (!aiFiles.length && (!nm.value || nm.dataset.auto)) {
-    const words = $('ai-idea').value.trim().split(/\s+/).slice(0, 4).join('_');
+    const words = $('ai-idea').value.trim().split(/\s+/).slice(0, 4).join(' ');
     nm.value = words ? projectNameFrom(words) : '';
     nm.dataset.auto = '1';
   }
   refreshAiMake();
 });
 $('ai-name').addEventListener('input', () => { delete $('ai-name').dataset.auto; refreshAiMake(); });
-$('ai-make').onclick = () => ($('ai-make').dataset.open ? openProject($('ai-name').value.trim()) : runAi());
+$('ai-make').onclick = () => ($('ai-make').dataset.open ? openProject(tidyName($('ai-name').value)) : runAi());
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && !$('ai-modal').hidden && !aiRunning) closeAiDialog();
 });
@@ -3990,7 +3995,7 @@ function startEarlyLoad() {
   if (location.hash.includes('access_token')) return;  // signing in first
   const name = new URLSearchParams(location.search).get('project') || readLastProject();
   early = { figures: fetch('/api/figures') };
-  if (name && /^[A-Za-z0-9_-]+$/.test(name)) {
+  if (name && NAME_OK.test(name)) {
     early.name = name;
     early.figure = fetch(`/api/figure/${name}`);
     early.history = fetch(`/api/history/${name}`);

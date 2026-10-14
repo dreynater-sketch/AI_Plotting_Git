@@ -24,7 +24,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.patches import FancyArrowPatch, Rectangle
-from matplotlib.ticker import MultipleLocator
+from matplotlib.ticker import LogLocator, MultipleLocator
 
 from figforge import layers
 
@@ -173,6 +173,9 @@ def _draw_series(ax, s, arrays, preview):
     kw.update(layers.style_for(s))
     if kind in layers.LEGEND_KINDS and s.get("label"):
         kw["label"] = s["label"]
+    n = layers.log_levels(s)
+    if n:
+        kw["levels"] = layers.geomspace_levels(pos[2], kw.get("vmin"), kw.get("vmax"), n)
     art = getattr(ax, k["method"])(*pos, **data_kw, **kw)
 
     if preview:
@@ -184,7 +187,8 @@ def _draw_series(ax, s, arrays, preview):
 
     cb = s.get("colorbar")
     if k.get("colorbar") and cb:
-        bar = ax.figure.colorbar(art, ax=ax)
+        # Log-even bands: ticks at 1, 10, 100... rather than at band edges.
+        bar = ax.figure.colorbar(art, ax=ax, **({"ticks": LogLocator()} if n else {}))
         bar.ax.tick_params(labelsize=cb.get("tick_size", 10))
         if cb.get("label"):
             bar.set_label(cb["label"], fontsize=cb.get("size", 12),
