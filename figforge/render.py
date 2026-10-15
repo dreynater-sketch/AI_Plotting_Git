@@ -89,6 +89,11 @@ def build_figure(spec, arrays, preview=False):
     axes = list(grid.flat)
     for spare in axes[len(panels):]:      # a 2 x 2 grid holding 3 panels
         spare.remove()
+    for i, p in enumerate(panels):        # 3-D and polar panels replace their flat cell
+        proj = layers.projection(p)
+        if proj:
+            axes[i].remove()
+            axes[i] = fig.add_subplot(rows, cols, i + 1, projection=proj)
     fig.set_dpi(SVG_DPI)
     fig.patch.set_facecolor("white")
 
@@ -146,6 +151,7 @@ def _layout_key(spec):
           p.get("xtick_size"), p.get("ytick_size"),
           p.get("legend"), p.get("top_axis"), p.get("right_axis"), p.get("xfmt"), p.get("yfmt"),
           p.get("minor_ticks"), p.get("twin"), p.get("ylabel2"),
+          p.get("projection"), p.get("zlabel"), p.get("zlim"), p.get("zscale"), p.get("view"),
           [x.get("colorbar") for x in p.get("series", [])]] for p in spec["panels"]],
     ], sort_keys=True, default=str)
 
@@ -167,6 +173,8 @@ def _draw_series(ax, s, arrays, preview):
     pos = [_resolve(s[c], arrays) for c in k["coords"]]
     for field in k.get("lists", ()):
         pos.append([_finite(_resolve(r, arrays)) for r in s.get(field) or []])
+    if kind in ("surface", "wireframe"):
+        pos = list(mesh(*pos))
     data_kw = {kw: _resolve(s[f], arrays) for kw, f in k["data_kw"].items()
                if s.get(f) is not None}
     kw = dict(k.get("fixed", {}))
@@ -177,8 +185,15 @@ def _draw_series(ax, s, arrays, preview):
     if n:
         kw["levels"] = layers.geomspace_levels(pos[2], kw.get("vmin"), kw.get("vmax"), n)
     art = getattr(ax, k["method"])(*pos, **data_kw, **kw)
+    three_d = k.get("proj") == "3d"
+    if kind == "line3d":
+        art = art[0]
+    if three_d:
+        # 3-D drawings are their own click target (they are never turned
+        # into a picture, and a flat hit path can't follow them).
+        art.set_gid("t_" + s["id"])
 
-    if preview:
+    if preview and not three_d:
         # Big drawings become one picture in the editor (exports stay vector).
         if kind == "line" and len(pos[0]) > RASTER_MIN_POINTS:
             art[0].set_rasterized(True)
@@ -188,7 +203,7 @@ def _draw_series(ax, s, arrays, preview):
     cb = s.get("colorbar")
     if k.get("colorbar") and cb:
         # Log-even bands: ticks at 1, 10, 100... rather than at band edges.
-        bar = ax.figure.colorbar(art, ax=ax, **({"ticks": LogLocator()} if n else {}))
+        bar = ax.figure.colorbar(art, ax=ax, **colorbar_kw(s, three_d))
         bar.ax.tick_params(labelsize=cb.get("tick_size", 10))
         if cb.get("label"):
             bar.set_label(cb["label"], fontsize=cb.get("size", 12),
@@ -206,20 +221,43 @@ def _draw_series(ax, s, arrays, preview):
             ax.figure.add_artist(hit)
             hit.set_gid(f"t_{s['id']}__cbar")
 
-    if preview:
-        if kind == "bar":
+    if preview and not three_d:
+        if kind in ("bar", "hist"):
             # Each bar is clickable all over, not just along its top.
             from matplotlib.collections import PolyCollection
-            w = np.broadcast_to(np.asarray(kw.get("width", 0.8), dtype=float), np.shape(pos[0]))
-            x0 = np.asarray(pos[0], dtype=float) - (w / 2 if kw.get("align", "center") == "center" else 0)
-            verts = [[(a, 0), (a + ww, 0), (a + ww, h), (a, h)]
-                     for a, ww, h in zip(x0, w, np.asarray(pos[1], dtype=float)) if np.isfinite(a) and np.isfinite(h)]
+            if kind == "hist":
+                # Every drawn bin (or the step outline), where the patches lie.
+                patches = list(art[2])   # bars, or the one step outline
+                verts = [pt.get_patch_transform().transform(pt.get_path().vertices) for pt in patches]
+            else:
+                w = np.broadcast_to(np.asarray(kw.get("width", 0.8), dtype=float), np.shape(pos[0]))
+                x0 = np.asarray(pos[0], dtype=float) - (w / 2 if kw.get("align", "center") == "center" else 0)
+                verts = [[(a, 0), (a + ww, 0), (a + ww, h), (a, h)]
+                         for a, ww, h in zip(x0, w, np.asarray(pos[1], dtype=float))
+                         if np.isfinite(a) and np.isfinite(h)]
             hit = PolyCollection(verts, facecolors="white", alpha=0.001, linewidths=0)
             ax.add_collection(hit, autolim=False)
             hit.set_gid("t_" + s["id"])
         else:
-            dots = kind == "scatter" or (kind in ("line", "errorbar") and kw.get("ls", kw.get("linestyle")) in ("none", "None", ""))
+            dots = kind in ("scatter", "quiver") or (kind in ("line", "errorbar") and kw.get("ls", kw.get("linestyle")) in ("none", "None", ""))
             _draw_series_hit_target(ax, s, *_hit_path(kind, s, pos, kw), dots=dots)
+
+
+def mesh(x, y, z):
+    """x, y, z of a surface as 2-D tables: 1-D x and y are the columns and
+    rows of z (like a heatmap); 2-D ones are already a mesh, which may
+    follow a curved edge."""
+    x, y, z = (np.asarray(a, dtype=float) for a in (x, y, z))
+    if x.ndim == 1 and y.ndim == 1 and z.ndim == 2:
+        x, y = np.meshgrid(x, y)
+    return x, y, z
+
+
+def colorbar_kw(s, three_d):
+    kw = layers.colorbar_kw(s, three_d)
+    if kw.get("ticks") == "log":
+        kw["ticks"] = LogLocator()
+    return kw
 
 
 def _hit_path(kind, s, pos, kw):
@@ -227,11 +265,11 @@ def _hit_path(kind, s, pos, kw):
     middle of a band, the box medians, the outline of a 2-D grid."""
     if kind == "band":
         return pos[0], (pos[1] + pos[2]) / 2
-    if kind in ("heatmap", "contour", "contourf"):
+    if kind in ("heatmap", "contour", "contourf", "hexbin"):
         x0, x1 = float(np.nanmin(pos[0])), float(np.nanmax(pos[0]))
         y0, y1 = float(np.nanmin(pos[1])), float(np.nanmax(pos[1]))
         return np.array([x0, x1, x1, x0, x0]), np.array([y0, y0, y1, y1, y0])
-    if kind == "box":
+    if kind in ("box", "violin"):
         groups = pos[-1]
         where = kw.get("positions") or list(range(1, len(groups) + 1))
         meds = [float(np.median(g)) if len(g) else np.nan for g in groups]
@@ -358,6 +396,8 @@ def _draw_second_axes(ax, p):
 
 
 def _draw_panel(ax, p, arrays, preview=False):
+    if layers.projection(p):
+        return _draw_round_or_3d(ax, p, arrays, preview)
     pid = p["id"]
     for i, h in enumerate(p.get("hlines", [])):
         ax.axhline(h["y"], color=h.get("color", "0.8"), ls=h.get("ls", "-"),
@@ -382,6 +422,8 @@ def _draw_panel(ax, p, arrays, preview=False):
     # "axis": "right" are drawn on it.
     ax2 = ax.twinx() if p.get("twin") is not None else None
     for s in p.get("series", []):
+        if not layers.fits(s, p):     # a 3-D surface on a flat plot: left out
+            continue
         on = ax2 if (ax2 is not None and s.get("axis") == "right") else ax
         _draw_series(on, s, arrays, preview)
 
@@ -400,41 +442,8 @@ def _draw_panel(ax, p, arrays, preview=False):
         if preview:
             _draw_arrow_hit_targets(ax, a)
 
-    for t in p.get("texts", []):
-        art = ax.text(
-            t["xy"][0], t["xy"][1], t["text"],
-            fontsize=t.get("size", 12),
-            color=t.get("color", "black"),
-            ha=t.get("ha", "left"),
-            va=t.get("va", "baseline"),
-            transform=ax.transData if t.get("coords", "data") == "data"
-            else ax.transAxes,
-            bbox=t.get("bbox"),
-            zorder=t.get("zorder", 10),
-        )
-        art.set_gid("t_" + t["id"])
-        # A label dragged past the axes edge should still draw in full, box
-        # and all, rather than being sliced off at the spine.
-        art.set_clip_on(False)
-        if art.get_bbox_patch() is not None:
-            art.get_bbox_patch().set_clip_on(False)
-
-    title = p.get("title", {})
-    if title.get("text"):
-        ta = ax.set_title(title["text"], loc=title.get("loc", "center"),
-                          fontsize=title.get("size", 14),
-                          color=title.get("color", "black"))
-        ta.set_gid("t_" + p["id"] + "__title")
-    xl = p.get("xlabel", {})
-    if xl.get("text"):
-        a = ax.set_xlabel(xl["text"], fontsize=xl.get("size", 13),
-                          color=xl.get("color", "black"))
-        a.set_gid("t_" + p["id"] + "__xlabel")
-    yl = p.get("ylabel", {})
-    if yl.get("text"):
-        a = ax.set_ylabel(yl["text"], fontsize=yl.get("size", 13),
-                          color=yl.get("color", "black"))
-        a.set_gid("t_" + p["id"] + "__ylabel")
+    _draw_texts(ax, p)
+    _draw_labels(ax, p)
 
     # Only when it changes: set_xscale resets the tick labels, which would
     # wipe a box plot's group names.
@@ -469,6 +478,77 @@ def _draw_panel(ax, p, arrays, preview=False):
     for i, lbl in enumerate(ax.get_yticklabels()):
         lbl.set_gid(f't_{p["id"]}__ytick_{i}')
 
+    _draw_legend(ax, p, ax2)
+
+
+def _draw_texts(ax, p, flat=True):
+    """Free labels. On a 3-D or polar panel they are always placed by their
+    0-1 position across the panel box (data x/y mean nothing flat there)."""
+    for t in p.get("texts", []):
+        on_axes = not flat or t.get("coords", "data") == "axes"
+        draw = ax.text2D if ax.name == "3d" else ax.text
+        art = draw(
+            t["xy"][0], t["xy"][1], t["text"],
+            fontsize=t.get("size", 12),
+            color=t.get("color", "black"),
+            ha=t.get("ha", "left"),
+            va=t.get("va", "baseline"),
+            transform=ax.transAxes if on_axes else ax.transData,
+            bbox=t.get("bbox"),
+            zorder=t.get("zorder", 10),
+        )
+        art.set_gid("t_" + t["id"])
+        # A label dragged past the axes edge should still draw in full, box
+        # and all, rather than being sliced off at the spine.
+        art.set_clip_on(False)
+        if art.get_bbox_patch() is not None:
+            art.get_bbox_patch().set_clip_on(False)
+
+
+def _draw_labels(ax, p, keys=("title", "xlabel", "ylabel")):
+    for key in keys:
+        lab = p.get(key) or {}
+        if not lab.get("text"):
+            continue
+        if key == "title":
+            a = ax.set_title(lab["text"], loc=lab.get("loc", "center"), fontsize=lab.get("size", 14),
+                             color=lab.get("color", "black"))
+        else:
+            a = getattr(ax, f"set_{key}")(lab["text"], fontsize=lab.get("size", 13),
+                                          color=lab.get("color", "black"))
+        a.set_gid(f"t_{p['id']}__{key}")
+
+
+def _draw_round_or_3d(ax, p, arrays, preview):
+    """A 3-D panel (x, y, z axes, turned by "view") or a polar one (x is the
+    angle in radians, y the distance from the middle). Guide lines, shaded
+    ranges, arrows and second scales belong to flat plots and are left out."""
+    three_d = ax.name == "3d"
+    for s in p.get("series", []):
+        if layers.fits(s, p):
+            _draw_series(ax, s, arrays, preview)
+    _draw_texts(ax, p, flat=False)
+    _draw_labels(ax, p, ("title", "xlabel", "ylabel", "zlabel") if three_d else ("title", "xlabel", "ylabel"))
+    for xyz in ("xyz" if three_d else "xy"):
+        scale = p.get(f"{xyz}scale", "linear")
+        if scale != "linear":
+            getattr(ax, f"set_{xyz}scale")(scale)
+        if p.get(f"{xyz}lim") and not (xyz == "x" and not three_d and layers.full_circle(p["xlim"])):
+            getattr(ax, f"set_{xyz}lim")(*p[f"{xyz}lim"])
+        ax.tick_params(axis=xyz, labelsize=p.get(f"{xyz}tick_size", 11))
+    if three_d:
+        view = p.get("view") or {}
+        ax.view_init(elev=view.get("elev", layers.VIEW_ELEV), azim=view.get("azim", layers.VIEW_AZIM))
+    ax.grid(bool(p.get("grid")))
+    for i, lbl in enumerate(ax.get_xticklabels()):
+        lbl.set_gid(f't_{p["id"]}__xtick_{i}')
+    for i, lbl in enumerate(ax.get_yticklabels()):
+        lbl.set_gid(f't_{p["id"]}__ytick_{i}')
+    _draw_legend(ax, p, None)
+
+
+
+def _draw_legend(ax, p, ax2):
     lg = p.get("legend")
     if lg and any(s.get("label") for s in p.get("series", [])):
         kw = dict(frameon=lg.get("frameon", False), fontsize=lg.get("size", 10))
@@ -512,6 +592,8 @@ def _geometry(fig, axes_by_id, spec):
             "xscale": ax.get_xscale(),
             "yscale": ax.get_yscale(),
         }
+        if layers.projection(p):
+            panels[p["id"]]["projection"] = layers.projection(p)
         lg = ax.get_legend()
         if lg is not None:
             lb = lg.get_window_extent()
@@ -523,7 +605,8 @@ def _geometry(fig, axes_by_id, spec):
     for p in spec["panels"]:
         ax = axes_by_id[p["id"]]
         for t in p.get("texts", []):
-            x, y = ax.transData.transform(t["xy"])
+            on_axes = layers.projection(p) or t.get("coords", "data") == "axes"
+            x, y = (ax.transAxes if on_axes else ax.transData).transform(t["xy"])
             texts[t["id"]] = {"panel": p["id"], "anchor": _f([x, H - y])}
 
     return {"width": float(W), "height": float(H),

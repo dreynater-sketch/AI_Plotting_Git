@@ -80,7 +80,8 @@ check(not res[0]["is_error"] and new["panels"][1]["series"][0]["style"]["alpha"]
       "style_series restyles bars")
 render.render(new, arrays)
 check(set(layers.KINDS) == {"line", "step", "errorbar", "band", "bar", "scatter", "heatmap",
-                            "contour", "contourf", "box"}, "kinds table")
+                            "contour", "contourf", "box", "violin", "hist", "quiver", "hexbin",
+                            "surface", "wireframe", "trisurf", "line3d", "scatter3d"}, "kinds table")
 
 # Data + a fit on its own, finer grid, added later from a separate table.
 NL = "\n"

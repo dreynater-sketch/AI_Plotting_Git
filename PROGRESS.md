@@ -270,3 +270,26 @@ figure → saved-code sync; a phone layout; photo-to-data-points.
 - A figure drawn a moment ago (reopened, or undone back to) comes from memory (~0.5 s saved).
 - The page's own files carry an ETag and are cached by Vercel until the next deploy.
 - Several requests with an expired sign-in share one renewal.
+
+## More kinds of plot + better AI models (2026-10-15)
+- 3-D panels (spec `"projection": "3d"`): surface, wireframe, trisurf (scattered points),
+  line3d, scatter3d; x/y/z linear or log (`zlim`, `zscale`, `zlabel`), turned by `"view"`
+  {elev, azim} (default 25 / -60). Surfaces from tidy rows: rows grouped by x with equal
+  counts become a mesh that follows a curved edge (each x up to its own limit). One surface
+  is coloured by height with a colour bar (log colours on a log height); several get one
+  colour each and a legend. Drawn clipped to the axis ranges (axlim_clip).
+- Polar panels (`"projection": "polar"`): x = angle in radians, y = distance from the middle.
+- New flat kinds: hist (raw values), violin (one column per group), quiver (arrow field),
+  hexbin (hexagon map).
+- Editor: a 3-D surface is clicked like any curve; dragging an empty spot in a 3-D plot turns
+  it; Plot box shows a height axis and Round/Up boxes. Labels on 3-D/polar plots sit across the
+  box (axes 0-1); arrows, shading and second scales are refused there with a plain message.
+- Exported code: `ax = axes[r, c] = fig.add_subplot(..., projection='3d')`, `ax.view_init(...)`,
+  violins tagged like boxes; codesync reads all of it back.
+- AI: create_figure takes projection / z_label / z_scale and layers with z_column; new
+  set_view tool; set_axis "z". The prompt no longer says "can't draw 3D"; it lists every kind and
+  adds general rules for model-made numbers (right model per case, check against known values
+  and say how close, cap blow-ups, compute each surface only up to its own edge, log axes for
+  values spanning decades, name what the model leaves out). From comparing FigForge's, Claude
+  Desktop's and Grok's critical-surface figures.
+- tests/test_plot_types.py (34 checks).

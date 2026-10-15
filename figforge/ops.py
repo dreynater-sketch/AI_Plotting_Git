@@ -111,8 +111,10 @@ TOOLS = [
     {
         "name": "set_axis",
         "description": "Change one axis of a panel: limits, linear/log scale, tick label size. "
-                       "Pass null for anything to leave unchanged. Log scale needs positive limits.",
-        "input_schema": _obj({"panel_id": _PANEL, "axis": {"type": "string", "enum": ["x", "y", "right"]},
+                       "Pass null for anything to leave unchanged. Log scale needs positive limits. "
+                       "\"z\" is the height axis of a 3-D panel; on a polar panel x is the angle "
+                       "(radians) and y the distance from the middle.",
+        "input_schema": _obj({"panel_id": _PANEL, "axis": {"type": "string", "enum": ["x", "y", "z", "right"]},
                               "min": _nullable({"type": "number"}), "max": _nullable({"type": "number"}),
                               "scale": _keep_enum(["linear", "log"]),
                               "tick_size": _nullable({"type": "number"})}),
@@ -208,6 +210,14 @@ TOOLS = [
         "input_schema": _obj({"series_id": _ID, "axis": {"type": "string", "enum": ["left", "right"]}}),
     },
     {
+        "name": "set_view",
+        "description": "Turn a 3-D panel: elevation is how far above (degrees, -90 to 90; 90 looks "
+                       "straight down) and azimuth the direction it is seen from (degrees around "
+                       "the vertical, -360 to 360). the default is 25 / -60.",
+        "input_schema": _obj({"panel_id": _PANEL, "elevation": {"type": "number"},
+                              "azimuth": {"type": "number"}}),
+    },
+    {
         "name": "set_layout",
         "description": "Arrange the panels in a grid: rows x columns, filled left to right then "
                        "down (rows 1 = all side by side). rows x columns must hold every panel.",
@@ -252,6 +262,10 @@ def _find(spec, eid):
         p = _panel(spec, pid)
         if part in ("title", "xlabel", "ylabel"):
             return part, p.setdefault(part, {}), p
+        if part == "zlabel":
+            if p.get("projection") != "3d":
+                raise OpError(f"panel {pid} isn't 3-D, so it has no z axis")
+            return part, p.setdefault("zlabel", {}), p
         if part == "ylabel2":
             if p.get("twin") is None:
                 raise OpError(f"panel {pid} has no right axis")
@@ -274,6 +288,13 @@ def _find(spec, eid):
                 if item["id"] == eid:
                     return kind[:-1] if kind != "series" else "series", item, p
     raise OpError(f"no element '{eid}' -- call describe_figure for current ids")
+
+
+def _flat(p, what):
+    """Guide lines, shaded ranges and second scales belong to flat plots."""
+    if p.get("projection"):
+        kind = "3-D" if p["projection"] == "3d" else "polar"
+        raise OpError(f"panel {p['id']} is a {kind} plot, which can't have {what}")
 
 
 def _num(v, what, lo=None, hi=None):
@@ -338,6 +359,13 @@ def _describe(spec, arrays):
                        "min": p["xlim"][0], "max": p["xlim"][1], "scale": p.get("xscale", "linear")},
             "y_axis": {"label_id": f"{p['id']}__ylabel", "label": (p.get("ylabel") or {}).get("text", ""),
                        "min": p["ylim"][0], "max": p["ylim"][1], "scale": p.get("yscale", "linear")},
+            **({"projection": p["projection"]} if p.get("projection") else {}),
+            **({"z_axis": {"label_id": f"{p['id']}__zlabel", "label": (p.get("zlabel") or {}).get("text", ""),
+                           "min": (p.get("zlim") or [None, None])[0], "max": (p.get("zlim") or [None, None])[1],
+                           "scale": p.get("zscale", "linear")},
+                "view": {"elevation": (p.get("view") or {}).get("elev", 25),
+                         "azimuth": (p.get("view") or {}).get("azim", -60)}}
+               if p.get("projection") == "3d" else {}),
             "right_y_axis": None if p.get("twin") is None else {
                 "label_id": f"{p['id']}__ylabel2", "label": (p.get("ylabel2") or {}).get("text", ""),
                 **p["twin"]},
@@ -366,7 +394,7 @@ def _describe(spec, arrays):
     return out
 
 
-_TEXT_KINDS = ("text", "title", "xlabel", "ylabel", "suptitle", "top_axis", "right_axis", "ylabel2")
+_TEXT_KINDS = ("text", "title", "xlabel", "ylabel", "zlabel", "suptitle", "top_axis", "right_axis", "ylabel2")
 
 
 def _set_text(spec, a):
@@ -396,6 +424,8 @@ def _move(spec, a):
     kind, obj, p = _find(spec, a["element_id"])
     x, y = _num(a["x"], "x"), _num(a["y"], "y")
     if kind == "text":
+        if p.get("projection") and a["coords"] != "axes":
+            raise OpError("on a 3-D or polar panel a label is placed in axes coordinates (0-1)")
         obj["xy"] = [x, y]
         obj["coords"] = a["coords"]
     elif kind == "legend":
@@ -411,6 +441,8 @@ def _move(spec, a):
 
 def _add_label(spec, a):
     p = _panel(spec, a["panel_id"])
+    if p.get("projection") and a["coords"] != "axes":
+        raise OpError("on a 3-D or polar panel a label is placed in axes coordinates (0-1)")
     ids = {i["id"] for q in spec["panels"] for k in ("texts", "series", "arrows") for i in q.get(k, [])}
     n = 1
     while f"{p['id']}_label{n}" in ids:
@@ -442,8 +474,11 @@ def _set_axis(spec, a):
     p = _panel(spec, a["panel_id"])
     ax = a["axis"]
     if ax == "right":
+        _flat(p, "a right-hand y-axis")
         return _set_twin_axis(p, a)
-    lim = list(p[f"{ax}lim"])
+    if ax == "z" and p.get("projection") != "3d":
+        raise OpError(f"panel {p['id']} isn't 3-D, so it has no z axis")
+    lim = list(p.get(f"{ax}lim") or [0, 1])
     if a["min"] is not None:
         lim[0] = _num(a["min"], "min")
     if a["max"] is not None:
@@ -512,6 +547,8 @@ def _set_legend(spec, a):
 def _set_second_axis(spec, a):
     p = _panel(spec, a["panel_id"])
     key = "top_axis" if a["side"] == "top" else "right_axis"
+    if a["show"]:
+        _flat(p, "a second scale")
     if key == "right_axis" and a["show"] and p.get("twin") is not None:
         raise OpError(f"panel {p['id']}'s right side already holds a second y-axis with its own data")
     if not a["show"]:
@@ -530,7 +567,7 @@ def _style_colormap(spec, a):
     from figforge import layers
     kind, s, _ = _find(spec, a["series_id"])
     if kind != "series" or not layers.info(s).get("colorbar"):
-        raise OpError(f"'{a['series_id']}' isn't a heatmap, contour or coloured scatter")
+        raise OpError(f"'{a['series_id']}' isn't a heatmap, contour, surface, hexagon map or coloured dots")
     st = dict(s.get("style") or {})
     if _given(a["colormap"]):
         st["cmap"] = a["colormap"]
@@ -586,6 +623,7 @@ def _set_tick_format(spec, a):
 
 def _add_span(spec, a):
     p = _panel(spec, a["panel_id"])
+    _flat(p, "shaded ranges")
     lo, hi = sorted((_num(a["from"], "from"), _num(a["to"], "to")))
     if lo == hi:
         raise OpError("from and to can't be equal")
@@ -626,6 +664,7 @@ def _set_curve_axis(spec, a):
     if kind != "series":
         raise OpError(f"'{a['series_id']}' isn't a curve")
     if a["axis"] == "right":
+        _flat(p, "a right-hand y-axis")
         if p.get("right_axis"):
             raise OpError(f"panel {p['id']} already has a right-hand scale (a calibration); remove "
                           "it with set_second_axis show false first")
@@ -639,6 +678,15 @@ def _set_curve_axis(spec, a):
             p.pop("twin", None)
             p.pop("ylabel2", None)
     return f"{a['series_id']} is on the {a['axis']} axis"
+
+
+def _set_view(spec, a):
+    p = _panel(spec, a["panel_id"])
+    if p.get("projection") != "3d":
+        raise OpError(f"panel {p['id']} isn't 3-D")
+    p["view"] = {"elev": _num(a["elevation"], "elevation", -90, 90),
+                 "azim": _num(a["azimuth"], "azimuth", -360, 360)}
+    return f"panel {p['id']} seen from elevation {p['view']['elev']}, azimuth {p['view']['azim']}"
 
 
 def _set_layout(spec, a):
@@ -679,7 +727,7 @@ _HANDLERS = {"set_text": _set_text, "style_text": _style_text, "move_element": _
              "set_second_axis": _set_second_axis, "set_font": _set_font,
              "style_colormap": _style_colormap, "set_grid": _set_grid,
              "set_tick_format": _set_tick_format, "add_span": _add_span, "set_layout": _set_layout,
-             "set_curve_axis": _set_curve_axis}
+             "set_curve_axis": _set_curve_axis, "set_view": _set_view}
 
 
 def _check_input(name, args):

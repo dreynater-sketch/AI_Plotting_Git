@@ -187,7 +187,7 @@ function resolve(id, source = spec) {
     if (!p) return null;
     return { id, kind: 'panel', obj: p, draggable: false, panel: pid };
   }
-  const m = id.match(/^(.+)__(title|xlabel|ylabel|ylabel2|top_axis|right_axis)$/);
+  const m = id.match(/^(.+)__(title|xlabel|ylabel|zlabel|ylabel2|top_axis|right_axis)$/);
   if (m) {
     const p = source.panels.find((q) => q.id === m[1]);
     if (!p || !p[m[2]]) return null;
@@ -253,7 +253,7 @@ function resolve(id, source = spec) {
     for (const t of p.texts || []) {
       if (t.id === id) {
         return { id, kind: 'text', obj: t, draggable: true, panel: p.id,
-                 coords: t.coords ?? 'data' };
+                 coords: p.projection ? 'axes' : (t.coords ?? 'data') };
       }
     }
     for (const sr of p.series || []) {
@@ -270,7 +270,7 @@ function allElements(source = spec) {
   const out = [];
   if (source.suptitle?.text) out.push(resolve('suptitle', source));
   for (const p of source.panels) {
-    for (const k of ['title', 'xlabel', 'ylabel', 'ylabel2', 'top_axis', 'right_axis']) {
+    for (const k of ['title', 'xlabel', 'ylabel', 'zlabel', 'ylabel2', 'top_axis', 'right_axis']) {
       if (p[k]?.text) out.push(resolve(`${p.id}__${k}`, source));
     }
     out.push(resolve(`${p.id}__legend`, source));
@@ -290,14 +290,14 @@ function allElements(source = spec) {
  * "side numbers", not "y-axis tick labels". */
 const KIND_LABEL = {
   suptitle: 'figure title', title: 'title', panel: 'plot box',
-  xlabel: 'bottom label', ylabel: 'side label', ylabel2: 'right side label', text: 'label',
+  xlabel: 'bottom label', ylabel: 'side label', zlabel: 'height label', ylabel2: 'right side label', text: 'label',
   top_axis: 'top axis label', right_axis: 'right axis label',
   xticks: 'bottom numbers', yticks: 'side numbers', legend: 'legend',
   series: 'line', arrow: 'arrow', guide: 'guide line', zero: 'zero lines', span: 'shaded range',
 };
 const KIND_PLURAL = {
   suptitle: 'figure titles', title: 'titles', panel: 'plot boxes',
-  xlabel: 'bottom labels', ylabel: 'side labels', ylabel2: 'right side labels', text: 'labels',
+  xlabel: 'bottom labels', ylabel: 'side labels', zlabel: 'height labels', ylabel2: 'right side labels', text: 'labels',
   top_axis: 'top axis labels', right_axis: 'right axis labels',
   xticks: 'bottom numbers', yticks: 'side numbers', legend: 'legends',
   series: 'lines', arrow: 'arrows', guide: 'guide lines', zero: 'zero lines', span: 'shaded ranges',
@@ -310,8 +310,15 @@ const plotName = (pid) => `plot (${pid})`;
 const SERIES_WORDS = {
   errorbar: 'error bars', band: 'band', bar: 'bars', step: 'steps', scatter: 'coloured dots',
   heatmap: 'heatmap', contour: 'contour lines', contourf: 'filled contours', box: 'box plot',
+  violin: 'violin plot', hist: 'histogram', quiver: 'arrows', hexbin: 'hexagon map',
+  surface: '3-D surface', wireframe: '3-D mesh', trisurf: '3-D surface', line3d: '3-D line',
+  scatter3d: '3-D dots',
 };
-const CMAP_KINDS = new Set(['heatmap', 'contour', 'contourf', 'scatter']);
+const CMAP_KINDS = new Set(['heatmap', 'contour', 'contourf', 'scatter', 'hexbin', 'surface', 'trisurf',
+                            'scatter3d']);
+/** Kinds coloured by a colour map unless given one plain colour. */
+const MAYBE_CMAP = new Set(['scatter', 'scatter3d', 'surface', 'trisurf']);
+const NOT_FLAT = (p) => !!p?.projection;
 
 function kindLabel(kind, obj) {
   if (kind === 'series' && obj?.kind && SERIES_WORDS[obj.kind]) return SERIES_WORDS[obj.kind];
@@ -327,7 +334,7 @@ const capitalize = (s) => s.charAt(0).toUpperCase() + s.slice(1);
  * Titles and axis labels are blanked, not removed, so their size/color
  * survive if the text is ever typed back. */
 const DELETABLE = new Set(['text', 'arrow', 'series', 'legend', 'guide', 'zero', 'span', 'top_axis', 'right_axis',
-                           'title', 'xlabel', 'ylabel', 'ylabel2', 'suptitle']);
+                           'title', 'xlabel', 'ylabel', 'zlabel', 'ylabel2', 'suptitle']);
 
 /* ------------------------------------------- coordinate transformations */
 
@@ -1030,10 +1037,30 @@ function refreshAxesInspector() {
     }
     $('f-y2scale').value = common((s) => s.obj.twin.yscale ?? 'linear') ?? 'linear';
   }
+  const panels = selected().filter((s) => s.kind === 'panel').map((s) => s.obj);
+  const round = panels.some(NOT_FLAT);
+  const three = panels.length > 0 && panels.every((p) => p.projection === '3d');
+  $('axes-3d-fields').hidden = !three;
+  // Flat-only settings: box shape, zero lines, shading, small ticks, tick spacing.
+  for (const el of [$('f-aspect').closest('.row'), $('f-zero').closest('label'), $('btn-add-span'),
+                    $('f-minor').closest('label.field'), $('f-xstep').closest('.row'), $('f-ystep').closest('.row')]) {
+    el.hidden = round;
+  }
+  if (three) {
+    setNum('f-zmin', (s) => s.obj.zlim?.[0] ?? null);
+    setNum('f-zmax', (s) => s.obj.zlim?.[1] ?? null);
+    $('f-zscale').value = common((s) => s.obj.zscale ?? 'linear') ?? 'linear';
+    setNum('f-turn', (s) => s.obj.view?.azim ?? VIEW.azim);
+    setNum('f-tilt', (s) => s.obj.view?.elev ?? VIEW.elev);
+  }
   $('axes-note').hidden = true;
 }
 
-const LEGEND_KINDS = new Set(['line', 'step', 'errorbar', 'band', 'bar', 'scatter', 'box']);
+/** FigForge's starting 3-D view (layers.VIEW_ELEV / VIEW_AZIM). */
+const VIEW = { elev: 25, azim: -60 };
+
+const LEGEND_KINDS = new Set(['line', 'step', 'errorbar', 'band', 'bar', 'scatter', 'box', 'hist', 'quiver',
+                              'surface', 'wireframe', 'trisurf', 'line3d', 'scatter3d']);
 
 function refreshLegendInspector() {
   const sel = selected();
@@ -1120,16 +1147,19 @@ function refreshSeriesInspector() {
   // A right axis holds its own data; not when the right side is already a
   // calibrated copy of the left one, and not for colour maps or box plots.
   $('series-axis-field').hidden = selected().some((s) => panelById(s.panel)?.right_axis
-    || ['heatmap', 'contour', 'contourf', 'box'].includes(s.obj.kind));
+    || NOT_FLAT(panelById(s.panel))
+    || ['heatmap', 'contour', 'contourf', 'box', 'violin', 'hist', 'hexbin', 'quiver'].includes(s.obj.kind));
 
   // Show only the settings this kind of curve has.
   const kinds = new Set(selected().map((s) => s.obj.kind || 'line'));
   const all = (...ks) => [...kinds].every((k) => ks.includes(k));
-  const noDots = all('band', 'bar', 'heatmap', 'contour', 'contourf', 'box');
+  const noDots = all('band', 'bar', 'heatmap', 'contour', 'contourf', 'box', 'violin', 'hist', 'quiver',
+                     'hexbin', 'surface', 'wireframe', 'trisurf');
   $('f-series-marker').closest('label').hidden = noDots;
   $('f-series-ms').closest('label').hidden = noDots || all('scatter');
-  $('f-series-lw').closest('label').hidden = noDots || all('scatter');
-  const mapped = selected().every((s) => CMAP_KINDS.has(s.obj.kind) && (s.obj.kind !== 'scatter' || s.obj.c));
+  $('f-series-lw').closest('label').hidden = (noDots && !all('wireframe')) || all('scatter', 'scatter3d');
+  const mapped = selected().every((s) => CMAP_KINDS.has(s.obj.kind)
+    && (!MAYBE_CMAP.has(s.obj.kind) || s.obj.c || s.obj.style?.cmap));
   $('f-series-color').closest('label').hidden = mapped;
   $('cmap-fields').hidden = !mapped;
   if (mapped) refreshCmapFields();
@@ -1621,6 +1651,7 @@ function buildList() {
     if (p.xlabel?.text) add(mathHtml(p.xlabel.text), `${p.id}__xlabel`, 'xlabel', ICON.words, p.xlabel);
     if (p.ylabel?.text) add(mathHtml(p.ylabel.text), `${p.id}__ylabel`, 'ylabel', ICON.words, p.ylabel);
     if (p.ylabel2?.text) add(mathHtml(p.ylabel2.text), `${p.id}__ylabel2`, 'ylabel2', ICON.words, p.ylabel2);
+    if (p.zlabel?.text) add(mathHtml(p.zlabel.text), `${p.id}__zlabel`, 'zlabel', ICON.words, p.zlabel);
     for (const k of ['top_axis', 'right_axis']) {
       if (p[k]?.text) add(mathHtml(p[k].text), `${p.id}__${k}`, k, ICON.words, p[k]);
     }
@@ -1646,7 +1677,7 @@ function buildList() {
 
 /* Kinds whose row shows user text, so it needs a word saying what it is.
  * Rows like "Plot box" already say it. */
-const TAGGED_KINDS = new Set(['suptitle', 'title', 'xlabel', 'ylabel', 'ylabel2', 'top_axis', 'right_axis',
+const TAGGED_KINDS = new Set(['suptitle', 'title', 'xlabel', 'ylabel', 'zlabel', 'ylabel2', 'top_axis', 'right_axis',
                               'text', 'series', 'guide']);
 
 const ICON = {
@@ -1787,6 +1818,7 @@ function markList() {
 
 let drag = null;
 let rubber = null;
+let turn = null;    // dragging an empty part of a 3-D plot turns it
 
 /** Which panel (if any) an SVG-space point falls inside. */
 function panelAt(pt) {
@@ -1925,6 +1957,13 @@ canvas.addEventListener('pointerdown', (evt) => {
   }
 
   evt.preventDefault();
+  const hit = panelAt(clientToSvg(evt));
+  if (hit && geometry.panels[hit].projection === '3d' && !isMulti(evt)) {
+    const p = panelById(hit);
+    turn = { pid: hit, start: { x: evt.clientX, y: evt.clientY }, base: { ...VIEW, ...p.view }, moved: false };
+    svgEl.setPointerCapture(evt.pointerId);
+    return;
+  }
   rubber = {
     startClient: { x: evt.clientX, y: evt.clientY },
     moved: false,
@@ -1937,6 +1976,20 @@ canvas.addEventListener('pointerdown', (evt) => {
 });
 
 canvas.addEventListener('pointermove', (evt) => {
+  if (turn) {
+    const dx = evt.clientX - turn.start.x;
+    const dy = evt.clientY - turn.start.y;
+    if (!turn.moved && Math.hypot(dx, dy) < 3) return;
+    if (!turn.moved) pushHistory();
+    turn.moved = true;
+    const p = panelById(turn.pid);
+    // Half a degree per screen pixel: across the plot is about a half turn.
+    p.view = { elev: Math.round(Math.max(-90, Math.min(90, turn.base.elev + dy * 0.5))),
+               azim: Math.round(((turn.base.azim - dx * 0.5 + 540) % 360) - 180) };
+    setStatus(`Turning ${plotName(turn.pid)}: ${p.view.azim}° round, ${p.view.elev}° up`);
+    scheduleSave(120);
+    return;
+  }
   if (drag) {
     const now = clientToSvg(evt);
     const dx = now.x - drag.start.x;
@@ -1985,6 +2038,13 @@ canvas.addEventListener('pointermove', (evt) => {
 });
 
 canvas.addEventListener('pointerup', (evt) => {
+  if (turn) {
+    try { svgEl.releasePointerCapture(evt.pointerId); } catch { /* already gone */ }
+    const { pid, moved } = turn;
+    turn = null;
+    if (moved) scheduleSave(0); else setSelection([`panel:${pid}`]);
+    return;
+  }
   if (drag) {
     const moved = drag.moved;
     svgEl.querySelectorAll('.ff-dragging').forEach((n) => n.classList.remove('ff-dragging'));
@@ -2009,6 +2069,7 @@ canvas.addEventListener('pointerup', (evt) => {
 });
 
 canvas.addEventListener('pointercancel', () => {
+  turn = null;
   svgEl?.querySelectorAll('.ff-dragging').forEach((n) => n.classList.remove('ff-dragging'));
   drag = null;
   if (rubber) { rubber.el?.remove(); rubber = null; }
@@ -2223,6 +2284,30 @@ for (const [fid, lim, idx] of [
   $(fid).addEventListener('change', (e) => {
     const v = parseFloat(e.target.value);
     if (Number.isFinite(v)) edit((o) => { o[lim][idx] = v; });
+  });
+}
+
+for (const [fid, idx] of [['f-zmin', 0], ['f-zmax', 1]]) {
+  $(fid).addEventListener('change', (e) => {
+    const v = parseFloat(e.target.value);
+    if (Number.isFinite(v)) edit((o) => { if (o.projection === '3d') { o.zlim ??= [0, 1]; o.zlim[idx] = v; } });
+  });
+}
+$('f-zscale').addEventListener('change', (e) => {
+  if (e.target.value === 'log' && selected().some((s) => (s.obj.zlim || [0]).some((v) => v <= 0))) {
+    $('axes-note').hidden = false;
+    $('axes-note').textContent = 'Log scale needs every number above zero, but the height goes down to zero or below.';
+    e.target.value = 'linear';
+    return;
+  }
+  edit((o) => { if (o.projection === '3d') o.zscale = e.target.value; });
+});
+for (const [fid, key, lo, hi] of [['f-turn', 'azim', -360, 360], ['f-tilt', 'elev', -90, 90]]) {
+  $(fid).addEventListener('change', (e) => {
+    const v = parseFloat(e.target.value);
+    if (Number.isFinite(v)) {
+      edit((o) => { if (o.projection === '3d') o.view = { ...VIEW, ...o.view, [key]: Math.max(lo, Math.min(hi, v)) }; });
+    }
   });
 }
 
@@ -2445,8 +2530,14 @@ for (const xy of ['x', 'y']) {
 }
 $('btn-add-span').addEventListener('click', () => addSpan(panelById(selected()[0]?.panel)));
 $('menu-add-span').onclick = () => addSpan(workingPanel());
+/** Flat-only things (arrows, shading, a second scale) on a 3-D or round plot: say so. */
+function flatOnly(p, what) {
+  if (!NOT_FLAT(p)) return false;
+  setStatus(`${capitalize(plotName(p.id))} is ${p.projection === '3d' ? '3-D' : 'round'}: ${what} only go on flat plots`, 'err');
+  return true;
+}
 function addSpan(p) {
-  if (!p) return;
+  if (!p || flatOnly(p, 'shaded ranges')) return;
   const m = middleOf(p);
   pushHistory();
   (p.spans ??= []).push({ axis: 'x', lo: m.xAt(0.4), hi: m.xAt(0.6), color: '#cccccc', alpha: 0.3 });
@@ -2734,6 +2825,10 @@ $('canvas-wrap').addEventListener('pointermove', (e) => {
   const pid = panelAt(pt);
   if (!pid) { $('sb-xy').textContent = ''; return; }
   const g = geometry.panels[pid];
+  if (g.projection) {
+    $('sb-xy').textContent = g.projection === '3d' ? 'Drag an empty spot to turn it' : '';
+    return;
+  }
   const [x, y] = svgToData(pid, pt.x, pt.y);
   const where = Object.keys(geometry.panels).length > 1 ? `(${pid})  ` : '';
   $('sb-xy').textContent = `${where}x ${shortNumber(x, g.xlim, g.xscale)}   y ${shortNumber(y, g.ylim, g.yscale)}`;
@@ -2903,7 +2998,8 @@ $('btn-add-label').onclick = () => {
   const m = middleOf(p);
   const id = freshId(p, 'label');
   pushHistory();
-  (p.texts ??= []).push({ id, text: 'New label', xy: [m.x, m.y], coords: 'data',
+  (p.texts ??= []).push({ id, text: 'New label', ...(NOT_FLAT(p) ? { xy: [0.5, 0.5], coords: 'axes' }
+                                                                 : { xy: [m.x, m.y], coords: 'data' }),
                           size: 12, color: '#000000', ha: 'center', va: 'center' });
   buildList();
   setSelection([id]);
@@ -2913,6 +3009,7 @@ $('btn-add-label').onclick = () => {
 
 $('btn-add-arrow').onclick = () => {
   const p = workingPanel();
+  if (flatOnly(p, 'arrows')) return;
   const m = middleOf(p);
   const id = freshId(p, 'arrow');
   pushHistory();
@@ -2952,6 +3049,7 @@ $('menu-add-grid').onclick = () => {
 
 $('menu-add-twin').onclick = () => {
   const p = workingPanel();
+  if (flatOnly(p, 'second scales')) return;
   const picked = selected().filter((s) => s.kind === 'series');
   const line = picked[0] ? null : [...(p.series || [])].reverse().find((c) => c.axis !== 'right');
   if (!picked.length && !line) {

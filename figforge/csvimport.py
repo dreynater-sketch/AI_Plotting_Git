@@ -138,8 +138,15 @@ def build(project, text, x, ys, kind="line", filename=""):
     return spec, arrays
 
 
-LAYER_KINDS = ("errorbar", "band", "bar", "scatter", "heatmap", "contour", "contourf", "box")
+LAYER_KINDS = ("errorbar", "band", "bar", "scatter", "heatmap", "contour", "contourf", "box",
+               "violin", "hist", "quiver", "hexbin",
+               "surface", "wireframe", "trisurf", "line3d", "scatter3d")
 GRID_KINDS = ("heatmap", "contour", "contourf")
+GROUP_KINDS = ("box", "violin")              # one column per group, no x
+NO_X_KINDS = GROUP_KINDS + ("hist",)
+KINDS_3D = ("surface", "wireframe", "trisurf", "line3d", "scatter3d")
+PROJECTIONS = ("flat", "3d", "polar")
+HIST_BINS = 30
 MAX_GRID_CELLS = 1_000_000
 
 
@@ -155,6 +162,35 @@ def _grid(xcol, ycol, zcol):
     Z = np.full((ys.size, xs.size), np.nan)
     Z[np.searchsorted(ys, ycol[ok]), np.searchsorted(xs, xcol[ok])] = zcol[ok]
     return xs, ys, Z
+
+
+def _mesh(xcol, ycol, zcol):
+    """Tidy x, y, z columns -> 2-D X, Y, Z for a 3-D surface. Rows grouped by
+    x with the same number of rows in every group make a mesh that may
+    follow a curved edge (each x its own y range, e.g. up to a material's
+    limit); otherwise the rows are arranged on a grid of every x and y."""
+    ok = ~(np.isnan(xcol) | np.isnan(ycol))
+    x, y, z = xcol[ok], ycol[ok], zcol[ok]
+    xs, counts = np.unique(x, return_counts=True)
+    if xs.size >= 2 and counts.min() == counts.max() >= 2:
+        order = np.lexsort((y, x))
+        shape = (xs.size, int(counts[0]))
+        return x[order].reshape(shape), y[order].reshape(shape), z[order].reshape(shape)
+    gx, gy, Z = _grid(xcol, ycol, zcol)
+    X, Y = np.meshgrid(gx, gy)
+    return X, Y, Z
+
+
+def _colour_surfaces(series):
+    """One surface: coloured by height with a colour bar. Several (e.g. one
+    per material): each its own plain colour, told apart by the legend."""
+    surfaces = [c for c in series if c.get("kind") in ("surface", "trisurf")]
+    if len(surfaces) == 1:
+        surfaces[0].setdefault("colorbar", {"label": surfaces[0].get("label", "")})
+        return
+    for n, c in enumerate(surfaces):
+        c["style"] = {"color": PALETTE[n % len(PALETTE)], "alpha": 0.85, "lw": 0}
+        c.pop("colorbar", None)
 
 
 def _edges(v):
@@ -183,14 +219,16 @@ def _col(names, cols, ref, what):
     return i
 
 
-def _curves(idp, pre, names, cols, batch, arrays, colour):
+def _curves(idp, pre, names, cols, batch, arrays, colour, lim_z=None):
     """One batch of curves for a panel: batch = {x, ys, kind, layers}; a
     layer may have its own x (a fit on a finer grid than the data).
     -> (behind, front, lim_x, lim_y, colour, has_bar, exact). exact = data
     edges the axes should hug (heatmaps, contours) instead of padding.
-    Array keys start with `pre` and ids with `idp`, so batches never collide."""
+    Array keys start with `pre` and ids with `idp`, so batches never collide.
+    lim_z collects the z values of 3-D layers."""
+    lim_z = [] if lim_z is None else lim_z
     layers = batch.get("layers") or []
-    only_boxes = layers and all(ly.get("kind") == "box" for ly in layers) and not batch.get("ys")
+    only_boxes = layers and all(ly.get("kind") in NO_X_KINDS for ly in layers) and not batch.get("ys")
     x = None if only_boxes and batch.get("x") in (None, "") else _col(names, cols, batch.get("x"), "x")
     kind = batch.get("kind") or "line"
     if kind not in PLOT_KINDS:
@@ -203,7 +241,7 @@ def _curves(idp, pre, names, cols, batch, arrays, colour):
     behind, front, lim_x, lim_y, has_bar, exact = [], [], [], [], False, []
     if x is not None:
         arrays[xkey] = cols[x]
-        if ys or any(ly.get("kind") not in GRID_KINDS + ("box",) for ly in layers):
+        if ys or any(ly.get("kind") not in GRID_KINDS + NO_X_KINDS + ("hexbin",) + KINDS_3D for ly in layers):
             lim_x.append(cols[x])
     for n, y in enumerate(ys):
         key = f"{pre}y{n}"
@@ -229,6 +267,38 @@ def _curves(idp, pre, names, cols, batch, arrays, colour):
         colour_hex = PALETTE[colour % len(PALETTE)]
         colour += 1
         key, ex = f"{pre}l{m}", f"{pre}l{m}b"
+        if lk == "hist":
+            v = _col(names, cols, ly.get("y"), "the histogram's values")
+            arrays[key] = cols[v][~np.isnan(cols[v])]
+            if not arrays[key].size:
+                raise CSVError(f"column '{names[v]}' has no numbers for a histogram")
+            counts, _ = np.histogram(arrays[key], HIST_BINS)
+            lim_x.append(arrays[key])
+            lim_y += [np.zeros(1), counts.astype(float)]
+            has_bar = True
+            behind.append({"id": f"{idp}l{m}", "kind": "hist", "x": key,
+                           "label": _plain(ly.get("label") or names[v]),
+                           "style": {"bins": HIST_BINS, "color": colour_hex, "alpha": 0.85,
+                                     "edgecolor": "white"}})
+            continue
+        if lk == "violin":
+            groups = [_col(names, cols, c, "a violin plot group") for c in ly.get("columns") or []]
+            if not groups:
+                raise CSVError("a violin plot needs at least one column (one per group)")
+            gkeys = []
+            for j, g in enumerate(groups):
+                gk = f"{pre}l{m}g{j}"
+                arrays[gk] = cols[g][~np.isnan(cols[g])]
+                if arrays[gk].size < 2:
+                    raise CSVError(f"column '{names[g]}' needs at least 2 numbers for a violin")
+                gkeys.append(gk)
+                lim_y.append(arrays[gk])
+            lim_x.append(np.array([0.5, len(groups) + 0.5]))
+            front.append({"id": f"{idp}l{m}", "kind": "violin", "groups": gkeys,
+                          "label": _plain(ly.get("label") or ""),
+                          "style": {"color": colour_hex, "showmedians": True, "widths": 0.6,
+                                    "positions": list(range(1, len(groups) + 1))}})
+            continue
         if lk == "box":
             groups = [_col(names, cols, c, "a box plot group") for c in ly.get("columns") or []]
             if not groups:
@@ -256,6 +326,65 @@ def _curves(idp, pre, names, cols, batch, arrays, colour):
             if xi != x:
                 lx = f"{pre}l{m}x"
                 arrays[lx] = cols[xi]
+        if lk in KINDS_3D:
+            z = _col(names, cols, ly.get("z"), f"the {lk} layer's z column")
+            label = _plain(ly.get("label") or names[z])
+            item = {"id": f"{idp}l{m}", "kind": lk, "label": label}
+            if lk in ("surface", "wireframe"):
+                X, Y, Z = _mesh(arrays[lx], cols[y], cols[z])
+                gx, gy = f"{pre}l{m}gx", f"{pre}l{m}gy"
+                arrays[gx], arrays[gy], arrays[key] = X, Y, Z
+                item.update(x=gx, y=gy, z=key)
+            else:
+                arrays[key], arrays[ex] = cols[y], cols[z]
+                item.update(x=lx, y=key, z=ex)
+            if lk == "surface" or lk == "trisurf":
+                item["style"] = {"cmap": "viridis", "alpha": 0.9, "lw": 0}
+            elif lk == "wireframe":
+                item["style"] = {"color": colour_hex, "lw": 0.6}
+            elif lk == "line3d":
+                item["style"] = {"color": colour_hex, "lw": 1.6}
+            else:
+                item["style"] = {"s": 20}
+                if ly.get("extra") not in (None, ""):
+                    c = _col(names, cols, ly["extra"], "the colour column")
+                    arrays[f"{pre}l{m}c"] = cols[c]
+                    item["c"] = f"{pre}l{m}c"
+                    item["style"]["cmap"] = "viridis"
+                    item["colorbar"] = {"label": _plain(names[c])}
+                else:
+                    item["style"]["color"] = colour_hex
+            lim_x.append(arrays[item["x"]])
+            lim_y.append(arrays[item["y"]])
+            lim_z.append(arrays[item["z"]])
+            (behind if lk in ("surface", "wireframe", "trisurf") else front).append(item)
+            continue
+        if lk == "quiver":
+            u = _col(names, cols, ly.get("extra"), "the arrows' x part (second_column)")
+            v = _col(names, cols, ly.get("z"), "the arrows' y part (z_column)")
+            arrays[key], arrays[ex], arrays[f"{pre}l{m}v"] = cols[y], cols[u], cols[v]
+            front.append({"id": f"{idp}l{m}", "kind": "quiver", "x": lx, "y": key, "u": ex,
+                          "v": f"{pre}l{m}v", "label": _plain(ly.get("label") or ""),
+                          "style": {"color": colour_hex}})
+            exact.append((float(np.nanmin(arrays[lx])), float(np.nanmax(arrays[lx])),
+                          float(np.nanmin(cols[y])), float(np.nanmax(cols[y]))))
+            continue
+        if lk == "hexbin":
+            arrays[key] = cols[y]
+            item = {"id": f"{idp}l{m}", "kind": "hexbin", "x": lx, "y": key,
+                    "style": {"gridsize": 30, "cmap": "viridis", "mincnt": 1}}
+            if ly.get("extra") not in (None, ""):
+                c = _col(names, cols, ly["extra"], "the hexagon map's value column")
+                arrays[ex] = cols[c]
+                item["c"] = ex
+                item["label"] = _plain(ly.get("label") or names[c])
+            else:
+                item["label"] = _plain(ly.get("label") or "count")
+            item["colorbar"] = {"label": item["label"]}
+            exact.append((float(np.nanmin(arrays[lx])), float(np.nanmax(arrays[lx])),
+                          float(np.nanmin(cols[y])), float(np.nanmax(cols[y]))))
+            behind.append(item)
+            continue
         if lk in GRID_KINDS:
             z = _col(names, cols, ly.get("extra"), f"the {lk} layer's value (z) column")
             xs, gys, Z = _grid(arrays[lx], cols[y], cols[z])
@@ -340,10 +469,12 @@ def _names_of(names, cols, batch):
            "kind": batch.get("kind") or "line", "layers": []}
     for ly in batch.get("layers") or []:
         l = {"kind": ly.get("kind"), "label": ly.get("label") or ""}
-        if ly.get("kind") == "box":
+        if ly.get("kind") in GROUP_KINDS:
             l["columns"] = [nm(c, "group") for c in ly.get("columns") or []]
         else:
             l["y"] = nm(ly.get("y"), "layer")
+            if ly.get("z") not in (None, ""):
+                l["z"] = nm(ly["z"], "layer z")
             if ly.get("extra") not in (None, ""):
                 l["extra"] = nm(ly["extra"], "layer")
             if ly.get("size") not in (None, ""):
@@ -374,8 +505,22 @@ def build_panels(project, text, panels, filename="", figure_title="", rows=1):
         pid = "abcdefghi"[i]
         where = f"panel ({pid}): " if len(panels) > 1 else ""
         xscale, yscale = pn.get("xscale") or "linear", pn.get("yscale") or "linear"
-        if xscale not in SCALES or yscale not in SCALES:
+        zscale = pn.get("zscale") or "linear"
+        if xscale not in SCALES or yscale not in SCALES or zscale not in SCALES:
             raise CSVError(f"{where}scale must be linear or log")
+        proj = pn.get("projection") or "flat"
+        if proj not in PROJECTIONS:
+            raise CSVError(f"{where}projection must be flat, 3d or polar")
+        kinds = [ly.get("kind") for b in [pn] + list(pn.get("more") or []) for ly in b.get("layers") or []]
+        if proj == "3d" and (any(b.get("ys") for b in [pn] + list(pn.get("more") or []))
+                             or pn.get("right_ys") or any(k not in KINDS_3D for k in kinds)):
+            raise CSVError(f"{where}a 3-D panel draws only 3-D layers (surface, wireframe, trisurf, "
+                           "line3d, scatter3d); give y_columns [] and list each curve as a layer")
+        if proj != "3d" and any(k in KINDS_3D for k in kinds):
+            raise CSVError(f"{where}3-D layers need the panel's projection set to 3d")
+        if proj == "polar" and pn.get("right_ys"):
+            raise CSVError(f"{where}a polar panel can't have a right-hand y-axis")
+        lim_z = []
         batches = [pn] + list(pn.get("more") or [])
         behind, front, lim_x, lim_y, has_bar, exact = [], [], [], [], False, []
         try:
@@ -384,7 +529,7 @@ def build_panels(project, text, panels, filename="", figure_title="", rows=1):
                 # older projects use.
                 pre = ("" if i == 0 else f"{pid}_") if b == 0 else f"{pid}_m{b}_"
                 idp = f"{pid}_" if b == 0 else f"{pid}_m{b}_"
-                bh, fr, lx, ly_, colour, bar, ex_ = _curves(idp, pre, names, cols, batch, arrays, colour)
+                bh, fr, lx, ly_, colour, bar, ex_ = _curves(idp, pre, names, cols, batch, arrays, colour, lim_z)
                 behind += bh; front += fr; lim_x += lx; lim_y += ly_; has_bar |= bar; exact += ex_
             recipe = [_names_of(names, cols, batch) for batch in batches]
             right, lim_r, right_names = [], [], []
@@ -414,11 +559,19 @@ def build_panels(project, text, panels, filename="", figure_title="", rows=1):
         # Bars stand on zero: no padding below it when nothing is negative.
         if has_bar and yscale == "linear" and min(float(np.nanmin(c)) for c in lim_y) >= 0:
             ylim[0] = 0.0
+        if proj == "polar":
+            # The angle (x, in radians) goes all the way round; the distance
+            # from the middle starts at 0.
+            xlim = [0.0, round(2 * math.pi, 12)]
+            if yscale == "linear" and min(float(np.nanmin(c)) for c in lim_y) >= 0:
+                ylim[0] = 0.0
         x0 = recipe[0]["x"]
         ys0 = recipe[0]["ys"]
         title = text_or(pn.get("title"), _plain(stem) if i == 0 else "")
         ylabel = text_or(pn.get("ylabel"), _plain(ys0[0]) if len(ys0) == 1 else "value")
         series = behind + front + right
+        _colour_surfaces(series)
+        z_names = [ly.get("z") for b in recipe for ly in b["layers"] if ly.get("z")]
         out.append({
             "id": pid,
             "title": {"text": title, "loc": "left", "size": 14, "color": "#000000"},
@@ -429,11 +582,25 @@ def build_panels(project, text, panels, filename="", figure_title="", rows=1):
             "xscale": xscale, "yscale": yscale, "aspect": "auto",
             "xtick_size": 11, "ytick_size": 11, "frame_lw": 0.8,
             "legend": {"loc": "best", "frameon": False, "size": 10, "xy": None}
-                      if sum(1 for c in series if c.get("kind") not in GRID_KINDS + ("box",)) > 1 else None,
+                      if sum(1 for c in series if c.get("kind") not in GRID_KINDS + GROUP_KINDS
+                             + ("hexbin",)) > 1 else None,
             "series": series,
             "arrows": [],
             "texts": [],
         })
+        if proj != "flat":
+            out[-1]["projection"] = proj
+            out[-1]["grid"] = "major"
+        if proj == "3d":
+            out[-1]["zlabel"] = {"text": text_or(pn.get("zlabel"), _plain(z_names[0]) if len(set(z_names)) == 1
+                                                 else "value"), "size": 13, "color": "#000000"}
+            out[-1]["zlim"] = _limits(lim_z, zscale == "log")
+            out[-1]["zscale"] = zscale
+            if zscale == "log":     # colours follow the height's log scale
+                for c in series:
+                    if "cmap" in (c.get("style") or {}) and c["kind"] in ("surface", "trisurf", "scatter3d"):
+                        c["style"]["norm"] = "log"
+            out[-1]["ztick_size"] = 11
         if right:
             out[-1]["twin"] = {"ylim": _limits(lim_r, False)}
             out[-1]["ylabel2"] = {"text": text_or(pn.get("right_label"), _plain(right_names[0])
@@ -441,6 +608,8 @@ def build_panels(project, text, panels, filename="", figure_title="", rows=1):
                                   "size": 13, "color": "#000000"}
         src = dict(recipe[0], title=pn.get("title"), xlabel=pn.get("xlabel"),
                    ylabel=pn.get("ylabel"), xscale=xscale, yscale=yscale)
+        if proj != "flat":
+            src.update(projection=proj, zlabel=pn.get("zlabel"), zscale=zscale)
         if right:
             src.update(right_ys=right_names, right_label=pn.get("right_label"))
         if len(recipe) > 1:
@@ -496,7 +665,7 @@ def add_batch(spec, project, text, panel_id, batch):
     added = [s for s in full["panels"][i]["series"] if s["id"] not in have]
     p = new["panels"][i]
     for s in added:
-        if s.get("kind") in ("band", "bar"):
+        if s.get("kind") in ("band", "bar", "hist", "hexbin", "surface", "wireframe", "trisurf"):
             p["series"].insert(0, s)      # behind the lines and points
         else:
             p["series"].append(s)

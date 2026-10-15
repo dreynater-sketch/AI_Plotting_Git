@@ -430,6 +430,37 @@
             </div>
           </div>
 
+          <div id="axes-3d-fields" hidden>
+            <div class="subhead">Height axis (z)</div>
+            <div class="row">
+              <label class="field">
+                <span>min</span>
+                <input type="number" id="f-zmin" step="any">
+              </label>
+              <label class="field">
+                <span>max</span>
+                <input type="number" id="f-zmax" step="any">
+              </label>
+            </div>
+            <label class="field">
+              <span>scale</span>
+              <select id="f-zscale">
+                <option value="linear">linear</option><option value="log">log</option>
+              </select>
+            </label>
+            <div class="subhead">Turn it (or drag an empty spot in the plot)</div>
+            <div class="row">
+              <label class="field">
+                <span>Round (°)</span>
+                <input type="number" id="f-turn" min="-360" max="360" step="5">
+              </label>
+              <label class="field">
+                <span>Up (°)</span>
+                <input type="number" id="f-tilt" min="-90" max="90" step="5">
+              </label>
+            </div>
+          </div>
+
           <div id="axes-panel-fields">
             <div class="subhead">Box</div>
             <div class="row">

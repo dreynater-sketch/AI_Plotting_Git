@@ -99,18 +99,47 @@ channel calibration). describe_figure gives the ids the editing tools need.
 someone who isn't an expert: what the figure shows, and anything you \
 couldn't do or had to assume.
 
-FigForge can draw lines, points and step lines; error bars; shaded bands; \
-bars (bar charts, and histograms from bin centres and counts you compute); \
-scatter dots coloured and sized by columns; heatmaps, contour lines and \
-filled contours from tidy x, y, z columns; box plots - in 1-9 panels, side by \
-side or in a grid (rows), with linear or log axes, a second top/right scale, labels, legend, \
-colour bars, fonts, grid lines and minor ticks (set_grid), scientific \
-tick numbers and tick spacing (set_tick_format), and shaded x or y ranges \
-(add_span), a second y-axis on the right with its own data (set_curve_axis), \
-panel grids (set_layout). style_colormap changes a map's colours, range, log \
-scale and colour bar. It cannot yet draw 3D or polar plots - if the idea \
-needs one, make the closest honest figure and say so. For a fit, compute \
-the fitted curve in the sandbox and plot it as its own column.
+FigForge can draw, in 1-9 panels side by side or in a grid (rows):
+- flat panels: lines, points and step lines; error bars; shaded bands; bars; \
+histograms (hist: FigForge bins the raw values); scatter dots coloured and \
+sized by columns; heatmaps, contour lines and filled contours from tidy x, y, \
+z columns; hexagon maps (hexbin: how many points fall in each cell, or a \
+column's mean there); arrow fields (quiver: x, y and the arrows' x and y \
+parts); box plots and violin plots (one column per group). With linear or log \
+axes, a second top/right scale (set_second_axis), a second y-axis on the \
+right with its own data (set_curve_axis), shaded x or y ranges (add_span).
+- 3-D panels (projection "3d"): surfaces (from tidy x, y, z rows - rows \
+grouped by x with the same number of rows per x make a mesh that can follow \
+a curved edge, e.g. each temperature running up to its own limit field), \
+wireframes, surfaces from scattered points (trisurf), 3-D lines and 3-D dots, \
+each axis linear or log, turned with set_view. Use 3-D when the idea asks \
+for it or a quantity truly depends on two others; one surface is coloured by \
+height with a colour bar, several get one colour each and a legend.
+- polar panels (projection "polar"): x is the angle in RADIANS (convert \
+degrees in the sandbox), y the distance from the middle; lines, dots, bars.
+Everywhere: labels, legend, colour bars, fonts, grid lines and minor ticks \
+(set_grid), scientific tick numbers and tick spacing (set_tick_format), panel \
+grids (set_layout); style_colormap changes a map's colours, range, log scale \
+and colour bar. For a fit, compute the fitted curve in the sandbox and plot \
+it as its own column.
+
+When the numbers come from a model or formula rather than measurements:
+- Use the established model for each case (e.g. a different material gets \
+its own law and constants, not one formula for all), and check that its \
+pieces agree with each other.
+- Check the model in the sandbox against a few well-known reference values \
+before drawing it (print them), and say in your reply how close it is \
+(e.g. "within about 2x") and that the constants are typical values from \
+the literature, not fitted to the user's data.
+- Look for places where the formula blows up or goes negative (dividing by \
+a value near zero, a power of a negative number) and cap or cut them in a \
+physically sensible way rather than plotting a spike.
+- Compute each curve or surface only over the range where it is valid, \
+right up to its own edge (e.g. up to each material's own limit), not over \
+one shared rectangle filled with zeros or blanks.
+- Use log axes when values span several powers of ten.
+- In the reply, name the main things the model leaves out that matter for \
+how it would be used (e.g. direction dependence, strain, sample quality).
 
 Rules: never invent data, values or units that aren't in the files or the \
 idea. With no files, the data comes from the idea itself: numbers the user \
@@ -125,23 +154,31 @@ _TEXT = {"type": "string"}
 _SCALE = {"type": "string", "enum": list(csvimport.SCALES)}
 _LAYER = ops._obj({
     "kind": {"type": "string", "enum": list(csvimport.LAYER_KINDS)},
-    "y_column": {"type": "string", "description": "y values; for heatmap/contour the y coordinate of each cell. \"\" for box."},
+    "y_column": {"type": "string", "description": "y values; for heatmap/contour/surface the y coordinate of "
+                                                    "each cell; hist: the raw values to bin. \"\" for box, violin."},
     "second_column": {"type": "string",
                       "description": "errorbar: the +/- error. band: the upper edge. heatmap/contour/contourf: "
-                                     "the value (z) of each cell. scatter: the column that colours the dots "
-                                     "(\"\" = one colour). bar, box: \"\"."},
+                                     "the value (z) of each cell. scatter, scatter3d: the column that colours "
+                                     "the dots (\"\" = one colour). hexbin: a value column averaged per cell "
+                                     "(\"\" = count the points). quiver: the arrows' x part. Others: \"\"."},
+    "z_column": {"type": "string",
+                 "description": "3-D layers (surface, wireframe, trisurf, line3d, scatter3d): the z (height) "
+                                "column. quiver: the arrows' y part. Others: \"\"."},
     "size_column": {"type": "string", "description": "scatter only: the column that sizes the dots; \"\" = one size."},
     "columns": {"type": "array", "items": {"type": "string"},
-                "description": "box only: one column per group (each box); [] otherwise."},
+                "description": "box, violin: one column per group; [] otherwise."},
     "x_column": {"type": "string",
                  "description": "This layer's own x column, e.g. a fit on a finer grid; \"\" = the panel's x."},
     "label": {"type": "string", "description": "Legend entry or colour-bar label; \"\" uses the column name."},
 })
 _LAYERS_DESC = ("Other kinds of curves ([] for none): errorbar, band (shaded between two columns), bar "
-                "(bar chart; a histogram from bin centres + counts), scatter (dots coloured and/or sized "
-                "by columns, with a colour bar), heatmap / contour / contourf (a 2-D map from TIDY "
-                "x, y, z columns - one row per cell; FigForge arranges the grid), box (box plot, one "
-                "column per group; the panel's x_column may be \"\").")
+                "(bar chart from bin centres + heights), hist (histogram of one column's raw values), "
+                "scatter (dots coloured and/or sized by columns, with a colour bar), heatmap / contour / "
+                "contourf (a 2-D map from TIDY x, y, z columns - one row per cell; FigForge arranges the "
+                "grid), hexbin (hexagon map of x, y points), quiver (arrows at x, y), box / violin (one "
+                "column per group; the panel's x_column may be \"\" for these and hist). Only in a "
+                "projection \"3d\" panel (and only these there): surface, wireframe (tidy x, y, z "
+                "rows), trisurf (scattered x, y, z points), line3d, scatter3d.")
 
 CREATE_FIGURE = {
     "name": "create_figure",
@@ -172,6 +209,12 @@ CREATE_FIGURE = {
                        "right_y_label": {"type": "string", "description": "Label of the right y-axis, or \"\"."},
                        "x_scale": _SCALE,
                        "y_scale": _SCALE,
+                       "projection": {"type": "string", "enum": ["flat", "3d", "polar"],
+                                      "description": "flat: an ordinary plot. 3d: x, y, z axes (y_columns [] - "
+                                                     "every curve is a 3-D layer). polar: x is the angle in "
+                                                     "radians, y the distance from the middle."},
+                       "z_label": {"type": "string", "description": "3-D panels: the z axis label; \"\" otherwise."},
+                       "z_scale": _SCALE,
                    })},
     }),
 }
@@ -230,6 +273,7 @@ PROGRESS = {
     "add_span": "Shaded a region",
     "set_layout": "Arranged the panels",
     "set_curve_axis": "Moved a curve to the other y-axis",
+    "set_view": "Turned the 3-D view",
 }
 
 
@@ -533,7 +577,7 @@ def _layers(names, table, layers):
     for ly in layers or []:
         kind = ly.get("kind")
         item = {"kind": kind, "label": ly.get("label") or ""}
-        if kind == "box":
+        if kind in csvimport.GROUP_KINDS:
             item["columns"] = [_column(names, c, table) for c in ly.get("columns") or []]
         else:
             item["y"] = _column(names, ly.get("y_column") or "", table)
@@ -541,6 +585,8 @@ def _layers(names, table, layers):
                 item["extra"] = _column(names, ly["second_column"], table)
             if ly.get("size_column"):
                 item["size"] = _column(names, ly["size_column"], table)
+            if ly.get("z_column"):
+                item["z"] = _column(names, ly["z_column"], table)
         if ly.get("x_column"):
             item["x"] = _column(names, ly["x_column"], table)
         out.append(item)
@@ -611,7 +657,9 @@ def _run_tool(state, fig, call, spec, arrays):
                        "ylabel": p["y_label"], "xscale": p["x_scale"], "yscale": p["y_scale"],
                        "layers": _layers(names, table, p.get("layers")),
                        "right_ys": [_column(names, y, table) for y in p.get("right_y_columns") or []],
-                       "right_label": p.get("right_y_label") or None}
+                       "right_label": p.get("right_y_label") or None,
+                       "projection": p.get("projection") or "flat",
+                       "zlabel": p.get("z_label") or None, "zscale": p.get("z_scale") or "linear"}
                       for p in args.get("panels") or []]
             new_spec, new_arrays = csvimport.build_panels(
                 fig.name, text, panels, table, args.get("figure_title") or "", args.get("rows") or 1)

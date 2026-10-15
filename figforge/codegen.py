@@ -7,6 +7,7 @@ data/curves.npz, run `python figure.py`, get the identical figure. That is what
 """
 
 from figforge import layers
+from figforge.layers import VIEW_AZIM, VIEW_ELEV, colorbar_kw, full_circle
 
 HEADER = '''r"""{title}
 
@@ -83,15 +84,18 @@ def _series_lines(s, axname="ax"):
         kw = (kw + ", " if kw else "") + lev
     if kind in layers.LEGEND_KINDS and s.get("label"):
         kw = (kw + ", " if kw else "") + f"label={_s(s['label'])}"
-    if kind != "box":
+    box = layers.CONTAINER_KINDS.get(kind)    # boxplot / violinplot take no gid=
+    if not box:
         kw = (kw + ", " if kw else "") + f"gid={_s(s['id'])}"
     cb = s.get("colorbar") if k.get("colorbar") else None
-    target = "_b = " if kind == "box" else "_m = " if cb else ""
+    target = "_b = " if box else "_m = " if cb else ""
     out = [f"{target}{axname}.{k['method']}({', '.join(args)}" + (f", {kw}" if kw else "") + ")"]
-    if kind == "box":
-        out.append(f'_b["boxes"][0].set_gid({_s(s["id"])})')
+    if box:
+        out.append(f'_b["{box}"][0].set_gid({_s(s["id"])})')
     if cb:
-        out.append("_cb = fig.colorbar(_m, ax=ax" + (", ticks=LogLocator())" if n else ")"))
+        more = "".join(f", {key}={'LogLocator()' if key == 'ticks' else repr(v)}"
+                       for key, v in colorbar_kw(s, k.get("proj") == "3d").items())
+        out.append(f"_cb = fig.colorbar(_m, ax=ax{more})")
         out.append(f"_cb.ax.tick_params(labelsize={cb.get('tick_size', 10)})")
         if cb.get("label"):
             out.append(f"_cb.set_label({_s(cb['label'])}, fontsize={cb.get('size', 12)}, "
@@ -136,7 +140,7 @@ def generate(spec):
     L.append("")
 
     for i, p in enumerate(spec["panels"]):
-        L.extend(_panel(p, i // cols, i % cols))
+        L.extend(_panel(p, i // cols, i % cols, rows, cols))
 
     layout = spec.get("layout", {})
     if layout.get("tight", True):
@@ -155,8 +159,13 @@ def _grid_shape(spec):
     return 1, n
 
 
-def _panel(p, r, c):
+def _panel(p, r, c, rows=1, cols=1):
     bar = "# " + "-" * 62 + f" ({p['id']})"
+    proj = layers.projection(p)
+    if proj:
+        return [bar, f"axes[{r}, {c}].remove()   # this panel is {'3-D' if proj == '3d' else 'round (polar)'}",
+                f"ax = axes[{r}, {c}] = fig.add_subplot({rows}, {cols}, {r * cols + c + 1}, projection={proj!r})"] \
+            + _round_or_3d(p, proj)
     L = [bar, f"ax = axes[{r}, {c}]"]
 
     for hl in p.get("hlines", []):
@@ -178,7 +187,8 @@ def _panel(p, r, c):
     if twin is not None:
         L.append("ax2 = ax.twinx()   # a second y-axis on the right, with its own data")
     for s in p.get("series", []):
-        L += _series_lines(s, "ax2" if twin is not None and s.get("axis") == "right" else "ax")
+        if layers.fits(s, p):
+            L += _series_lines(s, "ax2" if twin is not None and s.get("axis") == "right" else "ax")
 
     for a in p.get("arrows", []):
         L.append("ax.add_patch(FancyArrowPatch(")
@@ -190,22 +200,7 @@ def _panel(p, r, c):
                  f"zorder={a.get('zorder', 6)}, gid={_s(a['id'])}))")
 
     for t in p.get("texts", []):
-        args = [f"{t['xy'][0]!r}", f"{t['xy'][1]!r}", _s(t["text"])]
-        kw = [f"fontsize={t.get('size', 12)}",
-              f"color={_s(t.get('color', 'black'))}",
-              f"ha={_s(t.get('ha', 'left'))}",
-              f"va={_s(t.get('va', 'baseline'))}"]
-        if t.get("coords", "data") == "axes":
-            kw.append("transform=ax.transAxes")
-        if t.get("bbox"):
-            kw.append("bbox=" + _dict_literal(t["bbox"]))
-        kw.append(f"zorder={t.get('zorder', 10)}")
-        kw.append("clip_on=False")
-        kw.append(f"gid={_s(t['id'])}")
-        L.append(f"_t = ax.text({', '.join(args)},")
-        L.append(f"        {', '.join(kw)})")
-        if t.get("bbox"):
-            L.append("_t.get_bbox_patch().set_clip_on(False)")
+        L += _text_lines(t)
 
     title = p.get("title", {})
     if title.get("text"):
@@ -266,6 +261,73 @@ def _panel(p, r, c):
             L.append(f"{var}.set_{xy}label({_s(sa['text'])}, fontsize={sa.get('size', 13)}, "
                      f"color={_s(sa.get('color', 'black'))})")
 
+    L += _legend(p)
+    if twin is not None:   # one legend for the curves on both axes
+        L = [l.replace("ax.legend(", "ax.legend(handles=ax.get_legend_handles_labels()[0] + "
+                       "ax2.get_legend_handles_labels()[0], ", 1) if l.startswith("ax.legend(") else l
+             for l in L]
+    L.append("")
+    return L
+
+
+def _text_lines(t, flat=True, three_d=False):
+    args = [f"{t['xy'][0]!r}", f"{t['xy'][1]!r}", _s(t["text"])]
+    kw = [f"fontsize={t.get('size', 12)}",
+          f"color={_s(t.get('color', 'black'))}",
+          f"ha={_s(t.get('ha', 'left'))}",
+          f"va={_s(t.get('va', 'baseline'))}"]
+    if not flat or t.get("coords", "data") == "axes":
+        kw.append("transform=ax.transAxes")
+    if t.get("bbox"):
+        kw.append("bbox=" + _dict_literal(t["bbox"]))
+    kw.append(f"zorder={t.get('zorder', 10)}")
+    kw.append("clip_on=False")
+    kw.append(f"gid={_s(t['id'])}")
+    L = [f"_t = ax.{'text2D' if three_d else 'text'}({', '.join(args)},",
+         f"        {', '.join(kw)})"]
+    if t.get("bbox"):
+        L.append("_t.get_bbox_patch().set_clip_on(False)")
+    return L
+
+
+def _round_or_3d(p, proj):
+    """A 3-D or polar panel: its curves, labels (placed across the panel
+    box), axes and view; flat-only extras (guide lines, spans, arrows,
+    second scales) aren't drawn there."""
+    three_d = proj == "3d"
+    L = []
+    for s in p.get("series", []):
+        if layers.fits(s, p):
+            L += _series_lines(s)
+    for t in p.get("texts", []):
+        L += _text_lines(t, flat=False, three_d=three_d)
+    title = p.get("title", {})
+    if title.get("text"):
+        L.append(f"ax.set_title({_s(title['text'])}, loc={_s(title.get('loc', 'center'))}, "
+                 f"fontsize={title.get('size', 14)}, color={_s(title.get('color', 'black'))})")
+    for xyz in ("xyz" if three_d else "xy"):
+        lab = p.get(f"{xyz}label", {})
+        if lab.get("text"):
+            L.append(f"ax.set_{xyz}label({_s(lab['text'])}, fontsize={lab.get('size', 13)}, "
+                     f"color={_s(lab.get('color', 'black'))})")
+    for xyz in ("xyz" if three_d else "xy"):
+        if p.get(f"{xyz}scale", "linear") != "linear":
+            L.append(f"ax.set_{xyz}scale({_s(p[f'{xyz}scale'])})")
+        lim = p.get(f"{xyz}lim")
+        if lim and not (xyz == "x" and not three_d and full_circle(lim)):
+            L.append(f"ax.set_{xyz}lim({lim[0]!r}, {lim[1]!r})")
+        L.append(f'ax.tick_params(axis="{xyz}", labelsize={p.get(f"{xyz}tick_size", 11)})')
+    if three_d:
+        view = p.get("view") or {}
+        L.append(f"ax.view_init(elev={view.get('elev', VIEW_ELEV)!r}, azim={view.get('azim', VIEW_AZIM)!r})")
+    L.append(f"ax.grid({bool(p.get('grid'))})")
+    L += _legend(p)
+    L.append("")
+    return L
+
+
+def _legend(p):
+    L = []
     lg = p.get("legend")
     if lg and any(s.get("label") for s in p.get("series", [])):
         more = f", ncols={lg['ncols']}" if lg.get("ncols", 1) != 1 else ""
@@ -281,9 +343,4 @@ def _panel(p, r, c):
             L.append(f"ax.legend(loc={_s(lg.get('loc', 'best'))}, "
                      f"frameon={lg.get('frameon', False)!r}, "
                      f"fontsize={lg.get('size', 10)}{more})")
-    if twin is not None:   # one legend for the curves on both axes
-        L = [l.replace("ax.legend(", "ax.legend(handles=ax.get_legend_handles_labels()[0] + "
-                       "ax2.get_legend_handles_labels()[0], ", 1) if l.startswith("ax.legend(") else l
-             for l in L]
-    L.append("")
     return L

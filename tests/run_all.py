@@ -39,6 +39,7 @@ SUITES = [
     ("test_fast_open.py", True),
     ("test_names.py", True),
     ("test_layers.py", False),
+    ("test_plot_types.py", True),
     ("test_undo_delete.py", True),
     ("test_box.py", True),
     ("test_guides.py", True),

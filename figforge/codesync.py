@@ -7,6 +7,7 @@ shapes codegen writes -- top-level statements with literal arguments:
 
     fig.suptitle(...), plt.subplots(..., figsize=...), plt.rcParams.update({...})
     ax = axes[0, i]  (or axes[i])         which panel the lines below belong to
+    ax = axes[0, i] = fig.add_subplot(..., projection='3d')   a 3-D / polar panel
     ax.text / ax.plot / ax.add_patch(FancyArrowPatch(...))
     ax.set_title / set_xlabel / set_ylabel / set_xlim / set_ylim / set_xscale ...
     ax.axhline / ax.axvline, ax.tick_params, ax.legend, the spines loop
@@ -165,12 +166,21 @@ def apply(code, spec, array_keys=()):
 
     # Whatever the code didn't mention per panel falls back to "not shown".
     for pnl in panels:
-        for key in ("title", "xlabel", "ylabel"):
+        if "projection" not in pnl.saw:
+            pnl.p.pop("projection", None)
+        if "view" not in pnl.saw:
+            pnl.p.pop("view", None)
+        for key in ("title", "xlabel", "ylabel", "zlabel"):
             if key not in pnl.saw and pnl.p.get(key):
                 pnl.p[key] = {**pnl.p[key], "text": ""}
         for key, default in (("xscale", "linear"), ("yscale", "linear"), ("aspect", "auto")):
             if key not in pnl.saw:
                 pnl.p[key] = default
+        if "zscale" not in pnl.saw:
+            if "zscale" in pnl.old:
+                pnl.p["zscale"] = "linear"
+            else:
+                pnl.p.pop("zscale", None)
         for key in ("top_axis", "right_axis"):
             if key not in pnl.saw:
                 pnl.p.pop(key, None)
@@ -204,6 +214,11 @@ def _statement(node, new, panels, state, taken, array_keys):
         return
     if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant):
         return
+    if isinstance(node, ast.Assign) and len(node.targets) == 2 \
+            and _name(node.targets[0]) == "ax" and isinstance(node.targets[1], ast.Subscript) \
+            and _name(node.targets[1].value) == "axes" and isinstance(node.value, ast.Call) \
+            and _name(node.value.func) == "fig.add_subplot":
+        return _projected_panel(node, panels, state)
     if isinstance(node, ast.Assign) and len(node.targets) == 1:
         target = node.targets[0]
         # D["key"][row] = value: a number changed by hand
@@ -285,10 +300,33 @@ def _statement(node, new, panels, state, taken, array_keys):
         _put(pnl.p, "frame_lw", _num(_lit(node.body[0].value.args[0], "frame width"), "frame width"), 0.8)
         return
     if isinstance(node, ast.Expr) and isinstance(node.value, ast.Call):
+        # axes[r, c].remove(): the flat cell a 3-D / polar panel replaces
+        f = node.value.func
+        if isinstance(f, ast.Attribute) and f.attr == "remove" and isinstance(f.value, ast.Subscript) \
+                and _name(f.value.value) == "axes" and not node.value.args:
+            return
         return _call(node.value, new, state, taken, array_keys)
     raise Skip({ast.For: "loops", ast.While: "loops", ast.If: "if-blocks",
                 ast.FunctionDef: "functions", ast.With: "with-blocks"}
                .get(type(node), "this kind of statement") + " aren't reflected in the figure")
+
+
+def _projected_panel(node, panels, state):
+    """ax = axes[r, c] = fig.add_subplot(rows, cols, n, projection='3d')."""
+    i = _lit(node.targets[1].slice, "panel index")
+    if isinstance(i, tuple) and len(i) == 2:
+        i = i[0] * state.get("cols", len(panels)) + i[1]
+    if not isinstance(i, int) or not 0 <= i < len(panels):
+        raise Skip("there's no panel with that index")
+    kw = _kwargs(node.value)
+    proj = _lit(kw["projection"], "projection") if "projection" in kw else None
+    if proj not in layers.PROJECTIONS:
+        raise Skip("a panel can be projection='3d' or 'polar'")
+    pnl = panels[i]
+    pnl.p["projection"] = proj
+    pnl.saw.add("projection")
+    state["ax"] = pnl
+    state["ax2"] = None
 
 
 # variable -> (spec key, the axis method that makes it, its side, x or y)
@@ -469,8 +507,17 @@ def _call(call, new, state, taken, array_keys):
     p = pnl.p
     method = name[3:]
 
-    if method == "text":
+    if method in ("text", "text2D"):
         return _text(call, args, kw, pnl, taken)
+    if method == "view_init":
+        view = {}
+        for k in ("elev", "azim"):
+            if k in kw:
+                view[k] = _num(_lit(kw[k], k), k)
+        if view != {"elev": layers.VIEW_ELEV, "azim": layers.VIEW_AZIM} or "view" in pnl.old:
+            p["view"] = {**(pnl.old.get("view") or {}), **view}
+        pnl.saw.add("view")
+        return
     if method in layers.BY_METHOD:      # plot / errorbar / bar / pcolormesh / boxplot ...
         item = _series(method, args, kw, pnl, taken, array_keys)
         item.pop("axis", None)
@@ -479,7 +526,7 @@ def _call(call, new, state, taken, array_keys):
         state["last_mapped"] = item if mapped else None
         state["colorbar"] = None
         return
-    if method in ("set_title", "set_xlabel", "set_ylabel"):
+    if method in ("set_title", "set_xlabel", "set_ylabel", "set_zlabel"):
         key = method[4:]
         item = dict(pnl.old.get(key) or {})
         item["text"] = _lit(args[0], "label text") if args else ""
@@ -490,11 +537,11 @@ def _call(call, new, state, taken, array_keys):
         p[key] = item
         pnl.saw.add(key)
         return
-    if method in ("set_xlim", "set_ylim"):
+    if method in ("set_xlim", "set_ylim", "set_zlim"):
         lo, hi = (_lit(a, "limit") for a in args[:2])
         p[method[4:]] = [_num(lo, "limit"), _num(hi, "limit")]
         return
-    if method in ("set_xscale", "set_yscale"):
+    if method in ("set_xscale", "set_yscale", "set_zscale"):
         val = _lit(args[0], "scale")
         if val not in ("linear", "log"):
             raise Skip("only linear and log scales are supported")
@@ -509,8 +556,8 @@ def _call(call, new, state, taken, array_keys):
         axis = _lit(kw["axis"], "axis") if "axis" in kw else "both"
         if "labelsize" in kw:
             size = _num(_lit(kw["labelsize"], "labelsize"), "labelsize")
-            for a in ("x", "y"):
-                if axis in (a, "both"):
+            for a in ("x", "y", "z"):
+                if axis in (a, "both") and (a != "z" or axis == "z"):
                     _put(p, f"{a}tick_size", size, 11)
         return
     if method in ("axvspan", "axhspan"):
@@ -762,7 +809,7 @@ _ALL_DATA_FIELDS = {f for k in layers.KINDS.values()
 
 def _attach_box_gids(body):
     """codegen writes `_b = ax.boxplot(...)` then `_b["boxes"][0].set_gid('id')`
-    (boxplot takes no gid=). Fold the id into the boxplot call so it's
+    (boxplot and violinplot take no gid=). Fold the id into the boxplot call so it's
     claimed like every other curve, and drop the set_gid line."""
     out = []
     for node in body:
@@ -770,7 +817,8 @@ def _attach_box_gids(body):
         if (isinstance(node, ast.Expr) and isinstance(node.value, ast.Call)
                 and isinstance(node.value.func, ast.Attribute) and node.value.func.attr == "set_gid"
                 and isinstance(prev, ast.Assign) and _name(prev.targets[0]) == "_b"
-                and isinstance(prev.value, ast.Call) and _name(prev.value.func) == "ax.boxplot"
+                and isinstance(prev.value, ast.Call)
+                and _name(prev.value.func) in ("ax.boxplot", "ax.violinplot")
                 and node.value.args):
             prev.value.keywords.append(ast.keyword(arg="gid", value=node.value.args[0]))
             continue
@@ -820,7 +868,8 @@ def _diff(old, new, report):
             for i in before:
                 if i not in after:
                     report["removed"].append(f"({po['id']}) {kind[:-1]} “{_describe(before[i])}”")
-        for key in ("title", "xlabel", "ylabel", "xlim", "ylim", "xscale", "yscale",
+        for key in ("title", "xlabel", "ylabel", "zlabel", "xlim", "ylim", "zlim", "xscale", "yscale",
+                    "zscale", "projection", "view",
                     "aspect", "xtick_size", "ytick_size", "frame_lw", "legend",
                     "hlines", "vlines", "zero_lines", "top_axis", "right_axis",
                     "spans", "grid", "minor_ticks", "xfmt", "yfmt", "twin", "ylabel2"):
