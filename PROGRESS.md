@@ -293,3 +293,17 @@ figure → saved-code sync; a phone layout; photo-to-data-points.
   values spanning decades, name what the model leaves out). From comparing FigForge's, Claude
   Desktop's and Grok's critical-surface figures.
 - tests/test_plot_types.py (34 checks).
+
+## Curve fitting + smooth 3-D turning (2026-10-15)
+- Re-ran the critical-surface idea with the new AI: a real 3-D figure (Nb, Nb3Sn, REBCO surfaces,
+  each up to its own edge, log B and log Jc), 4 steps, $0.33. Saved online as "Critical surface 3D".
+- Fit a curve (figforge/fit.py, numpy only -- no scipy on Vercel): straight line, x², x³,
+  exponential, power law, Gaussian, Lorentzian, or a typed formula (parsed with ast and walked by
+  hand, never eval'd). Levenberg-Marquardt, ± errors from the covariance, R², weighted by error
+  bars when the line has them. POST /api/fit/<name> returns numbers + a 200-point curve; the page
+  adds it as a dashed line ("<id>_fit", replaced by a new fit; Undo removes it) with
+  series["fit"] holding the result. "+ Put these numbers on the plot" adds a label.
+  Insert > Fit a curve. tests/test_fit.py.
+- Turning a 3-D plot: GET /api/mesh/<name>/<panel> sends its curves thinned out (30 mesh lines,
+  3000 points); while dragging the page draws a wire picture with the same view maths as
+  matplotlib on a canvas over the plot, and the server draws once on letting go.

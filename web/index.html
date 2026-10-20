@@ -49,6 +49,7 @@
         <hr>
         <button role="menuitem" id="menu-add-legend" title="Show which line is which">Legend</button>
         <button role="menuitem" id="menu-add-grid" title="Faint lines across the plot at the numbers">Grid lines</button>
+        <button role="menuitem" id="menu-add-fit" title="Work out a line or curve that follows the points">Fit a curve…</button>
         <button role="menuitem" id="menu-add-twin" title="Measure a line on its own scale, on the right side">Second scale on the right</button>
       </div>
     </div>
@@ -628,6 +629,48 @@
               <span>Colour bar label</span>
               <input type="text" id="f-cbar-label" spellcheck="false">
             </label>
+          </div>
+          <div id="fit-fields" hidden>
+            <div class="subhead">Fit a curve to it</div>
+            <div class="row">
+              <label class="field">
+                <span>Shape</span>
+                <select id="f-fit-model">
+                  <option value="line">Straight line</option>
+                  <option value="poly2">Curve (x²)</option>
+                  <option value="poly3">Curve (x³)</option>
+                  <option value="exp">Exponential</option>
+                  <option value="power">Power law (x^b)</option>
+                  <option value="gauss">Bell peak (Gaussian)</option>
+                  <option value="lorentz">Sharp peak (Lorentzian)</option>
+                  <option value="formula">My own formula…</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>&nbsp;</span>
+                <button type="button" id="btn-fit-curve">Fit</button>
+              </label>
+            </div>
+            <p class="note" id="fit-shape"></p>
+            <label class="field" id="f-fit-formula-field" hidden>
+              <span>Formula in x <em>(the other letters are worked out)</em></span>
+              <input type="text" id="f-fit-formula" spellcheck="false" placeholder="a*exp(-x/t) + c">
+            </label>
+            <div class="row">
+              <label class="field">
+                <span>Only x from</span>
+                <input type="number" id="f-fit-from" step="any" placeholder="the start">
+              </label>
+              <label class="field">
+                <span>to</span>
+                <input type="number" id="f-fit-to" step="any" placeholder="the end">
+              </label>
+            </div>
+          </div>
+          <div id="fit-result" hidden>
+            <div class="subhead">Fit result</div>
+            <pre id="fit-numbers"></pre>
+            <button type="button" id="btn-fit-label" class="link">+ Put these numbers on the plot</button>
           </div>
           <p class="note" id="series-note">Its numbers are listed under the figure. Click one to change it.</p>
         </div>

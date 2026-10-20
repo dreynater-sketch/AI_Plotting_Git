@@ -408,6 +408,7 @@ function clientToSvg(evt) {
 /* -------------------------------------------------------- svg rendering */
 
 function applySvg(svgText) {
+  if (!turn) removeTurnPreview();      // the real picture replaces the quick one
   canvas.innerHTML = svgText;
   svgEl = canvas.querySelector('svg');
   refreshSizeLabel();
@@ -1056,6 +1057,149 @@ function refreshAxesInspector() {
   $('axes-note').hidden = true;
 }
 
+/* ---------------------------------------------- turning a 3-D plot smoothly
+ * While an empty spot of a 3-D plot is dragged, a quick wire picture of its
+ * curves is drawn right here in the browser at every mouse move, over the
+ * plot; the real matplotlib picture is drawn once, on letting go, and
+ * replaces it. The wire picture uses the same view angles as matplotlib
+ * (looking from azimuth / elevation, z up, the box 4 : 4 : 3). */
+let turnMesh = null;                 // {pid, series} from /api/mesh
+
+async function loadTurnMesh(pid) {
+  turnMesh = { pid, series: null };
+  try {
+    const r = await fetch(`/api/mesh/${FIGURE}/${pid}`);
+    if (r.ok && turnMesh?.pid === pid) {
+      turnMesh.series = (await r.json()).series;
+      if (turn?.moved) drawTurnPreview(pid);
+    }
+  } catch { /* the wire picture is a nicety; the real one still comes */ }
+}
+
+function removeTurnPreview() {
+  document.getElementById('turn-preview')?.remove();
+}
+
+const VIRIDIS = ['#440154', '#3b528b', '#21918c', '#5ec962', '#fde725'];
+function viridisAt(f) {
+  const i = Math.max(0, Math.min(VIRIDIS.length - 1.001, f * (VIRIDIS.length - 1)));
+  const [a, b] = [VIRIDIS[Math.floor(i)], VIRIDIS[Math.floor(i) + 1]];
+  const t = i - Math.floor(i);
+  const mix = (k) => Math.round(parseInt(a.substr(k, 2), 16) * (1 - t) + parseInt(b.substr(k, 2), 16) * t);
+  return `rgb(${mix(1)},${mix(3)},${mix(5)})`;
+}
+
+function drawTurnPreview(pid) {
+  const g = geometry?.panels[pid];
+  const p = panelById(pid);
+  if (!g || !p || !svgEl) return;
+  const r = svgEl.getBoundingClientRect();
+  const k = r.width / geometry.width;
+  const [bx, by, bw, bh] = g.bbox.map((v) => v * k);
+  let cv = document.getElementById('turn-preview');
+  if (!cv) {
+    cv = document.createElement('canvas');
+    cv.id = 'turn-preview';
+    cv.style.cssText = 'position:fixed;pointer-events:none;background:#fff;z-index:5';
+    document.body.appendChild(cv);
+  }
+  const dpr = window.devicePixelRatio || 1;
+  Object.assign(cv.style, { left: `${r.left + bx}px`, top: `${r.top + by}px`, width: `${bw}px`, height: `${bh}px` });
+  cv.width = Math.round(bw * dpr); cv.height = Math.round(bh * dpr);
+  const ctx = cv.getContext('2d');
+  ctx.scale(dpr, dpr);
+
+  const view = { ...VIEW, ...p.view };
+  const az = view.azim * Math.PI / 180, el = view.elev * Math.PI / 180;
+  const u = [-Math.sin(az), Math.cos(az), 0];
+  const w = [-Math.sin(el) * Math.cos(az), -Math.sin(el) * Math.sin(az), Math.cos(el)];
+  const ASPECT = [1, 1, 0.75];
+  const scaleOf = (xyz) => p[`${xyz}scale`] === 'log';
+  const lims = {};
+  for (const xyz of 'xyz') {
+    let lim = p[`${xyz}lim`];
+    if (!lim) {
+      const vals = (turnMesh?.series || []).flatMap((sr) => sr[xyz].flat()).filter((v) => v != null);
+      lim = vals.length ? [Math.min(...vals), Math.max(...vals)] : [0, 1];
+    }
+    lims[xyz] = scaleOf(xyz) ? lim.map((v) => Math.log10(Math.max(v, 1e-300))) : lim;
+  }
+  const norm = (v, xyz) => {
+    if (v == null || !Number.isFinite(v)) return null;
+    const t = scaleOf(xyz) ? (v > 0 ? Math.log10(v) : null) : v;
+    if (t == null) return null;
+    const [lo, hi] = lims[xyz];
+    return Math.max(0, Math.min(1, (t - lo) / ((hi - lo) || 1))) - 0.5;
+  };
+  const project = (a, b, c) => {
+    const q = [a * ASPECT[0], b * ASPECT[1], c * ASPECT[2]];
+    return [q[0] * u[0] + q[1] * u[1], q[0] * w[0] + q[1] * w[1] + q[2] * w[2]];
+  };
+  const corners = [];
+  for (const a of [-0.5, 0.5]) for (const b of [-0.5, 0.5]) for (const c of [-0.5, 0.5]) corners.push(project(a, b, c));
+  const xs = corners.map((c) => c[0]), ys = corners.map((c) => c[1]);
+  const sc = 0.88 * Math.min(bw / (Math.max(...xs) - Math.min(...xs)), bh / (Math.max(...ys) - Math.min(...ys)));
+  const cx = bw / 2 - sc * (Math.max(...xs) + Math.min(...xs)) / 2;
+  const cy = bh / 2 + sc * (Math.max(...ys) + Math.min(...ys)) / 2;
+  const toScreen = ([px, py]) => [cx + sc * px, cy - sc * py];
+
+  // the box, with its three axes darker and named
+  ctx.lineWidth = 1;
+  ctx.strokeStyle = '#d0d0d0';
+  const edge = (p0, p1) => {
+    const [a0, b0] = toScreen(project(...p0)), [a1, b1] = toScreen(project(...p1));
+    ctx.beginPath(); ctx.moveTo(a0, b0); ctx.lineTo(a1, b1); ctx.stroke();
+  };
+  const H = 0.5;
+  for (const a of [-H, H]) for (const b of [-H, H]) {
+    edge([a, b, -H], [a, b, H]); edge([a, -H, b], [a, H, b]); edge([-H, a, b], [H, a, b]);
+  }
+  ctx.strokeStyle = '#555';
+  ctx.fillStyle = '#333';
+  ctx.font = '12px sans-serif';
+  for (const [xyz, to] of [['x', [H, -H, -H]], ['y', [-H, H, -H]], ['z', [-H, -H, H]]]) {
+    edge([-H, -H, -H], to);
+    const [tx, ty] = toScreen(project(...to.map((v) => v * 1.12)));
+    ctx.fillText(xyz, tx, ty);
+  }
+
+  // the curves
+  for (const sr of turnMesh?.series || []) {
+    const colorAt = (zn) => (sr.color || !sr.cmap ? (sr.color || '#4C78A8') : viridisAt(zn + 0.5));
+    const pt = (x, y, z) => {
+      const a = norm(x, 'x'), b = norm(y, 'y'), c = norm(z, 'z');
+      return a == null || b == null || c == null ? null : { s: toScreen(project(a, b, c)), c };
+    };
+    const line = (pts) => {
+      ctx.beginPath();
+      let on = false;
+      for (const q of pts) {
+        if (!q) { on = false; continue; }
+        ctx.strokeStyle = colorAt(q.c);
+        if (on) ctx.lineTo(...q.s); else ctx.moveTo(...q.s);
+        on = true;
+      }
+      ctx.stroke();
+    };
+    ctx.lineWidth = 1;
+    if (Array.isArray(sr.x[0])) {           // a mesh: its rows and its columns
+      const rows = sr.z.length, cols = sr.z[0].length;
+      const P = sr.z.map((row, i) => row.map((z, j) => pt(sr.x[i][j], sr.y[i][j], z)));
+      for (let i = 0; i < rows; i++) line(P[i]);
+      for (let j = 0; j < cols; j++) line(P.map((row) => row[j]));
+    } else if (sr.kind === 'line3d') {
+      line(sr.x.map((x, i) => pt(x, sr.y[i], sr.z[i])));
+    } else {                                // dots (and a surface from points)
+      for (let i = 0; i < sr.x.length; i++) {
+        const q = pt(sr.x[i], sr.y[i], sr.z[i]);
+        if (!q) continue;
+        ctx.fillStyle = colorAt(q.c);
+        ctx.fillRect(q.s[0] - 1.5, q.s[1] - 1.5, 3, 3);
+      }
+    }
+  }
+}
+
 /** FigForge's starting 3-D view (layers.VIEW_ELEV / VIEW_AZIM). */
 const VIEW = { elev: 25, azim: -60 };
 
@@ -1132,7 +1276,102 @@ function refreshCmapFields() {
   $('f-cbar-label').value = common((s) => s.obj.colorbar?.label ?? '') ?? '';
 }
 
+const FIT_KINDS = new Set(['line', 'step', 'errorbar', 'scatter']);
+const FIT_SHAPES = {
+  line: 'y = a·x + b', poly2: 'y = a·x² + b·x + c', poly3: 'y = a·x³ + b·x² + c·x + d',
+  exp: 'y = a·e^(b·x) + c', power: 'y = a·x^b', gauss: 'y = a·e^(−(x−m)²/(2s²)) + c',
+  lorentz: 'y = a / (1 + ((x−m)/w)²) + c', formula: '',
+};
+
+/** One picked line or set of dots: the "Fit a curve" box; a fitted curve:
+ *  its numbers. */
+function refreshFitFields() {
+  const sel = selected();
+  const one = sel.length === 1 && sel[0].kind === 'series' ? sel[0].obj : null;
+  const p = one && panelById(sel[0].panel);
+  $('fit-fields').hidden = !one || !!one.fit || !FIT_KINDS.has(one.kind || 'line') || NOT_FLAT(p);
+  $('fit-result').hidden = !one?.fit;
+  if (one?.fit) $('fit-numbers').textContent = fitSummary(one.fit);
+  const m = $('f-fit-model').value;
+  $('fit-shape').textContent = FIT_SHAPES[m];
+  $('fit-shape').hidden = m === 'formula';
+  $('f-fit-formula-field').hidden = m !== 'formula';
+}
+$('f-fit-model').addEventListener('change', refreshFitFields);
+
+function fitSummary(f) {
+  return [f.text, ...f.nice, `R² = ${f.r2.toFixed(4)}  (${f.n} points${f.weighted ? ', weighted by the error bars' : ''})`]
+    .join('\n');
+}
+
+let fitting = false;   // a fit is on its way (tests wait on it)
+$('btn-fit-curve').onclick = async () => {
+  const s = selected()[0];
+  if (!s || s.kind !== 'series') return;
+  fitting = true;
+  const p = panelById(s.panel);
+  const num = (id) => { const v = parseFloat($(id).value); return Number.isFinite(v) ? v : null; };
+  const body = { series_id: s.id, model: $('f-fit-model').value, formula: $('f-fit-formula').value,
+                 xmin: num('f-fit-from'), xmax: num('f-fit-to') };
+  setStatus('Fitting…', 'busy');
+  try {
+    await flushPending();               // the server fits what is saved
+    const r = await fetch(`/api/fit/${FIGURE}`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                                  body: JSON.stringify(body) });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || r.statusText);
+    pushHistory();
+    // Fitting the same line again replaces its earlier fit.
+    const id = `${s.id}_fit`;
+    p.series = p.series.filter((c) => c.id !== id);
+    const at = p.series.findIndex((c) => c.id === s.id) + 1;
+    const fit = { of: s.id, model: body.model, formula: body.model === 'formula' ? body.formula : '',
+                  text: data.text, nice: data.nice, r2: data.r2, n: data.n, weighted: data.weighted,
+                  params: data.params };
+    p.series.splice(at, 0, { id, x: data.x, y: data.y, label: `fit: ${data.text.replace(/^y = /, '')}`,
+                             style: { color: '#000000', lw: 1.4, ls: '--' }, fit });
+    if (p.series.filter((c) => c.label).length > 1 && !p.legend) {
+      p.legend = { loc: 'best', frameon: false, size: 10, xy: null };
+    }
+    buildList();
+    setSelection([id]);
+    scheduleSave(0);
+    setStatus(`Fitted: R² = ${data.r2.toFixed(4)} ✓`);
+  } catch (e) {
+    setStatus(e.message, 'err');
+  } finally {
+    fitting = false;
+  }
+};
+
+$('menu-add-fit').onclick = () => {
+  const s = selected()[0];
+  const ok = s?.kind === 'series' && FIT_KINDS.has(s.obj.kind || 'line') && !s.obj.fit;
+  const line = ok ? null : (workingPanel().series || []).find((c) => FIT_KINDS.has(c.kind || 'line') && !c.fit);
+  if (!ok && !line) { setStatus('Pick a line or dots first, then fit a curve to it', 'err'); return; }
+  if (line) setSelection([line.id]);
+  $('f-fit-model').focus();
+  setStatus('Choose a shape and press Fit');
+};
+
+$('btn-fit-label').onclick = () => {
+  const s = selected()[0];
+  if (!s?.obj.fit) return;
+  const p = panelById(s.panel);
+  const id = freshId(p, 'label');
+  const f = s.obj.fit;
+  // Plain text (no $...$): mathtext would trip over ± and ².
+  const text = [...f.nice, `R² = ${f.r2.toFixed(4)}`].join('\n');
+  pushHistory();
+  (p.texts ??= []).push({ id, text, xy: [0.04, 0.96], coords: 'axes', size: 10, color: '#000000',
+                          ha: 'left', va: 'top' });
+  buildList();
+  setSelection([id]);
+  scheduleSave(0);
+};
+
 function refreshSeriesInspector() {
+  refreshFitFields();
   const label = common((s) => s.obj.label ?? '');
   $('f-series-label').value = label ?? '';
   $('f-series-label').placeholder = label === undefined ? 'mixed' : 'No name';
@@ -1961,6 +2200,7 @@ canvas.addEventListener('pointerdown', (evt) => {
   if (hit && geometry.panels[hit].projection === '3d' && !isMulti(evt)) {
     const p = panelById(hit);
     turn = { pid: hit, start: { x: evt.clientX, y: evt.clientY }, base: { ...VIEW, ...p.view }, moved: false };
+    loadTurnMesh(hit);
     svgEl.setPointerCapture(evt.pointerId);
     return;
   }
@@ -1987,7 +2227,7 @@ canvas.addEventListener('pointermove', (evt) => {
     p.view = { elev: Math.round(Math.max(-90, Math.min(90, turn.base.elev + dy * 0.5))),
                azim: Math.round(((turn.base.azim - dx * 0.5 + 540) % 360) - 180) };
     setStatus(`Turning ${plotName(turn.pid)}: ${p.view.azim}° round, ${p.view.elev}° up`);
-    scheduleSave(120);
+    drawTurnPreview(turn.pid);     // instant; the real picture comes on letting go
     return;
   }
   if (drag) {
@@ -2042,7 +2282,7 @@ canvas.addEventListener('pointerup', (evt) => {
     try { svgEl.releasePointerCapture(evt.pointerId); } catch { /* already gone */ }
     const { pid, moved } = turn;
     turn = null;
-    if (moved) scheduleSave(0); else setSelection([`panel:${pid}`]);
+    if (moved) scheduleSave(0); else { removeTurnPreview(); setSelection([`panel:${pid}`]); }
     return;
   }
   if (drag) {
@@ -2070,6 +2310,7 @@ canvas.addEventListener('pointerup', (evt) => {
 
 canvas.addEventListener('pointercancel', () => {
   turn = null;
+  removeTurnPreview();
   svgEl?.querySelectorAll('.ff-dragging').forEach((n) => n.classList.remove('ff-dragging'));
   drag = null;
   if (rubber) { rubber.el?.remove(); rubber = null; }

@@ -62,6 +62,7 @@ import hashlib
 import http.cookies
 import io
 import json
+import math
 import mimetypes
 import os
 import posixpath
@@ -70,6 +71,8 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlparse
+
+import numpy as np
 
 from figforge import codegen, codesync, csvimport, ops, render
 from figforge.auth import AuthError, is_admin, public_user
@@ -88,6 +91,10 @@ EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 RENDER_CACHE_MAX = 16  # drawn figures kept in memory, newest last
 _RENDER_CACHE = {}
 _RENDER_LOCK = threading.Lock()
+
+
+FIT_KINDS = ("line", "step", "errorbar", "scatter")
+MESH_LINES, MESH_POINTS = 30, 3000   # the quick 3-D picture while turning
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -200,6 +207,9 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith("/api/data/"):
             return self._series_data(path[len("/api/data/"):])
 
+        if path.startswith("/api/mesh/"):
+            return self._mesh(path[len("/api/mesh/"):])
+
         if path == "/api/assistant/tools":
             return self._json({"model": "claude-opus-5", "tools": ops.TOOLS})
 
@@ -231,6 +241,42 @@ class Handler(BaseHTTPRequestHandler):
                               extra={"Content-Encoding": "gzip"})
 
         return self._static(path)
+
+    def _mesh(self, rest):
+        """A 3-D panel's curves, thinned out, for the quick wire picture the
+        page draws while the plot is being turned (the real one is drawn
+        when the mouse is let go)."""
+        from figforge import layers
+        parts = rest.rsplit("/", 1)
+        if len(parts) != 2:
+            return self._error(400, "expected /api/mesh/<figure>/<panel id>")
+        fig = self._figure(parts[0])
+        if not fig:
+            return self._error(404, "unknown figure")
+        spec = fig.load_spec()
+        panel = next((p for p in spec["panels"] if p["id"] == parts[1]), None)
+        if panel is None or layers.projection(panel) != "3d":
+            return self._error(404, "no 3-D plot with that id")
+        arrays = render.apply_data_edits(fig.load_arrays(), spec)
+        clean = lambda a: [[None if not math.isfinite(v) else round(float(v), 8) for v in row] for row in a]
+        out = []
+        for s in panel.get("series", []):
+            kind = layers.kind_of(s)
+            if not layers.fits(s, panel):
+                continue
+            x, y, z = (np.asarray(render._resolve(s[k], arrays), dtype=float) for k in ("x", "y", "z"))
+            if kind in ("surface", "wireframe"):
+                x, y, z = render.mesh(x, y, z)
+                step = [max(1, -(-n // MESH_LINES)) for n in z.shape]
+                x, y, z = (a[::step[0], ::step[1]] for a in (x, y, z))
+                pts = [clean(x), clean(y), clean(z)]
+            else:
+                step = max(1, -(-x.size // MESH_POINTS))
+                pts = [clean([x.ravel()[::step]])[0], clean([y.ravel()[::step]])[0], clean([z.ravel()[::step]])[0]]
+            st = s.get("style") or {}
+            out.append({"id": s["id"], "kind": kind, "color": st.get("color"), "cmap": st.get("cmap"),
+                        "x": pts[0], "y": pts[1], "z": pts[2]})
+        return self._json({"series": out})
 
     def _series_data(self, rest):
         """The raw (x, y) values behind one series -- what a clicked curve's
@@ -294,6 +340,12 @@ class Handler(BaseHTTPRequestHandler):
             return self._admin_invite(link=True)
         if not self._authorize():
             return
+
+        if path.startswith("/api/fit/"):
+            fig = self._figure(path[len("/api/fit/"):])
+            if not fig:
+                return self._error(404, "unknown figure")
+            return self._fit(fig)
 
         if path.startswith("/api/rebuild/"):
             fig = self._figure(path[len("/api/rebuild/"):])
@@ -413,6 +465,49 @@ class Handler(BaseHTTPRequestHandler):
         fig.save_spec(spec)
         fig.write_outputs(payload["svg"], codegen.generate(spec))
         return self._json({"name": name, "figures": list_figures(self.store)})
+
+    def _fit(self, fig):
+        """{series_id, model, formula?, xmin?, xmax?} -> the fitted values and
+        a smooth curve over the range (the page adds it as a new line, so
+        Undo takes it away again). Nothing is saved here."""
+        from figforge import fit as fitting
+        body = self._body()
+        if not isinstance(body, dict) or body.get("model") not in fitting.MODELS:
+            return self._error(400, "expected {series_id, model}")
+        spec = fig.load_spec()
+        found = [(p, s) for p in spec["panels"] for s in p.get("series", []) if s["id"] == body.get("series_id")]
+        if not found:
+            return self._error(404, "that curve isn't in the figure")
+        panel, s = found[0]
+        if (s.get("kind") or "line") not in FIT_KINDS:
+            return self._error(400, "only lines and dots can be fitted")
+        arrays = render.apply_data_edits(fig.load_arrays(), spec)
+        x, y = (np.asarray(render._resolve(s[k], arrays), dtype=float).ravel() for k in ("x", "y"))
+        sigma = (np.asarray(render._resolve(s["yerr"], arrays), dtype=float).ravel()
+                 if s.get("yerr") is not None else None)
+        if sigma is not None and sigma.size != x.size:
+            sigma = None
+        keep = np.ones(x.shape, bool)
+        for key, op in (("xmin", np.greater_equal), ("xmax", np.less_equal)):
+            v = body.get(key)
+            if isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v):
+                keep &= op(x, v)
+        try:
+            res = fitting.fit(x[keep], y[keep], body["model"], body.get("formula"),
+                              None if sigma is None else sigma[keep])
+        except fitting.FitError as e:
+            return self._error(400, str(e))
+        xs = x[keep][np.isfinite(x[keep]) & np.isfinite(y[keep])]
+        lo, hi = float(xs.min()), float(xs.max())
+        log = panel.get("xscale") == "log" and lo > 0
+        cx = np.geomspace(lo, hi, 200) if log else np.linspace(lo, hi, 200)
+        cy = res["f"](cx)
+        ok = np.isfinite(cy)
+        return self._json({"params": res["params"], "r2": res["r2"], "text": res["text"], "n": res["n"],
+                           "weighted": sigma is not None,
+                           "nice": [f"{q['name']} = {fitting.nice(q['value'], q['error'])}" for q in res["params"]],
+                           "x": [round(float(v), 10) for v in cx[ok]],
+                           "y": [round(float(v), 10) for v in cy[ok]]})
 
     def _rebuild(self, fig):
         """Throw away layout edits and regenerate the spec from raw data:

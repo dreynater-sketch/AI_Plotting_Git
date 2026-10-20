@@ -170,8 +170,17 @@ try:
               "…flat-only settings are hidden")
         pg.wait_for_timeout(500)            # the figure re-fits beside the opened settings
         x, y = at(0.04, 0.96)
-        pg.mouse.move(x, y); pg.mouse.down(); pg.mouse.move(x + 40, y - 20, steps=5)
+        posts = []
+        pg.on("request", lambda r: posts.append(1) if "/api/figure" in r.url and r.method == "POST" else None)
+        pg.mouse.move(x, y); pg.mouse.down(); pg.mouse.move(x + 20, y - 10, steps=3)
+        pg.wait_for_timeout(600)                     # the wire data arrives
+        pg.mouse.move(x + 40, y - 20, steps=3)
+        check(ev("!!document.getElementById('turn-preview')") and not posts,
+              "while turning, a quick wire picture follows the mouse (nothing redrawn on the server yet)")
         pg.mouse.up(); settle()
+        pg.wait_for_timeout(300)
+        check(not ev("!!document.getElementById('turn-preview')") and len(posts) == 1,
+              "letting go draws the real picture once, replacing the wire one")
         v = disk()["panels"][0].get("view")
         check(v == {"elev": 15, "azim": -80}, f"dragging turns it and saves the view ({v})")
         pg.click("#btn-undo"); settle()
