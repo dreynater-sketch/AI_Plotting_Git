@@ -368,16 +368,19 @@ class Figure:
     def load_script(self):
         """The user's edited figure.py, or None if they've never saved one.
         base_rev is the spec rev it was forked from: the generated code moves
-        on whenever the figure is edited in the drag editor, this doesn't."""
+        on whenever the figure is edited in the drag editor; base_generated
+        (the generated code at base_rev) lets codemerge carry those edits
+        into this one."""
         raw = self.store.read(self._rel("custom_figure.json"))
         try:
             return json.loads(raw) if raw else None
         except ValueError:
             return None
 
-    def save_script(self, code, base_rev, saved_at):
+    def save_script(self, code, base_rev, saved_at, base_generated=None):
         self.store.write(self._rel("custom_figure.json"), json.dumps(
-            {"code": code, "base_rev": base_rev, "saved_at": saved_at},
+            {"code": code, "base_rev": base_rev, "saved_at": saved_at,
+             "base_generated": base_generated},
             ensure_ascii=False).encode("utf-8"))
 
     def clear_script(self):

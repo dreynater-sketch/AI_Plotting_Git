@@ -96,19 +96,45 @@ function block(html) {
   $('blocker').hidden = false;
 }
 
-function showBanner() {
+let stale = false;        // the figure changed and the server couldn't fold that into this code
+let figureMoved = false;  // the figure changed while this code had unsaved typing
+
+/** Where your code and the figure both changed the same lines: your lines
+ *  were kept. Clickable, like the Output panel's line links. */
+function conflictLinks(conflicts) {
+  return conflicts.map((c) => `<a class="jump" data-line="${c.line}">line ${c.line}</a>`).join(', ');
+}
+
+function showBanner(merged) {
   const b = $('banner');
-  if (hasCustom && baseRev != null && rev != null && baseRev !== rev) {
-    b.innerHTML = `The figure has been edited in the figure editor since you saved this code ` +
-      `(rev ${baseRev} → ${rev}), and your version doesn't include those changes — saving ` +
-      `this version would undo them. ` +
-      `<button id="banner-gen">Open the generated code instead</button>`;
+  if (stale) {
+    b.innerHTML = `The figure was changed in the figure editor after you saved this code, and ` +
+      `those changes couldn’t be added to your version — saving it would undo them. ` +
+      `<button id="banner-gen">Open the code made from the figure instead</button>`;
     b.hidden = false;
     $('banner-gen').onclick = () => loadGenerated();
+  } else if (figureMoved) {
+    b.textContent = 'The figure just changed in the figure editor. When you save, those ' +
+      'changes are added to your code too.';
+    b.hidden = false;
+  } else if (merged) {
+    b.innerHTML = 'Your code now has the changes you made in the figure editor.' +
+      (merged.conflicts.length ? ` You had changed the same lines yourself at ${conflictLinks(merged.conflicts)}, ` +
+        'so your lines were kept there.' : '') + ' <button id="banner-ok">OK</button>';
+    b.hidden = false;
+    $('banner-ok').onclick = () => { b.hidden = true; };
   } else {
     b.hidden = true;
   }
 }
+
+$('banner').addEventListener('click', (e) => {
+  const a = e.target.closest('.jump');
+  if (!a) return;
+  cm.setCursor({ line: +a.dataset.line - 1, ch: 0 });
+  cm.scrollIntoView({ line: +a.dataset.line - 1, ch: 0 }, 120);
+  cm.focus();
+});
 
 async function load() {
   if (!/^[A-Za-z0-9_-]+( [A-Za-z0-9_-]+)*$/.test(PROJECT)) {
@@ -129,10 +155,14 @@ async function load() {
   generated = d.generated;
   rev = d.rev;
   hasCustom = !!d.custom;
+  stale = !!d.custom?.stale;
+  figureMoved = false;
   savedValue = hasCustom ? d.custom.code : generated;
   baseRev = hasCustom ? d.custom.base_rev : rev;
+  const cursor = cm.getCursor(), scroll = cm.getScrollInfo();
   cm.setValue(savedValue);
   cm.clearHistory();
+  if (reloading) { cm.setCursor(cursor); cm.scrollTo(scroll.left, scroll.top); }
   $('tree-project').textContent = PROJECT;
   $('side-note').innerHTML = `Run executes this script <b>in your browser</b> (Python via Pyodide); ` +
     `nothing runs on the server. <b>Saving</b> keeps your code and applies what it can to ` +
@@ -140,10 +170,25 @@ async function load() {
     `in your code only and is listed after you save. <br><br><a href="/?project=${encodeURIComponent(PROJECT)}">` +
     `← Back to the figure editor</a>`;
   refreshDirty();
-  showBanner();
+  showBanner(d.custom?.merged);
   drawMinimap();
-  cm.focus();
+  if (!reloading) cm.focus();
 }
+
+/* The figure editor changed the figure: show the new code. With unsaved
+ * typing here, nothing is replaced -- Save merges the figure's changes in. */
+let reloading = false;
+channel?.addEventListener('message', async (e) => {
+  if (HOWTO || e.data?.type !== 'figure-changed' || e.data.project !== PROJECT) return;
+  if (e.data.rev != null && e.data.rev === rev) return;
+  if (cm.getValue() !== savedValue) {
+    figureMoved = true;
+    showBanner();
+    return;
+  }
+  reloading = true;
+  try { await load(); } finally { reloading = false; }
+});
 
 async function loadHowto() {
   const r = await fetch(`/api/howto/${PROJECT}`);
@@ -179,6 +224,7 @@ async function loadHowto() {
 function loadGenerated() {
   cm.setValue(generated);
   baseRev = rev;
+  stale = figureMoved = false;
   $('banner').hidden = true;
   setStatus('Loaded the code generated from the current figure. Save to keep it.');
 }
@@ -191,16 +237,23 @@ async function save() {
   try {
     const r = await fetch(`/api/script/${PROJECT}`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ code }),
+      body: JSON.stringify({ code, base_rev: baseRev }),
     });
     const d = await r.json();
     if (!r.ok) throw new Error(d.error || r.statusText);
-    savedValue = code;
+    // The figure's own changes may have been merged in on the way.
+    if (d.code !== code && cm.getValue() === code) {
+      const cursor = cm.getCursor();
+      cm.setValue(d.code);
+      cm.setCursor(cursor);
+    }
+    savedValue = d.code;
     hasCustom = true;
     rev = baseRev = d.rev;
     generated = d.generated;
+    stale = figureMoved = false;
     refreshDirty();
-    showBanner();
+    showBanner(d.sync.merged);
     showSyncReport(d.sync);
   } catch (e) {
     setStatus(`Save failed: ${e.message}`, 'err');
@@ -258,6 +311,7 @@ async function resetToGenerated() {
   hasCustom = false;
   savedValue = generated;
   baseRev = rev;
+  stale = figureMoved = false;
   cm.setValue(generated);
   showBanner();
   refreshDirty();

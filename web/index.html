@@ -50,6 +50,7 @@
         <button role="menuitem" id="menu-add-legend" title="Show which line is which">Legend</button>
         <button role="menuitem" id="menu-add-grid" title="Faint lines across the plot at the numbers">Grid lines</button>
         <button role="menuitem" id="menu-add-fit" title="Work out a line or curve that follows the points">Fit a curve…</button>
+        <button role="menuitem" id="menu-add-curves" title="Draw more lines from another file of numbers in this figure">Lines from another file…</button>
         <button role="menuitem" id="menu-add-twin" title="Measure a line on its own scale, on the right side">Second scale on the right</button>
       </div>
     </div>
@@ -825,9 +826,13 @@
             <option value="line+markers">Lines + points</option>
           </select>
         </label>
-        <label class="field">
+        <label class="field" id="csv-name-field">
           <span>Project name</span>
           <input type="text" id="csv-name" spellcheck="false">
+        </label>
+        <label class="field" id="csv-panel-field" hidden>
+          <span>Put them in</span>
+          <select id="csv-panel"></select>
         </label>
       </div>
     </div>
@@ -885,20 +890,18 @@
       <h3 id="ai-edit-title">✨ Change this figure with AI</h3>
       <button class="link" id="ai-edit-close" title="Close (Esc)">×</button>
     </div>
+    <div class="chat" id="ai-chat" aria-live="polite"></div>
     <label class="field">
-      <span>What should change?</span>
+      <span id="ai-edit-ask">What should change?</span>
       <textarea id="ai-edit-request" rows="3" spellcheck="true"
         placeholder="e.g. Make it fit one journal column, bigger axis labels, and add a linear fit to the measured points"></textarea>
     </label>
-    <div class="ai-run" id="ai-edit-run" hidden>
-      <ol class="ai-log" id="ai-edit-log"></ol>
-      <p class="ai-reply" id="ai-edit-reply" hidden></p>
-    </div>
     <p class="csv-msg" id="ai-edit-msg" role="status"></p>
     <p class="ai-usage" id="ai-edit-usage"></p>
     <div class="modal-foot">
+      <button id="ai-edit-new" hidden title="Forget this talk and start again">Start a new talk</button>
       <button id="ai-edit-done">Close</button>
-      <button class="primary" id="ai-edit-go">✨ Change it</button>
+      <button class="primary" id="ai-edit-go">✨ Send</button>
     </div>
   </div>
 </div>

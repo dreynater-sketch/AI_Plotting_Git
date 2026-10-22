@@ -42,9 +42,10 @@ PRICES = {"claude-opus-5": (5.00, 25.00), "claude-sonnet-5": (2.00, 10.00),
           "claude-sonnet-5-5": (2.00, 10.00), "claude-haiku-5-5": (0.10, 0.50)}
 CACHE_WRITE, CACHE_READ = 1.25, 0.10     # x the input price
 
-MAX_STEPS = 20          # Claude calls per figure
-MAX_COST_USD = 2.00     # per figure; the session stops (and says so) past this
-MAX_VIEWS = 4           # pictures of the figure Claude may ask for
+MAX_STEPS = 20          # Claude calls per request (a figure, or one chat message)
+MAX_COST_USD = 2.00     # per request; the turn stops (and says so) past this
+MAX_CHAT_USD = 6.00     # a whole chat; past it the user starts a new one
+MAX_VIEWS = 4           # pictures of the figure Claude may ask for, per request
 VIEW_DPI = 70           # an 8 x 5 in figure -> 560 x 350 px: plenty to judge layout
 MAX_TABLE_BYTES = 4 * 1024 * 1024
 MAX_IMAGE_BYTES = 1_500_000
@@ -381,7 +382,8 @@ def start(fig, files, skipped, idea):
             "messages": [{"role": "user", "content": content}],
             "container": None, "anthropic_files": [uploaded.id] if uploaded else [], "tables": tables,
             "steps": 0, "views": 0, "cost_usd": 0.0,
-            "created": False, "done": False, "reply": "", "log": []}
+            "created": False, "done": False, "reply": "", "log": [],
+            "chat": [{"role": "user", "text": idea.strip()}]}
 
 
 def start_edit(fig, request):
@@ -409,7 +411,78 @@ def start_edit(fig, request):
             "messages": [{"role": "user", "content": content}],
             "container": None, "anthropic_files": [upload.id] if upload else [], "tables": tables,
             "steps": 0, "views": 0, "cost_usd": 0.0,
-            "created": True, "done": False, "reply": "", "log": []}
+            "created": True, "done": False, "reply": "", "log": [],
+            "chat": [{"role": "user", "text": request.strip()}]}
+
+
+# ------------------------------------------------------------------ chat
+
+def chat_turns(state):
+    """[{role: "user"|"assistant", text, steps?, cost_usd?}] -- the conversation
+    as the page shows it. Sessions from before chats existed have one turn."""
+    if not state:
+        return []
+    if state.get("chat"):
+        return state["chat"]
+    turns = [{"role": "user", "text": state.get("idea", "")}]
+    if state.get("done"):
+        turns.append({"role": "assistant", "text": state.get("reply", "")})
+    return turns
+
+
+def can_continue(state):
+    """A finished session on a drawn figure, with room left in its budget."""
+    return bool(state and state.get("done") and state.get("created")
+                and state.get("cost_usd", 0) < MAX_CHAT_USD and state.get("messages"))
+
+
+def continue_chat(fig, state, message):
+    """The user's next message in an existing conversation about this figure.
+    The figure may have been changed by hand since, so Claude gets its
+    current summary again; its data table goes back into the sandbox, since
+    files from earlier turns were deleted when those turns finished."""
+    spec = fig.load_spec()
+    arrays = fig.load_arrays()
+    content, upload = [], None
+    text = fig.load_source_csv()
+    if text:
+        fig.save_table("figure_data.csv", text)
+        state["tables"]["figure_data.csv"] = {"from": "the figure's own data"}
+        upload = _client().files.upload(file=("figure_data.csv", io.BytesIO(text.encode("utf-8"))))
+        state.setdefault("anthropic_files", []).append(upload.id)
+    # Files from earlier turns are gone from Anthropic's storage: replaying
+    # their upload blocks would fail.
+    live = set(state.get("anthropic_files", []))
+    for m in state["messages"]:
+        if m.get("role") == "user" and isinstance(m.get("content"), list):
+            m["content"] = [b if b.get("type") != "container_upload" or b.get("file_id") in live
+                            else {"type": "text", "text": "(a file was attached to the sandbox here)"}
+                            for b in m["content"]]
+    if state.get("container_expires") and state["container_expires"] < time.time() + 60:
+        state["container"] = None    # a fresh sandbox; earlier files there are gone
+    content.append({"type": "text", "text":
+        "The user has a follow-up. The figure as it is now (they may have changed it by hand "
+        "since your last turn):\n" + json.dumps(ops.describe(spec, arrays)) +
+        ("\n\nIts data table is (again) in the sandbox and available to FigForge as "
+         "figure_data.csv." if text else "")})
+    if upload:
+        content.append({"type": "container_upload", "file_id": upload.id})
+    content.append({"type": "text", "text": f"What the user says now:\n{message.strip()}"})
+    msgs = state["messages"]
+    if msgs and msgs[-1].get("role") == "user":
+        # The last turn was stopped right after tool results: add to them.
+        msgs[-1]["content"] = list(msgs[-1]["content"]) + content
+    else:
+        if (state.get("effort") or FIRST_EFFORT) != FIRST_EFFORT \
+                and (state.get("model") or MODEL) in PER_MESSAGE_EFFORT:
+            # A new request deserves more thought again than the tidy-up did.
+            state["effort"] = FIRST_EFFORT
+            msgs.append({"role": "system", "content": [], "output_config": {"effort": FIRST_EFFORT}})
+        msgs.append({"role": "user", "content": content})
+    state["chat"] = chat_turns(state)[:]
+    state["chat"].append({"role": "user", "text": message.strip()})
+    state.update(done=False, reply="", views=0, turn_steps=state["steps"], turn_cost=state["cost_usd"])
+    return state
 
 
 def step(state, fig):
@@ -421,7 +494,8 @@ def step(state, fig):
 
     kw = {"container": state["container"]} if state.get("container") else {}
     # The last allowed turn is a wrap-up: no tools, just the summary.
-    wrap_up = state["steps"] >= MAX_STEPS - 1 or state["cost_usd"] >= MAX_COST_USD * 0.9
+    steps, cost_so_far = _turn(state)
+    wrap_up = steps >= MAX_STEPS - 1 or cost_so_far >= MAX_COST_USD * 0.9
     if wrap_up:
         kw["tool_choice"] = {"type": "none"}
     model = state.get("model") or MODEL
@@ -448,6 +522,9 @@ def step(state, fig):
     state["cost_usd"] = round(state["cost_usd"] + cost, 5)
     if getattr(response, "container", None):
         state["container"] = response.container.id
+        expires = getattr(response.container, "expires_at", None)
+        if hasattr(expires, "timestamp"):
+            state["container_expires"] = expires.timestamp()
     blocks = [b.to_dict() for b in response.content]
     state["messages"].append({"role": "assistant", "content": blocks})
     state.setdefault("usage", []).append(
@@ -501,11 +578,19 @@ def step(state, fig):
     return _check_limits(state), (spec if changed else None), events
 
 
+def _turn(state):
+    """(steps, cost) of the request being worked on: the whole session, or
+    since the user's latest chat message."""
+    return (state["steps"] - state.get("turn_steps", 0),
+            state["cost_usd"] - state.get("turn_cost", 0.0))
+
+
 def _check_limits(state):
     # Normally the wrap-up turn (tool_choice none) ends the session with a
     # summary; this only catches a turn that still asked for tools.
-    if not state["done"] and (state["steps"] >= MAX_STEPS or state["cost_usd"] >= MAX_COST_USD):
-        note = ("I stopped here to keep this figure's cost down." if state["cost_usd"] >= MAX_COST_USD
+    steps, cost = _turn(state)
+    if not state["done"] and (steps >= MAX_STEPS or cost >= MAX_COST_USD):
+        note = ("I stopped here to keep this figure's cost down." if cost >= MAX_COST_USD
                 else "I stopped after the maximum number of steps.")
         _finish(state, note + " You can keep adjusting it by hand.")
     return state
@@ -513,6 +598,10 @@ def _check_limits(state):
 
 def _finish(state, reply):
     state["done"], state["reply"] = True, reply
+    if "chat" in state:
+        steps, cost = _turn(state)
+        state["chat"].append({"role": "assistant", "text": reply, "steps": steps,
+                              "cost_usd": round(cost, 5)})
     return state
 
 
@@ -606,7 +695,7 @@ def _add_curves(state, fig, args, spec):
         names = csvimport.parse(text)[0]
         merged_note = ""
         if base and not have <= set(names):
-            text, added = csvimport.merge_tables(base, text)
+            text, added, _ = csvimport.merge_tables(base, text)
             names = csvimport.parse(text)[0]
             merged_note = f" (merged {len(added)} new column(s) of {table} into the figure's table)"
         batch = {"x": _column(names, args["x_column"], table) if args.get("x_column") else "",

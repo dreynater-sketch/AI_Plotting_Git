@@ -219,6 +219,45 @@ check(espec and espec["panels"][0]["xlabel"]["text"] == "Channel number", "edit 
 es, _, _ = assistant.step(es, fig)
 check(es["done"] and es["reply"] == "Renamed the x axis.", "edit session ends with its reply")
 
+# A talk: the next message goes on in the same conversation.
+check(assistant.chat_turns(es) == [{"role": "user", "text": "Call the x axis 'Channel number'."},
+                                   {"role": "assistant", "text": "Renamed the x axis.", "steps": 2,
+                                    "cost_usd": es["chat"][-1]["cost_usd"]}],
+      "the talk so far: the request and the answer")
+check(assistant.can_continue(es), "a finished edit can go on")
+assistant.cleanup(es)
+chat_fake = FakeClient([
+    reply(tool("set_text", element_id="a__xlabel", text="Channel (#)")),
+    reply(Block(type="text", text="Added the units."), stop="end_turn"),
+])
+chat_fake.files.upload = lambda file: types.SimpleNamespace(id="file_chat")
+assistant._client = lambda: chat_fake
+n_msgs = len(es["messages"])
+es["steps"] = assistant.MAX_STEPS + 3          # a long talk: limits count per message
+es = assistant.continue_chat(fig, es, "Now give it units.")
+said = es["messages"][-1]["content"]
+said_text = " ".join(b.get("text", "") for b in said)
+check(not es["done"] and es["chat"][-1] == {"role": "user", "text": "Now give it units."}
+      and "follow-up" in said_text and "Now give it units." in said_text and '"panels"' in said_text,
+      "the follow-up carries the message and the figure as it is now")
+check(any(b.get("type") == "container_upload" and b["file_id"] == "file_chat" for b in said)
+      and not any(b.get("type") == "container_upload" for m in es["messages"][:n_msgs]
+                  if m["role"] == "user" for b in m["content"]),
+      "the data goes back to the sandbox; uploads of deleted files are dropped from the replay")
+check(es["messages"][-2] == {"role": "system", "content": [], "output_config": {"effort": "medium"}},
+      "a new message gets medium effort again")
+es, espec, _ = assistant.step(es, fig)
+check("tool_choice" not in chat_fake.seen[-1] and espec["panels"][0]["xlabel"]["text"] == "Channel (#)",
+      "the follow-up isn't cut short by the earlier messages' steps")
+es, _, _ = assistant.step(es, fig)
+check(es["done"] and [t["role"] for t in es["chat"]] == ["user", "assistant", "user", "assistant"]
+      and es["chat"][-1]["text"] == "Added the units." and es["chat"][-1]["steps"] == 2,
+      "the answer joins the talk, with this message's own steps")
+check(not assistant.can_continue(dict(es, cost_usd=assistant.MAX_CHAT_USD)), "a talk that cost too much can't go on")
+check(assistant.chat_turns({"idea": "old", "done": True, "reply": "ok"})
+      == [{"role": "user", "text": "old"}, {"role": "assistant", "text": "ok"}],
+      "sessions from before talks show as one exchange")
+
 # Limits: a session stops itself.
 st = dict(state, done=False, steps=assistant.MAX_STEPS - 1)
 last = FakeClient([reply(tool("describe_figure"))])

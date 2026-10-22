@@ -51,6 +51,7 @@ SUITES = [
     ("test_csv_import.py", True),
     ("test_code_editor.py", True),
     ("test_sync_e2e.py", True),
+    ("test_more_data.py", True),
     ("test_accounts.py", False),
     ("test_invites.py", False),
     ("test_code_hosted.py", False),

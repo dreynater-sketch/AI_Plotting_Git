@@ -94,7 +94,7 @@ fspec, farr = csvimport.build_panels("f", data, [{"x": "T", "ys": [], "layers": 
     {"kind": "errorbar", "y": "f_mean", "extra": "f_std"}]}])
 check(fspec["source"]["panels"][0]["layers"][0]["y"] == "f_mean", "the recipe names columns, not positions")
 fspec["panels"][0]["xlabel"]["text"] = "Temperature (K)"
-merged, added = csvimport.merge_tables(data, fit)
+merged, added, _ = csvimport.merge_tables(data, fit)
 check(added == ["T_fit", "f_fit", "ci_lo", "ci_hi"] and merged.count(NL) == 106, "a second table merges in")
 nspec, narr, ids = csvimport.add_batch(fspec, "f", merged, "a", {"x": "T_fit", "ys": ["f_fit"], "kind": "line",
     "layers": [{"kind": "band", "y": "ci_lo", "extra": "ci_hi"}]})

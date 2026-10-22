@@ -102,6 +102,11 @@ async function saveHistoryNow() {
 
 let inFlight = false, needsSave = false, saveTimer = null, savePending = false;
 
+// Talks to the code editor tab: it shows figure.py and keeps the user's
+// saved version up to date with changes made here.
+const figChannel = 'BroadcastChannel' in window ? new BroadcastChannel('figforge') : null;
+const announceChange = () => figChannel?.postMessage({ type: 'figure-changed', project: FIGURE, rev: spec?.rev });
+
 function scheduleSave(delay = 0) {
   clearTimeout(saveTimer);
   savePending = true;
@@ -138,6 +143,7 @@ async function doSave() {
     applySvg(data.svg);
     buildList();
     setStatus('Saved ✓');
+    announceChange();
   } catch (e) {
     setStatus(e.message, 'err');
     // The bad edit is still sitting in `spec`. Left there, every future save
@@ -2917,8 +2923,8 @@ async function download(url, filename) {
  * the new version. The server put the old spec on the undo stack, so Ctrl+Z
  * here undoes the whole sync. A pending local save is dropped rather than
  * sent -- it would overwrite what the code just did. */
-if ('BroadcastChannel' in window) {
-  new BroadcastChannel('figforge').onmessage = async (e) => {
+if (figChannel) {
+  figChannel.onmessage = async (e) => {
     if (e.data?.type !== 'figure-synced' || e.data.project !== FIGURE) return;
     clearTimeout(saveTimer);
     savePending = needsSave = false;
@@ -3338,6 +3344,7 @@ $('btn-rebuild').onclick = async () => {
     applySvg(data.svg);
     buildList();
     setStatus('Started over from your data ✓');
+    announceChange();
   } catch (e) {
     setStatus(e.message, 'err');
   }
@@ -3459,6 +3466,7 @@ $('project-select').onchange = (e) => {
  * parses), lists its columns, and builds the figure from the picks. */
 
 let csvText = null, csvFilename = '';
+let csvAdding = false;     // the dialog adds lines to this figure instead of making a new one
 let assistantOn = false;   // /api/auth/me: the AI assistant is set up and you may use it
 
 function csvMessage(msg, cls = '') {
@@ -3466,7 +3474,21 @@ function csvMessage(msg, cls = '') {
   $('csv-msg').className = 'csv-msg ' + cls;
 }
 
-function openCsvDialog() {
+/** "Plot 2 – Spectra": a plot's name for a menu, in plain words. */
+function panelName(p, i) {
+  const title = (p.title?.text || '').replace(/[$\\{}^_]/g, '').trim();
+  return `Plot ${i + 1}${title ? ` – ${title}` : ''}`;
+}
+
+function openCsvDialog(adding = false) {
+  csvAdding = adding === true;
+  $('csv-title').textContent = csvAdding ? 'Add lines from another file' : 'New figure from a CSV';
+  $('csv-create').textContent = csvAdding ? 'Add the lines' : 'Create figure';
+  $('csv-name-field').hidden = csvAdding;
+  const flat = csvAdding ? spec.panels.filter((p) => !p.projection || p.projection === 'flat') : [];
+  $('csv-panel').innerHTML = flat.map((p, i) =>
+    `<option value="${escapeHtml(p.id)}">${escapeHtml(panelName(p, i))}</option>`).join('');
+  $('csv-panel-field').hidden = flat.length < 2;
   csvText = null;
   $('csv-file').value = '';
   $('csv-pick').hidden = true;
@@ -3507,7 +3529,8 @@ async function loadCsvFile(file) {
     const numeric = info.columns.filter((c) => c.numeric);
     $('csv-drop-text').innerHTML = `<b>${escapeHtml(file.name)}</b> · choose another file`;
     $('csv-summary').textContent = `${info.rows} rows · ${info.columns.length} columns · ${info.separator}-separated. ` +
-      'Pick the x column and one or more columns to plot.';
+      (csvAdding ? 'Pick the column that goes along the bottom, and the lines to add.'
+                 : 'Pick the x column and one or more columns to plot.');
     $('csv-cols').innerHTML = info.columns.map((c) => {
       const range = c.numeric ? `${fmt(c.min)} … ${fmt(c.max)}` : 'not numbers';
       const dis = c.numeric ? '' : 'disabled';
@@ -3537,10 +3560,18 @@ function csvChoice() {
 
 function refreshCsvCreate() {
   const { x, ys } = csvChoice();
-  $('csv-create').disabled = !(csvText && x !== null && ys.length && NAME_OK.test(tidyName($('csv-name').value)));
+  $('csv-create').disabled = !(csvText && x !== null && ys.length &&
+                                (csvAdding || NAME_OK.test(tidyName($('csv-name').value))));
 }
 
-$('btn-new').onclick = openCsvDialog;
+$('btn-new').onclick = () => openCsvDialog();
+$('menu-add-curves').onclick = () => {
+  if (!['csv', 'csv-panels'].includes(spec?.source?.kind)) {
+    setStatus('Lines can only be added to a figure made from a file of numbers.', 'err');
+    return;
+  }
+  openCsvDialog(true);
+};
 $('csv-close').onclick = closeCsvDialog;
 $('csv-cancel').onclick = closeCsvDialog;
 $('csv-file').onchange = (e) => loadCsvFile(e.target.files[0]);
@@ -3562,7 +3593,40 @@ const drop = $('csv-drop');
 ['dragleave', 'drop'].forEach((t) => drop.addEventListener(t, (e) => { e.preventDefault(); drop.classList.remove('over'); }));
 drop.addEventListener('drop', (e) => loadCsvFile(e.dataTransfer.files[0]));
 
+/** Add the picked columns as new lines in this figure. The figure as it
+ *  was goes on the undo stack first, so one Ctrl+Z takes them away. */
+async function addCurvesFromCsv() {
+  const { x, ys } = csvChoice();
+  $('csv-create').disabled = true;
+  csvMessage('Adding the lines…');
+  try {
+    await flushPending();
+    const r = await fetch(`/api/add-curves/${FIGURE}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ csv: csvText, filename: csvFilename, x, ys, plot: $('csv-plot').value,
+                             panel: $('csv-panel').value || spec.panels[0].id }),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || r.statusText);
+    pushHistory();
+    spec = d.spec;
+    renderedSpec = clone(d.spec);
+    geometry = d.geometry;
+    applySvg(d.svg);
+    buildList();
+    setSelection(d.added.filter((id) => resolve(id)));
+    refreshFigureFields();
+    announceChange();
+    closeCsvDialog();
+    setStatus(`Added ${d.added.length} line${d.added.length === 1 ? '' : 's'} ✓ (Ctrl+Z to undo)`);
+  } catch (e) {
+    csvMessage(e.message, 'err');
+    refreshCsvCreate();
+  }
+}
+
 async function createFromCsv() {
+  if (csvAdding) return addCurvesFromCsv();
   const { x, ys } = csvChoice();
   const name = tidyName($('csv-name').value);
   $('csv-create').disabled = true;
@@ -3797,6 +3861,24 @@ async function aiSteps(name, log) {
   return d;
 }
 
+/** One message in the Change-with-AI talk. -> the bubble. */
+function chatBubble(role, text = '', meta = '') {
+  const el = document.createElement('div');
+  el.className = `chat-msg ${role === 'user' ? 'you' : 'ai'}`;
+  el.textContent = text;
+  if (meta) {
+    const small = document.createElement('small');
+    small.textContent = meta;
+    el.appendChild(small);
+  }
+  $('ai-chat').appendChild(el);
+  $('ai-chat').scrollTop = $('ai-chat').scrollHeight;
+  return el;
+}
+
+const stepsCost = (steps, cost) =>
+  `${steps} step${steps === 1 ? '' : 's'} · about $${(cost || 0).toFixed(2)}`;
+
 function showAiReply(el, d) {
   el.textContent = d.reply;
   const cost = document.createElement('small');
@@ -3855,19 +3937,39 @@ async function runAi() {
   }
 }
 
-/* ✨ Change with AI: Claude edits the figure on screen. The figure as it
- * was goes on the undo stack first, so one Ctrl+Z takes the change back. */
+/* ✨ Change with AI: a talk with Claude about the figure on screen. Each
+ * message is one request; Claude remembers the talk, so "now make it
+ * bigger" works. The figure as it was before each answer goes on the undo
+ * stack, so one Ctrl+Z takes that answer's changes back. */
 let aiEditRunning = false;
+let aiChatGoesOn = false;   // the next message adds to the talk shown
 
-function openAiEdit() {
+function showChatState() {
+  const talking = !!$('ai-chat').children.length;
+  $('ai-edit-ask').textContent = talking ? 'Anything else?' : 'What should change?';
+  $('ai-edit-new').hidden = !talking || aiEditRunning;
+  $('ai-edit-go').disabled = aiEditRunning;
+}
+
+async function openAiEdit() {
   $('ai-edit-request').value = '';
-  $('ai-edit-run').hidden = true;
   $('ai-edit-msg').textContent = '';
-  $('ai-edit-go').hidden = false;
-  $('ai-edit-go').disabled = false;
   $('ai-edit-modal').hidden = false;
   showAiUsage();
   setTimeout(() => $('ai-edit-request').focus(), 0);
+  if (aiEditRunning) return;
+  $('ai-chat').innerHTML = '';
+  aiChatGoesOn = false;
+  try {
+    const r = await fetch(`/api/assistant/chat/${FIGURE}`);
+    const d = r.ok ? await r.json() : { turns: [] };
+    for (const t of d.turns) {
+      chatBubble(t.role, t.text, t.role === 'assistant' && t.steps ? stepsCost(t.steps, t.cost_usd) : '');
+    }
+    aiChatGoesOn = !!d.can_continue;
+    if (d.running) runAiEdit(true);    // the page was closed while Claude worked: carry on
+  } catch { /* an empty talk */ }
+  showChatState();
 }
 
 async function reloadFigure() {
@@ -3881,48 +3983,73 @@ async function reloadFigure() {
   buildList();
   refreshInspector();
   refreshFigureFields();
+  announceChange();
 }
 
-async function runAiEdit() {
+/** Send the typed message (or, resuming, keep stepping the session the
+ *  server already has) and show Claude's answer in the talk. */
+async function runAiEdit(resume = false) {
   const request = $('ai-edit-request').value.trim();
-  if (!request || aiEditRunning) return;
+  if ((!request && resume !== true) || aiEditRunning) return;
   aiEditRunning = true;
-  $('ai-edit-go').disabled = true;
   $('ai-edit-msg').textContent = '';
   $('ai-edit-msg').className = 'csv-msg';
-  const log = $('ai-edit-log');
-  log.innerHTML = '';
-  $('ai-edit-reply').hidden = true;
-  $('ai-edit-run').hidden = false;
+  showChatState();
+  if (resume !== true) chatBubble('user', request);
+  const answer = chatBubble('assistant');
+  const log = document.createElement('ol');
+  log.className = 'ai-log';
+  answer.appendChild(log);
   const revBefore = spec.rev;
   try {
     await flushPending();
     pushHistory();                       // the figure as it was: one Ctrl+Z away
-    await aiPost(`/api/assistant/edit/${encodeURIComponent(FIGURE)}`, { request });
+    if (resume !== true) {
+      await aiPost(`/api/assistant/edit/${encodeURIComponent(FIGURE)}`, { request, continue: aiChatGoesOn });
+      $('ai-edit-request').value = '';
+    }
     const d = await aiSteps(FIGURE, log);
     // The changed figure first, then the reply: nothing reads or undoes
     // the old one in between.
     await reloadFigure();
     if (spec.rev === revBefore) { history.pop(); refreshUndoButtons(); }   // nothing changed
     else setStatus('Changed by AI ✓ (Ctrl+Z to undo)');
-    showAiReply($('ai-edit-reply'), d);
-    $('ai-edit-go').hidden = true;
+    answer.textContent = d.reply;
+    const small = document.createElement('small');
+    small.textContent = stepsCost(d.turn_steps ?? d.steps, d.turn_cost_usd ?? d.cost_usd);
+    answer.appendChild(small);
+    aiChatGoesOn = !!d.can_continue;
+    if (!aiChatGoesOn) {
+      $('ai-edit-msg').textContent = 'This talk has got long. Your next message starts a new one.';
+    }
+    $('ai-chat').scrollTop = $('ai-chat').scrollHeight;
   } catch (e) {
+    answer.remove();
     $('ai-edit-msg').textContent = `The AI couldn't finish: ${e.message}`;
     $('ai-edit-msg').className = 'csv-msg err';
+    if (e.status === 409) aiChatGoesOn = false;    // that talk can't go on: the next try starts afresh
     try { await reloadFigure(); } catch { /* keep what's on screen */ }
   } finally {
     aiEditRunning = false;
-    $('ai-edit-go').disabled = false;
+    showChatState();
   }
 }
 
 $('btn-ai-edit').onclick = openAiEdit;
 $('ai-edit-close').onclick = () => { if (!aiEditRunning) $('ai-edit-modal').hidden = true; };
 $('ai-edit-done').onclick = () => { if (!aiEditRunning) $('ai-edit-modal').hidden = true; };
-$('ai-edit-go').onclick = runAiEdit;
+$('ai-edit-go').onclick = () => runAiEdit();
+$('ai-edit-new').onclick = () => {
+  if (aiEditRunning) return;
+  $('ai-chat').innerHTML = '';
+  aiChatGoesOn = false;
+  $('ai-edit-msg').textContent = '';
+  showChatState();
+  $('ai-edit-request').focus();
+};
+// Enter sends; Shift+Enter starts a new line.
 $('ai-edit-request').addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) runAiEdit();
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); runAiEdit(); }
 });
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && !$('ai-edit-modal').hidden && !aiEditRunning) $('ai-edit-modal').hidden = true;

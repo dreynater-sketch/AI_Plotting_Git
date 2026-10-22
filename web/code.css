@@ -180,4 +180,4 @@ body { background: var(--edit); color: var(--text); font: 13px/1.4 var(--ui); ov
 /* sync report after Save */
 .console .ok { color: var(--accent); }
 .console .warn { color: var(--orange); }
-.console .jump { color: var(--blue); cursor: pointer; text-decoration: underline; }
+.console .jump, .banner .jump { color: var(--blue); cursor: pointer; text-decoration: underline; }

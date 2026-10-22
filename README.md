@@ -55,6 +55,19 @@ Tests: `pip install -r requirements-dev.txt`, then `python tests/run_all.py`
 - **Ctrl+Z** to undo. **Rebuild** discards all edits and regenerates from the CSV.
 - **figure.py** downloads a standalone script that reproduces exactly what you
   see. **PNG** exports at the spec's dpi.
+- **Insert > Lines from another file** adds curves from a second CSV to a plot
+  of a figure made from a table. Its columns join the figure's table (a name
+  the figure already has gets the file's name added, e.g. `signal (run2)`), the
+  plot's ranges grow to show them, and Start over keeps them. Ctrl+Z removes them.
+- **Your saved figure.py follows the figure.** Change the figure by dragging
+  and your hand-edited code picks up those changes (a three-way merge by
+  lines, `figforge/codemerge.py`); where you had changed the same lines
+  yourself, your lines are kept and the code editor says where. An open code
+  tab updates by itself; with unsaved typing it waits and merges on Save.
+- **✨ Change with AI is a talk**: after Claude answers, type the next thing
+  ("now make the labels bigger") and it carries on with what it knows. Each
+  answer is one Ctrl+Z. "Start a new talk" forgets it. Limits are per message
+  ($2, 20 steps) and $6 per talk.
 
 Panel titles and axis labels are editable (text/size/color) but not draggable —
 matplotlib positions those itself.
@@ -316,11 +329,6 @@ figures/qcircle/
 
 ## Not in this build yet
 
-- **The AI assistant itself.** `figforge/ops.py` has the editing operations as
-  Claude API tool definitions and `POST /api/ops/<project>` runs them; the
-  chat loop that calls the model is the next step.
-- Deleting a whole project; editing values in the data table; adding a curve
-  to an existing figure (a CSV figure picks its curves when it's created).
-- Syncing figure edits back into a saved hand-edited `figure.py` (code →
-  figure is synced; figure → your saved code shows a "figure changed" banner).
+- Adding lines from a file to a figure that wasn't made from a table (the
+  Q-circle analysis figure), or to a 3-D or polar plot.
 - A phone layout.

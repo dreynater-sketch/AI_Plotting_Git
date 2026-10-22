@@ -21,6 +21,8 @@
     GET  /api/describe/<name>    the compact figure summary an assistant reads first
     POST /api/ops/<name>         {calls: [{name, input}]} -> apply them; one result per call
     POST /api/project/from-csv   {name, csv, filename, x, ys, plot} -> new project
+    POST /api/add-curves/<name>  {csv, filename, x, ys, plot, panel} -> lines from another
+                               file joined into a panel (its columns join the figure's table)
 
 Hosted only (accounts, see figforge/auth.py) -- every other /api/ route
 then requires a signed-in user and works in that user's own project space:
@@ -38,7 +40,9 @@ then requires a signed-in user and works in that user's own project space:
     POST /api/admin/invite-link  (admins) {email} -> the invite link itself, no email sent
     GET  /api/admin/ai-ping    (admins) one tiny Claude request: is the key working?
     POST /api/assistant/start  {name, idea, files, skipped} -> a new AI session
-    POST /api/assistant/edit/<name>  {request} -> an AI session that changes an existing figure
+    POST /api/assistant/edit/<name>  {request, continue?} -> an AI session that changes an
+                               existing figure; continue: true adds to the last chat instead
+    GET  /api/assistant/chat/<name>  -> {turns: [{role, text}], can_continue, running}
     POST /api/assistant/step/<name>  one Claude round -> {done, events, reply, cost_usd, ai_usage}
     POST /api/assistant/howto/<name>  "How this was made" for a finished AI figure (made once)
     GET  /api/howto/<name>       -> {howto or null, can_make}
@@ -74,7 +78,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 import numpy as np
 
-from figforge import codegen, codesync, csvimport, ops, render
+from figforge import codegen, codemerge, codesync, csvimport, ops, render
 from figforge.auth import AuthError, is_admin, public_user
 from figforge.project import AUTH, ROOT, STORE, Figure, list_figures
 
@@ -161,7 +165,7 @@ class Handler(BaseHTTPRequestHandler):
             if not fig:
                 return self._error(404, "unknown figure")
             if "edited=1" in urlparse(self.path).query:
-                custom = fig.load_script()
+                custom = self._script_now(fig, fig.load_spec())
                 if not custom:
                     return self._error(404, "no edited version saved")
                 return self._send(200, custom["code"], "text/plain; charset=utf-8")
@@ -174,7 +178,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._error(404, "unknown figure")
             spec = fig.load_spec()
             return self._json({"generated": codegen.generate(spec),
-                               "custom": fig.load_script(), "rev": spec.get("rev")})
+                               "custom": self._script_now(fig, spec), "rev": spec.get("rev")})
 
         if path.startswith("/api/npz/"):
             fig = self._figure(path[len("/api/npz/"):])
@@ -222,6 +226,16 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"howto": howto, "can_make": False})
             from figforge import assistant
             return self._json({"howto": None, "can_make": assistant.can_explain(fig.load_assistant())})
+
+        if path.startswith("/api/assistant/chat/"):
+            fig = self._figure(path[len("/api/assistant/chat/"):])
+            if not fig:
+                return self._error(404, "unknown figure")
+            from figforge import assistant
+            state = fig.load_assistant()
+            return self._json({"turns": assistant.chat_turns(state),
+                               "can_continue": assistant.can_continue(state),
+                               "running": bool(state and not state.get("done"))})
 
         if path.startswith("/api/describe/"):
             fig = self._figure(path[len("/api/describe/"):])
@@ -347,6 +361,12 @@ class Handler(BaseHTTPRequestHandler):
                 return self._error(404, "unknown figure")
             return self._fit(fig)
 
+        if path.startswith("/api/add-curves/"):
+            fig = self._figure(path[len("/api/add-curves/"):])
+            if not fig:
+                return self._error(404, "unknown figure")
+            return self._add_curves(fig)
+
         if path.startswith("/api/rebuild/"):
             fig = self._figure(path[len("/api/rebuild/"):])
             if not fig:
@@ -415,7 +435,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._error(400, "expected {code, base_rev}")
             if len(code.encode("utf-8")) > SCRIPT_MAX:
                 return self._error(413, "that script is over 512 KB")
-            return self._save_script(fig, code)
+            return self._save_script(fig, code, body.get("base_rev"))
 
         if not path.startswith("/api/figure/"):
             return self._error(404, "not found")
@@ -431,7 +451,9 @@ class Handler(BaseHTTPRequestHandler):
             return self._error(400, f"bad request: {e}")
 
         try:
-            spec["rev"] = int(spec.get("rev", 0)) + 1
+            # Never back to a number already used: an undo sends an older
+            # spec, and the saved figure.py tells versions apart by rev.
+            spec["rev"] = max(int(spec.get("rev", 0)), int(fig.load_spec().get("rev", 0))) + 1
             payload = self._payload(fig, spec)
         except Exception as e:  # a bad edit shouldn't kill the server
             return self._error(422, f"render failed: {type(e).__name__}: {e}")
@@ -465,6 +487,53 @@ class Handler(BaseHTTPRequestHandler):
         fig.save_spec(spec)
         fig.write_outputs(payload["svg"], codegen.generate(spec))
         return self._json({"name": name, "figures": list_figures(self.store)})
+
+    def _add_curves(self, fig):
+        """{csv, filename, x, ys, plot, panel}: curves from another file into a
+        panel of this figure, keeping every edit so far. The file's columns
+        join the figure's table (same names get the file's name added), so
+        Start over keeps the new curves. The page puts the old figure on its
+        undo stack first, so Ctrl+Z takes them away again."""
+        body = self._body()
+        if not isinstance(body, dict) or not isinstance(body.get("csv"), str):
+            return self._error(400, "expected {csv, x, ys, panel}")
+        spec = fig.load_spec()
+        if (spec.get("source") or {}).get("kind") not in ("csv", "csv-panels"):
+            return self._error(409, "curves can only be added to a figure made from a table of numbers")
+        base = fig.load_source_csv()
+        if base is None:
+            return self._error(404, "this figure's own table is missing")
+        x, ys = body.get("x"), body.get("ys")
+        if not isinstance(x, int) or not isinstance(ys, list) or not ys \
+                or not all(isinstance(y, int) for y in ys):
+            return self._error(400, "pick the x column and at least one column to plot")
+        plot = body.get("plot") or "line"
+        panel = body.get("panel") or spec["panels"][0]["id"]
+        target = next((p for p in spec["panels"] if p["id"] == panel), None)
+        if target is None:
+            return self._error(404, "that plot isn't in the figure")
+        if target.get("projection") in ("3d", "polar"):
+            return self._error(400, "curves from a file can only go into a flat plot")
+        stem = re.sub(r"\.[A-Za-z0-9]+$", "", str(body.get("filename") or "")).strip() or "new file"
+        try:
+            text, _, where = csvimport.merge_tables(base, body["csv"], rename=stem[:40])
+            if x not in where or any(y not in where for y in ys):
+                raise csvimport.CSVError("pick columns that hold numbers")
+            batch = {"x": where[x], "ys": [where[y] for y in ys if y != x], "kind": plot, "layers": []}
+            new_spec, arrays, ids = csvimport.add_batch(spec, fig.name, text, panel, batch)
+        except csvimport.CSVError as e:
+            return self._error(400, str(e))
+        _widen_limits(next(p for p in new_spec["panels"] if p["id"] == panel), ids, arrays)
+        new_spec["rev"] = int(spec.get("rev", 0)) + 1
+        try:
+            payload = self._payload(fig, new_spec, arrays)
+        except Exception as e:
+            return self._error(422, f"couldn't draw those curves: {type(e).__name__}: {e}")
+        fig.save_arrays(arrays)
+        fig.save_source_csv(text)
+        fig.save_spec(new_spec)
+        fig.write_outputs(payload["svg"], codegen.generate(new_spec))
+        return self._json(dict(payload, added=ids))
 
     def _fit(self, fig):
         """{series_id, model, formula?, xmin?, xmax?} -> the fitted values and
@@ -612,13 +681,55 @@ class Handler(BaseHTTPRequestHandler):
             out.update(payload)
         return self._json(out)
 
-    def _save_script(self, fig, code):
+    def _generated_at(self, fig, rev, custom=None):
+        """The code FigForge generated for an earlier rev of the figure: kept
+        with the saved script, else rebuilt from that spec on the undo stack.
+        None if it's gone (codemerge can't run without it)."""
+        if custom and custom.get("base_rev") == rev and custom.get("base_generated"):
+            return custom["base_generated"]
+        for old in reversed(fig.load_history()["undo"]):
+            if isinstance(old, dict) and old.get("rev") == rev:
+                try:
+                    return codegen.generate(old)
+                except Exception:
+                    return None
+        return None
+
+    def _script_now(self, fig, spec):
+        """The user's saved figure.py with every figure-editor change since
+        it was saved merged in (codemerge.py), saved back. "merged" tells the
+        code editor what happened: conflicts are places where the user had
+        changed the same lines, so theirs were kept. "stale" = couldn't merge."""
+        custom = fig.load_script()
+        if not custom or custom.get("base_rev") == spec.get("rev"):
+            return custom
+        base = self._generated_at(fig, custom.get("base_rev"), custom)
+        if base is None:
+            return dict(custom, stale=True)
+        theirs = codegen.generate(spec)
+        code, conflicts = codemerge.merge3(base, custom["code"], theirs)
+        fig.save_script(code, spec.get("rev"), custom.get("saved_at"), theirs)
+        out = dict(custom, code=code, base_rev=spec.get("rev"), base_generated=theirs)
+        if theirs != base:      # nothing to say when the code came out the same
+            out["merged"] = {"conflicts": conflicts}
+        return out
+
+    def _save_script(self, fig, code, base_rev=None):
         """Keep the user's code as written, then fold what it can into the
         figure. The spec only changes if the result renders; the old spec
-        goes onto the undo stack so the figure editor can undo the sync."""
+        goes onto the undo stack so the figure editor can undo the sync.
+        If the figure changed after the editor loaded the code (base_rev is
+        older), those changes are merged into the code first -- otherwise
+        saving would quietly undo them."""
         saved_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         spec = fig.load_spec()
-        sync = {"changed": [], "added": [], "removed": [], "skipped": [], "error": None}
+        sync = {"changed": [], "added": [], "removed": [], "skipped": [], "error": None,
+                "merged": None}
+        if isinstance(base_rev, int) and base_rev != spec.get("rev"):
+            base = self._generated_at(fig, base_rev, fig.load_script())
+            if base is not None:
+                code, conflicts = codemerge.merge3(base, code, codegen.generate(spec))
+                sync["merged"] = {"conflicts": conflicts}
         new_spec = None
         try:
             new_spec, report = codesync.apply(code, spec, set(fig.load_arrays()))
@@ -642,9 +753,10 @@ class Handler(BaseHTTPRequestHandler):
                 h = fig.load_history()
                 fig.save_history((h["undo"] + [spec])[-HISTORY_MAX:], [])
                 spec = new_spec
-        fig.save_script(code, spec.get("rev"), saved_at)
+        generated = codegen.generate(spec)
+        fig.save_script(code, spec.get("rev"), saved_at, generated)
         return self._json({"ok": True, "saved_at": saved_at, "rev": spec.get("rev"),
-                           "generated": codegen.generate(spec), "sync": sync})
+                           "generated": generated, "code": code, "sync": sync})
 
     # ------------------------------------------------------------ accounts
     def _cookie(self, name):
@@ -861,7 +973,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def _assistant_edit(self, name):
         """A new AI session on an EXISTING figure: {request}. Its steps run
-        through /api/assistant/step/<name> like a new figure's."""
+        through /api/assistant/step/<name> like a new figure's. With
+        continue: true, the request is the next message in the figure's
+        last conversation (a chat) instead."""
         if not self._assistant_allowed():
             return
         from figforge import assistant
@@ -875,8 +989,12 @@ class Handler(BaseHTTPRequestHandler):
             return self._error(400, "say what should change")
         if len(request) > 4000:
             return self._error(400, "please keep it under 4000 characters")
+        old = fig.load_assistant() if body.get("continue") else None
+        if body.get("continue") and not assistant.can_continue(old):
+            return self._error(409, "that conversation can't go on -- start a new one")
         try:
-            state = assistant.start_edit(fig, request)
+            state = (assistant.continue_chat(fig, old, request) if old
+                     else assistant.start_edit(fig, request))
         except anthropic.APIError as e:
             return self._error(502, f"couldn't reach Claude: {e}")
         fig.save_assistant(state)
@@ -925,9 +1043,12 @@ class Handler(BaseHTTPRequestHandler):
             assistant.cleanup(state)
         fig.save_assistant(state)
         used, cap = self._ai_budget()
+        turn_steps, turn_cost = assistant._turn(state)
         return self._json({"done": state["done"], "events": events, "reply": state["reply"],
                            "created": state["created"], "steps": state["steps"],
-                           "cost_usd": state["cost_usd"], "ai_usage": {"used": round(used, 4), "cap": cap}})
+                           "cost_usd": state["cost_usd"], "ai_usage": {"used": round(used, 4), "cap": cap},
+                           "turn_steps": turn_steps, "turn_cost_usd": round(turn_cost, 5),
+                           "can_continue": assistant.can_continue(state)})
 
     def _assistant_howto(self, name):
         """"How this was made" for a finished AI figure: one cheap Claude
@@ -1068,10 +1189,11 @@ class Handler(BaseHTTPRequestHandler):
         return self._error(404, "unknown account action")
 
     # -------------------------------------------------------------- parts
-    def _payload(self, fig, spec):
+    def _payload(self, fig, spec, arrays=None):
         # Drawing takes about half a second; the same figure opened again (or
         # undone back to) on this server is handed back from memory instead.
-        arrays = fig.load_arrays()
+        # `arrays`: new data not saved yet (drawn first, to prove it works).
+        arrays = fig.load_arrays() if arrays is None else arrays
         key = (fig.store.cache_key + fig.name,
                hashlib.sha1(json.dumps(spec, sort_keys=True).encode("utf-8")).hexdigest())
         with _RENDER_LOCK:
@@ -1111,6 +1233,27 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             return
         return self._send(200, body, ctype, extra)
+
+
+def _widen_limits(panel, ids, arrays):
+    """Stretch a panel's x / y ranges so newly added curves show, keeping
+    the old ranges where they already cover them (and reversed axes as is)."""
+    new = [s for s in panel["series"] if s["id"] in ids]
+    for axis, key in (("x", "xlim"), ("y", "ylim")):
+        lim = panel.get(key)
+        if not lim or lim[0] >= lim[1]:
+            continue
+        vals = [np.asarray(render._resolve(s[axis], arrays), dtype=float).ravel()
+                for s in new if s.get(axis) is not None]
+        vals = [v[np.isfinite(v)] for v in vals]
+        vals = [v for v in vals if v.size]
+        if not vals:
+            continue
+        try:
+            lo, hi = csvimport._limits(vals, panel.get(f"{axis}scale") == "log")
+        except csvimport.CSVError:
+            continue
+        panel[key] = [min(lim[0], lo), max(lim[1], hi)]
 
 
 def serve(host="127.0.0.1", port=8000):

@@ -675,10 +675,12 @@ def add_batch(spec, project, text, panel_id, batch):
     return new, arrays, [s["id"] for s in added]
 
 
-def merge_tables(base_text, extra_text):
+def merge_tables(base_text, extra_text, rename=""):
     """One table with base's numeric columns plus extra's new ones, side by
     side (shorter columns padded with blanks). Names already in base keep
-    base's data. -> (csv text, names taken from extra)."""
+    base's data -- unless `rename` is given (e.g. the second file's name):
+    then extra's column comes in too, as "<name> (<rename>)".
+    -> (csv text, names taken from extra, {extra column index: its name})."""
     import csv as _csv
     import io as _io
     bn, bc, _ = parse(base_text)
@@ -687,14 +689,22 @@ def merge_tables(base_text, extra_text):
     for n, c in zip(bn, bc):
         if c is not None and n not in names:
             names.append(n); cols.append(c)
-    added = []
-    for n, c in zip(en, ec):
-        if c is not None and n not in names:
+    added, where = [], {}
+    for j, (n, c) in enumerate(zip(en, ec)):
+        if c is None:
+            continue
+        if n in names and rename:
+            stem, k = f"{n} ({rename})", 2
+            n = stem
+            while n in names:
+                n, k = f"{stem} {k}", k + 1
+        if n not in names:
             names.append(n); cols.append(c); added.append(n)
+            where[j] = n
     rows = max(len(c) for c in cols)
     buf = _io.StringIO()
     w = _csv.writer(buf, lineterminator="\n")
     w.writerow(names)
     for r in range(rows):
         w.writerow(["" if r >= len(c) or math.isnan(c[r]) else repr(float(c[r])) for c in cols])
-    return buf.getvalue(), added
+    return buf.getvalue(), added, where

@@ -144,12 +144,16 @@ with sync_playwright() as pw:
         main.click("#py-download-edited")
     check("hello from figure.py" in open(d.value.path(), encoding="utf-8").read(), "main menu: 'Download my edited version'")
 
-    # --- figure changes after the code was forked -> banner
+    # --- figure changes after the code was forked -> merged into it, with a note
     spec = json.load(open(f"figures/{P}/spec.json"))
+    spec["suptitle"]["text"] = "Changed in the figure"
     urllib.request.urlopen(urllib.request.Request(f"{B}/api/figure/{P}", data=json.dumps({"spec": spec}).encode(),
                                                   headers={"Content-Type": "application/json"}, method="POST"))
     pg.reload(); pg.wait_for_function("typeof cm !== 'undefined' && cm.getValue().length > 100")
-    check(pg.is_visible("#banner") and "rev" in pg.inner_text("#banner"), "banner: figure changed since this code was saved")
+    check(pg.is_visible("#banner") and "changes you made in the figure editor" in pg.inner_text("#banner")
+          and "Changed in the figure" in pg.evaluate("cm.getValue()")
+          and "hello from figure.py" in pg.evaluate("cm.getValue()"),
+          "figure changed since the code was saved: merged into it, and the editor says so")
 
     # --- command palette: reset
     pg.keyboard.press("Control+Shift+p")

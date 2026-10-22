@@ -85,10 +85,16 @@ with sync_playwright() as pw:
     check(text(d, "a_R")["text"] == "$R=0.075$" and d["panels"][2]["xlim"] == [-40, 40]
           and not any(t["text"] == "from code" for t in d["panels"][1]["texts"]), "Ctrl+Z in the figure editor undoes the whole sync")
 
-    # the code tab now warns its code no longer matches the figure
-    code.bring_to_front(); code.reload()
-    code.wait_for_function("typeof cm !== 'undefined' && cm.getValue().length > 100")
-    check(code.is_visible("#banner"), "code tab warns the figure moved on (after the undo)")
+    # the open code tab follows: the undone values come back; lines typed by
+    # hand (the loop, the ax.text line) stay -- a merge never drops the user's own lines
+    code.bring_to_front()
+    code.wait_for_function("cm.getValue().includes('R=0.075') && cm.getValue().includes('set_xlim(-40, 40)')",
+                           timeout=15000)
+    check("for k in range(2)" in code.evaluate("cm.getValue()") and code.is_visible("#banner"),
+          "code tab takes in the undo, keeps the loop, and says so")
+    code.reload()
+    code.wait_for_function("typeof cm !== 'undefined' && cm.getValue().includes('for k in range(2)')")
+    check(code.evaluate("cm.getValue().includes('R=0.075')"), "the merged code was saved")
 
     # a syntax error saves the code but leaves the figure alone
     before = disk()

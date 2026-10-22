@@ -307,3 +307,26 @@ figure → saved-code sync; a phone layout; photo-to-data-points.
 - Turning a 3-D plot: GET /api/mesh/<name>/<panel> sends its curves thinned out (30 mesh lines,
   3000 points); while dragging the page draws a wire picture with the same view maths as
   matplotlib on a canvas over the plot, and the server draws once on letting go.
+
+## Lines from another file, AI talks, saved code follows the figure (2026-10-21)
+- Insert > Lines from another file: the New-from-CSV dialog in an "add" mode (no project name;
+  "Put them in" picks the plot when there are several). POST /api/add-curves/<name> merges the
+  file's columns into the figure's table (csvimport.merge_tables(rename=<file name>): a clashing
+  name becomes "signal (run2)"), adds a batch with csv.add_batch (recorded in source.more, so Start
+  over keeps it), stretches the plot's x/y ranges to show the new lines (server._widen_limits).
+  The page pushes the old spec on its undo stack: one Ctrl+Z.
+- Change with AI is a talk (assistant.continue_chat): the next message goes into the same
+  conversation, with the figure's current summary (it may have been changed by hand) and its data
+  table re-uploaded (earlier uploads are deleted after each answer, so their container_upload
+  blocks are replaced by a note in the replay; an expired sandbox is dropped). Effort goes back to
+  medium for each new message. Limits (MAX_STEPS, MAX_COST_USD, MAX_VIEWS) count per message;
+  MAX_CHAT_USD = $6 per talk. state["chat"] keeps the turns; GET /api/assistant/chat/<name> hands
+  them to the page, which also resumes a talk whose answer was still being worked on.
+- Figure -> saved code: figforge/codemerge.py (three-way line merge). The saved script keeps
+  base_generated (the code generated when it was saved); GET /api/script merges the figure's later
+  changes in and saves the result ("merged": {conflicts}); POST /api/script with an older
+  base_rev merges before applying, so saving never undoes figure edits. Clashes keep the user's
+  lines and the code editor names them (clickable). The figure tab broadcasts
+  {type: 'figure-changed'}; an untouched code tab reloads, one with typing shows a note.
+  codegen's header no longer carries "rev N" (it made every save look like a user edit there).
+- tests/test_more_data.py (25 checks); test_assistant.py gained the talk checks.
