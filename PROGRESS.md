@@ -330,3 +330,22 @@ figure → saved-code sync; a phone layout; photo-to-data-points.
   {type: 'figure-changed'}; an untouched code tab reloads, one with typing shows a note.
   codegen's header no longer carries "rev N" (it made every save look like a user edit there).
 - tests/test_more_data.py (25 checks); test_assistant.py gained the talk checks.
+
+## A friendlier, cuter look (2026-10-28)
+- From the design canvas the user picked (claude.ai artifact "FigForge cute UI ideas"): soft
+  lavender ground, white cards, Nunito (Google Fonts; falls back to the system font), berry pink
+  #d6336c for the main thing and Claude, sky blue #3b5bdb for picked/links/Save, mint for "all good".
+  Rounded everything (12-26px), 2px soft borders, 40-44px buttons. All ids kept.
+- Menus renamed in plain words: File -> Figure, Insert -> Add, View -> Look, AI -> Ask Claude.
+  Undo / Redo carry their words; a blue "Save picture" menu (PDF / PNG / SVG) sits top right.
+- Tool strip shows names by default now (Words, Arrow, Shade, Legend, Grid, Fit, Code, PDF) on soft
+  coloured tiles; Ask Claude is a pink tile at the bottom; "Smaller" folds it to tiles only.
+  New Fit tool (= Add > Fit a curve).
+- Figure > Open another figure opens a start screen: From my file / Ask Claude cards and a card per
+  figure (the open one in mint). The top-bar list stays for quick switching.
+- Colour dots (matplotlib's tab colours + black/grey) under every colour box; one click types the
+  colour into the box. "Nothing picked yet" card with a little face. Status messages are pills.
+- Change with AI: chat bubbles (yours blue on the right, Claude's white on the left) and
+  "Ideas to try" chips that fill in the box.
+- test_menubar: names show from the start; test_guides clicks the zero line clear of the circle
+  (the figure sits a little smaller beside the wider tool strip).

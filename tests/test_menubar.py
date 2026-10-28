@@ -1,9 +1,9 @@
-"""The menu bar (File, Edit, Insert, View, Code, AI, Help): menus open and
-close by click, pointing and keys; Insert adds a legend, grid lines, a second
+"""The menu bar (Figure, Edit, Add, Look, Code, Ask Claude, Help): menus open and
+close by click, pointing and keys; Add adds a legend, grid lines, a second
 scale on the right and a shaded range; View shows or hides the list of
 everything and the "Change it" panel (remembered); zoom from the bottom bar;
-Start over asks first. The left tool strip (one-click tools, names shown or
-hidden) and the bottom bar (what's picked, the pointer's x/y in the plot's
+Start over asks first. The left tool strip (one-click tools, names shown by
+default, folded away and back) and the bottom bar (what's picked, the pointer's x/y in the plot's
 numbers, the figure size, the list)."""
 import os as _os
 ROOT_DIR = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
@@ -140,14 +140,15 @@ try:
         n = len(panel("a").get("texts") or [])
         ev("setSelection(['panel:a'])"); pg.click("#tool-label"); settle()
         check(len(panel("a").get("texts") or []) == n + 1, "tool strip: Label adds one")
-        check(not ev("document.getElementById('toolstrip').classList.contains('wide')")
-              and not shown("#tool-label .tl"), "tool strip starts as icons only")
+        check(ev("document.getElementById('toolstrip').classList.contains('wide')")
+              and shown("#tool-label .tl") and pg.inner_text("#tool-label") == "Words",
+              "tool strip starts with the names showing")
         pg.click("#tool-expand")
-        check(shown("#tool-label .tl") and pg.inner_text("#tool-label") == "Label", "the bottom button shows the names")
+        check(not shown("#tool-label .tl"), "the bottom button folds it to pictures only")
         pg.reload(); pg.wait_for_function("document.getElementById('status').dataset.ready === '1'")
-        check(shown("#tool-label .tl"), "…and it's remembered")
+        check(not shown("#tool-label .tl"), "…and it's remembered")
         pg.click("#tool-expand")
-        check(not shown("#tool-label .tl"), "…and hides them again")
+        check(shown("#tool-label .tl"), "…and shows them again")
 
         # --- bottom bar
         size = disk()["size_in"]
@@ -178,7 +179,7 @@ try:
 
         # --- Help
         pg.click("#btn-help")
-        check(shown("#help-pop") and "Insert" in pg.inner_text("#help-pop"), "Help shows how to use it")
+        check(shown("#help-pop") and "Add" in pg.inner_text("#help-pop"), "Help shows how to use it")
         pg.keyboard.press("Escape")
         check(not errs, f"no page errors {errs}")
         br.close()

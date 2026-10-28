@@ -31,7 +31,7 @@ with sync_playwright() as pw:
 
     # Clicking the grey zero line (away from the curve) picks "zero lines".
     x, y, w, h = box("t_a__zero__h")
-    pg.mouse.click(x + 30, y + h / 2)
+    pg.mouse.click(x + w * 0.04, y + h / 2)   # left of the circle (it starts 10% in)
     check(ev("selection") == ["a__zero"], f"click on the zero line picks it ({ev('selection')})")
     check(ev("$('insp-kind').textContent") == "Zero lines", "side panel names it 'Zero lines'")
 

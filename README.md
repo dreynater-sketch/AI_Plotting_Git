@@ -55,7 +55,7 @@ Tests: `pip install -r requirements-dev.txt`, then `python tests/run_all.py`
 - **Ctrl+Z** to undo. **Rebuild** discards all edits and regenerates from the CSV.
 - **figure.py** downloads a standalone script that reproduces exactly what you
   see. **PNG** exports at the spec's dpi.
-- **Insert > Lines from another file** adds curves from a second CSV to a plot
+- **Add > Lines from another file** adds curves from a second CSV to a plot
   of a figure made from a table. Its columns join the figure's table (a name
   the figure already has gets the file's name added, e.g. `signal (run2)`), the
   plot's ranges grow to show them, and Start over keeps them. Ctrl+Z removes them.

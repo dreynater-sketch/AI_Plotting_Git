@@ -2951,7 +2951,8 @@ if (figChannel) {
 }
 
 /* ------------------------------------------------------------ menu bar */
-/* File, Edit, Insert, View, Code, AI, Help. Click a name to open its menu;
+/* Figure, Edit, Add, Look, Code, Ask Claude, Help (plus Save picture on the
+ * right). Click a name to open its menu;
  * with one open, pointing at another name switches to it. A click on a
  * choice runs it and closes the menu; Esc or a click elsewhere closes it.
  * The arrow keys walk the choices. */
@@ -3012,7 +3013,7 @@ window.addEventListener('keydown', (e) => {
 /* View: the list of everything (bottom) and the "Change it" panel (right).
  * Remembered per browser. */
 const VIEW_KEY = 'figforge.view';
-const view = { list: false, side: true, wide: false };
+const view = { list: false, side: true, wide: true };
 try { Object.assign(view, JSON.parse(localStorage.getItem(VIEW_KEY) || '{}')); } catch { /* defaults */ }
 function applyView() {
   $('dock').classList.toggle('list-on', view.list);
@@ -3024,6 +3025,7 @@ function applyView() {
   $('toolstrip').classList.toggle('wide', view.wide);
   $('tool-expand').setAttribute('aria-expanded', String(view.wide));
   $('tool-expand').title = view.wide ? 'Hide the names' : 'Show the names';
+  $('tool-expand').querySelector('.tl').textContent = view.wide ? 'Smaller' : 'Names';
 }
 function toggleView(key) {
   view[key] = !view[key];
@@ -3036,10 +3038,11 @@ $('menu-view-list').onclick = () => toggleView('list');
 $('menu-view-side').onclick = () => toggleView('side');
 
 /* Left tool strip: the most-used things, one click each. The bottom button
- * shows or hides their names. */
+ * shows or hides their names. Save picture (top) is the three downloads. */
 const toolFor = { 'tool-label': 'btn-add-label', 'tool-arrow': 'btn-add-arrow', 'tool-span': 'menu-add-span',
-                  'tool-legend': 'menu-add-legend', 'tool-grid': 'menu-add-grid', 'tool-ai': 'btn-ai-edit',
-                  'tool-code': 'py-view', 'tool-pdf': 'dl-pdf' };
+                  'tool-legend': 'menu-add-legend', 'tool-grid': 'menu-add-grid', 'tool-fit': 'menu-add-fit',
+                  'tool-ai': 'btn-ai-edit', 'tool-code': 'py-view', 'tool-pdf': 'dl-pdf',
+                  'save-pdf': 'dl-pdf', 'save-png': 'btn-png', 'save-svg': 'dl-svg' };
 for (const [tool, target] of Object.entries(toolFor)) $(tool).onclick = () => $(target).click();
 $('tool-expand').onclick = () => toggleView('wide');
 
@@ -3086,11 +3089,52 @@ $('menu-zoom-out').onclick = $('zoom-out').onclick = () => setZoom(zoom - 10, tr
 $('menu-fit').onclick = () => fit();
 $('menu-undo').onclick = () => undo();
 $('menu-redo').onclick = () => redo();
+/* Open another figure: a start screen with the big ways to begin and a
+ * card for each of your figures. */
 $('menu-open').onclick = () => {
-  const sel = $('project-select');
-  sel.focus();
-  try { sel.showPicker(); } catch { /* older browsers: the list is focused */ }
+  const names = [...$('project-select').options].map((o) => o.value);
+  $('start-mine').innerHTML = names.map((n) => `
+    <button class="mine${n === FIGURE ? ' on' : ''}" data-name="${escapeHtml(n)}">
+      <svg viewBox="0 0 64 36" aria-hidden="true"><path d="M6 28C16 6 24 6 30 20s14 12 28-12"/></svg>
+      <b>${escapeHtml(n)}</b>${n === FIGURE ? '<span>Open now</span>' : ''}
+    </button>`).join('');
+  $('start-ai').hidden = !assistantOn;
+  $('start-modal').hidden = false;
+  $('start-mine').querySelector('.mine.on')?.focus();
 };
+$('start-mine').addEventListener('click', (e) => {
+  const b = e.target.closest('.mine');
+  if (!b) return;
+  $('start-modal').hidden = true;
+  if (b.dataset.name !== FIGURE) openProject(b.dataset.name);
+});
+$('start-close').onclick = () => { $('start-modal').hidden = true; };
+$('start-file').onclick = () => { $('start-modal').hidden = true; $('btn-new').click(); };
+$('start-ai').onclick = () => { $('start-modal').hidden = true; $('btn-ai').click(); };
+$('start-modal').addEventListener('click', (e) => {
+  if (e.target === $('start-modal')) $('start-modal').hidden = true;
+});
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !$('start-modal').hidden) $('start-modal').hidden = true;
+});
+
+/* Colour dots under every colour box: one click picks a colour. They type
+ * it into the box next to them, so the box's own handler does the rest. */
+const DOTS = ['#000000', '#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#e377c2', '#7f7f7f'];
+for (const wrap of document.querySelectorAll('.colorwrap')) {
+  const hex = wrap.querySelector('input[type=text]');
+  const dots = document.createElement('span');
+  dots.className = 'color-dots';
+  dots.innerHTML = DOTS.map((c) =>
+    `<button type="button" class="dot" style="background:${c}" data-c="${c}" title="${c}" aria-label="Colour ${c}"></button>`).join('');
+  dots.addEventListener('click', (e) => {
+    const c = e.target.closest('.dot')?.dataset.c;
+    if (!c) return;
+    hex.value = c;
+    hex.dispatchEvent(new Event('change'));
+  });
+  wrap.after(dots);
+}
 
 /* Code: open the code editor (code.html, a new tab) or download.
  * "Download my changed version" only shows once one is saved. */
@@ -4048,6 +4092,13 @@ $('ai-edit-new').onclick = () => {
   $('ai-edit-request').focus();
 };
 // Enter sends; Shift+Enter starts a new line.
+// Ideas to try: a click puts the words in the box, ready to send or change.
+$('ai-edit-ideas').addEventListener('click', (e) => {
+  const b = e.target.closest('.idea');
+  if (!b) return;
+  $('ai-edit-request').value = b.textContent;
+  $('ai-edit-request').focus();
+});
 $('ai-edit-request').addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); runAiEdit(); }
 });
