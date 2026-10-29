@@ -413,6 +413,7 @@ function clientToSvg(evt) {
 
 /* -------------------------------------------------------- svg rendering */
 
+let shownSize = null;   // the figure's size in pixels, as last shown
 function applySvg(svgText) {
   if (!turn) removeTurnPreview();      // the real picture replaces the quick one
   canvas.innerHTML = svgText;
@@ -420,7 +421,11 @@ function applySvg(svgText) {
   refreshSizeLabel();
   svgEl.removeAttribute('width');
   svgEl.removeAttribute('height');
-  applyZoom();
+  // A new figure size: show all of it again (a zoom set by hand was for
+  // the old size).
+  const size = geometry ? `${geometry.width}x${geometry.height}` : null;
+  if (shownSize && size && size !== shownSize) fit(); else applyZoom();
+  shownSize = size;
 
   for (const g of svgEl.querySelectorAll('g[id^="t_"]')) {
     const r = resolve(g.id.slice(2));
@@ -3197,6 +3202,7 @@ function refreshFigureFields() {
   $('f-fig-w').value = tidyNum(spec.size_in[0]);
   $('f-fig-h').value = tidyNum(spec.size_in[1]);
   $('f-fig-preset').value = '';
+  $('f-fig-small').hidden = smallestText() >= 5;
   $('f-fig-font').value = spec.rcparams?.['font.family'] ?? 'sans-serif';
   // Rows of plots: 1 row = side by side; columns follow.
   const n = spec.panels.length;
@@ -3229,8 +3235,61 @@ $('f-fig-layout').addEventListener('change', (e) => {
   setTimeout(fit, 0);
 });
 
-/** Every text size in the figure, times k (rounded to half points): so a
- *  figure shrunk to one journal column keeps readable, proportionate text. */
+/* matplotlib's own sizes (points) for things the figure doesn't set itself:
+ * curves' line width and dots, tick marks and the gaps by the numbers. */
+const RC_SIZES = {
+  'lines.linewidth': 1.5, 'lines.markersize': 6, 'lines.markeredgewidth': 1, 'patch.linewidth': 1,
+  'xtick.major.size': 3.5, 'xtick.minor.size': 2, 'xtick.major.width': 0.8, 'xtick.minor.width': 0.6,
+  'ytick.major.size': 3.5, 'ytick.minor.size': 2, 'ytick.major.width': 0.8, 'ytick.minor.width': 0.6,
+  'xtick.major.pad': 3.5, 'xtick.minor.pad': 3.4, 'ytick.major.pad': 3.5, 'ytick.minor.pad': 3.4,
+  'axes.labelpad': 4, 'axes.titlepad': 6,
+};
+const STYLE_SIZES = ['lw', 'linewidth', 'ms', 'markersize', 'mew', 'markeredgewidth',
+                     'capsize', 'elinewidth', 'capthick'];
+
+/** Everything drawn in points, times k: words, lines, dots, arrows, the
+ *  frame, tick marks. So a figure shrunk to one journal column looks like
+ *  the same figure, only smaller (points don't follow the inches by
+ *  themselves). */
+function scaleFigure(k) {
+  scaleText(k);
+  const r = (v) => Math.round(v * k * 100) / 100;
+  const rc = { ...(spec.rcparams || {}) };
+  for (const [key, d] of Object.entries(RC_SIZES)) rc[key] = r(typeof rc[key] === 'number' ? rc[key] : d);
+  spec.rcparams = rc;
+  for (const p of spec.panels) {
+    p.frame_lw = r(p.frame_lw ?? 0.8);
+    for (const g of [...(p.hlines || []), ...(p.vlines || [])]) g.lw = r(g.lw ?? 1);
+    for (const a of p.arrows || []) { a.lw = r(a.lw ?? 1.8); a.mutation_scale = r(a.mutation_scale ?? 12); }
+    for (const t of p.texts || []) {
+      if (!t.bbox) continue;
+      for (const key of ['pad', 'lw', 'linewidth']) if (typeof t.bbox[key] === 'number') t.bbox[key] = r(t.bbox[key]);
+    }
+    for (const c of p.series || []) {
+      const st = c.style;
+      if (!st) continue;
+      for (const key of STYLE_SIZES) if (typeof st[key] === 'number') st[key] = r(st[key]);
+      if (typeof st.s === 'number') st.s = Math.round(st.s * k * k * 100) / 100;   // dot area
+      if (typeof st.linewidths === 'number') st.linewidths = r(st.linewidths);
+    }
+  }
+}
+
+/** The smallest word size in the figure, in points. */
+function smallestText() {
+  const sizes = [];
+  const add = (o, d) => { if (o?.text) sizes.push(o.size ?? d); };
+  add(spec.suptitle, 16);
+  for (const p of spec.panels) {
+    add(p.title, 14); add(p.xlabel, 13); add(p.ylabel, 13);
+    sizes.push(p.xtick_size ?? 11, p.ytick_size ?? 11);
+    if (p.legend) sizes.push(p.legend.size ?? 10);
+    for (const t of p.texts || []) sizes.push(t.size ?? 12);
+  }
+  return Math.min(...sizes);
+}
+
+/** Every text size in the figure, times k (rounded to half points). */
 function scaleText(k) {
   const r = (v) => Math.max(4, Math.round(v * k * 2) / 2);
   const sz = (o, d) => { if (o) o.size = r(o.size ?? d); };
@@ -3254,8 +3313,10 @@ function scaleText(k) {
 function setFigureSize(w, h) {
   if (!(w >= 1 && w <= 40 && h >= 1 && h <= 40)) return;
   pushHistory();
-  const k = w / spec.size_in[0];
-  if ($('f-fig-scale').checked && Math.abs(k - 1) > 0.01) scaleText(k);
+  // Both sides count: a figure half as wide and half as tall has half-size
+  // words; one only made taller grows them a little.
+  const k = Math.sqrt((w / spec.size_in[0]) * (h / spec.size_in[1]));
+  if ($('f-fig-scale').checked && Math.abs(k - 1) > 0.01) scaleFigure(k);
   spec.size_in = [Math.round(w * 100) / 100, Math.round(h * 100) / 100];
   refreshFigureFields();
   scheduleSave(0);
@@ -3270,15 +3331,7 @@ $('f-fig-preset').addEventListener('change', (e) => {
   else if (v) { const w = parseFloat(v); setFigureSize(w, w * h0 / w0); }   // same proportions
 });
 $('f-fig-w').addEventListener('change', (e) => setFigureSize(parseFloat(e.target.value), spec.size_in[1]));
-$('f-fig-h').addEventListener('change', (e) => {
-  // Height alone: the text keeps its size.
-  const h = parseFloat(e.target.value);
-  if (!(h >= 1 && h <= 40)) return;
-  pushHistory();
-  spec.size_in = [spec.size_in[0], Math.round(h * 100) / 100];
-  scheduleSave(0);
-  setTimeout(fit, 0);
-});
+$('f-fig-h').addEventListener('change', (e) => setFigureSize(spec.size_in[0], parseFloat(e.target.value)));
 $('f-fig-font').addEventListener('change', (e) => {
   pushHistory();
   const rc = { ...(spec.rcparams || {}) };
@@ -3432,7 +3485,7 @@ new ResizeObserver(() => { if (zoomFits && geometry) fit(); }).observe($('canvas
 
 function setZoom(z, byHand = false) {
   if (byHand) zoomFits = false;
-  zoom = Math.max(40, Math.min(220, Math.round(z)));
+  zoom = Math.max(40, Math.min(400, Math.round(z)));
   $('zoom').value = zoom;
   $('zoomval').textContent = zoom + '%';
   applyZoom();

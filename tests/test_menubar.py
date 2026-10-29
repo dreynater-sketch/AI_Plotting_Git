@@ -127,7 +127,7 @@ try:
 
         # --- zoom from the corner
         z = ev("zoom"); pg.click("#zoom-in")
-        check(ev("zoom") == min(220, z + 10) and pg.inner_text("#zoomval") == f"{ev('zoom')}%", "+ makes it bigger")
+        check(ev("zoom") == min(400, z + 10) and pg.inner_text("#zoomval") == f"{ev('zoom')}%", "+ makes it bigger")
         pg.click("#menu-view"); pg.click("#menu-zoom-out")
         check(ev("zoom") == z, "View > Smaller makes it smaller again")
 

@@ -358,3 +358,13 @@ figure → saved-code sync; a phone layout; photo-to-data-points.
 - Left tool strip: a row per tool with its picture, a clearer name and a few words on what it does
   (Add words / a label on the plot, Add an arrow / to point at a spot, Shade a range, Legend,
   Grid lines, Fit a curve, See the code, Save as PDF, Ask Claude). 186px wide; "Smaller" folds it.
+
+## Resizing keeps the figure looking the same (2026-10-29)
+- Changing the figure size now scales everything drawn in points, not just the words: curve
+  line widths and dots, arrows, guide lines, the frame, tick marks and their gaps, label boxes
+  (`scaleFigure` in app.js; matplotlib defaults go into rcparams, explicit values are scaled).
+- The scale counts both sides (square root of width ratio × height ratio), so typing a height
+  also scales; it used to change nothing.
+- After a new size the view fits the figure to the window again (it kept the old zoom, so a
+  small figure showed tiny and a big one ran off screen). Zoom now goes up to 400%.
+- A note under the size boxes says when some words are under 5 pt.

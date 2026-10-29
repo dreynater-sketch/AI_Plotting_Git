@@ -73,8 +73,17 @@ with sync_playwright() as pw:
     check(d["size_in"][0] == 3.4 and abs(d["size_in"][1] - round(3.4 * h0 / w0, 2)) < 0.011,
           f"1-column preset: 3.4 in wide, same proportions ({d['size_in']})")
     check(d["panels"][0]["xlabel"]["size"] < size0, f"text shrinks with it ({size0} -> {d['panels'][0]['xlabel']['size']})")
+    k = 3.4 / w0
+    check(abs(d["rcparams"]["lines.linewidth"] - 1.5 * k) < 0.01 and abs(d["rcparams"]["xtick.major.size"] - 3.5 * k) < 0.01,
+          f"lines and tick marks shrink too ({d['rcparams'].get('lines.linewidth')})")
+    check(abs(d["panels"][0]["frame_lw"] - 0.8 * k) < 0.01, "so does the frame")
+    pg.wait_for_function("svgEl && geometry && Math.abs(svgEl.getBoundingClientRect().width - "
+                         "Math.min($('canvas-wrap').clientWidth - 40, ($('canvas-wrap').clientHeight - 40) * geometry.width / geometry.height)) < 3")
+    check(True, "the smaller figure is fitted to the window again")
+    check(pg.is_visible("#f-fig-small"), "three plots in one column width: a note says the words are too small")
     pg.fill("#f-fig-h", "3"); pg.press("#f-fig-h", "Enter"); settle()
     check(disk()["size_in"][1] == 3, "height can be typed")
+    check(not pg.is_visible("#f-fig-small"), "taller: the words grow and the note goes away")
     pg.select_option("#f-fig-font", "serif"); settle()
     check(disk()["rcparams"].get("font.family") == "serif", "font: serif")
 
