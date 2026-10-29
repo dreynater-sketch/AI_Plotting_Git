@@ -141,14 +141,22 @@ try:
         ev("setSelection(['panel:a'])"); pg.click("#tool-label"); settle()
         check(len(panel("a").get("texts") or []) == n + 1, "tool strip: Label adds one")
         check(ev("document.getElementById('toolstrip').classList.contains('wide')")
-              and shown("#tool-label .tl") and pg.inner_text("#tool-label") == "Words",
+              and shown("#tool-label .tl") and pg.inner_text("#tool-label .tl") == "Add words"
+              and shown("#tool-label .th"),
               "tool strip starts with the names showing")
         pg.click("#tool-expand")
-        check(not shown("#tool-label .tl"), "the bottom button folds it to pictures only")
+        check(not shown("#tool-label .tl") and not shown("#tool-label .th"), "the bottom button folds it to pictures only")
         pg.reload(); pg.wait_for_function("document.getElementById('status').dataset.ready === '1'")
         check(not shown("#tool-label .tl"), "…and it's remembered")
         pg.click("#tool-expand")
         check(shown("#tool-label .tl"), "…and shows them again")
+
+        # --- numbers in the boxes are short: no float noise, no digits finer than the axis needs
+        check(ev("[tidyNum(3.9375999999999998), tidyNum(3.93761234, 10), tidyNum(1234567.891), tidyNum(0.25), tidyNum(null)]")
+              == ["3.9376", "3.938", "1234568", "0.25", ""], "numbers in the boxes are tidied")
+        ev("setSelection(['panel:a'])")
+        check(len(pg.input_value("#f-xmin")) <= 8, f"axis limits show short ({pg.input_value('#f-xmin')})")
+        ev("setSelection([])")
 
         # --- bottom bar
         size = disk()["size_in"]

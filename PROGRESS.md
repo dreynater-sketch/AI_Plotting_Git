@@ -349,3 +349,12 @@ figure → saved-code sync; a phone layout; photo-to-data-points.
   "Ideas to try" chips that fill in the box.
 - test_menubar: names show from the start; test_guides clicks the zero line clear of the circle
   (the figure sits a little smaller beside the wider tool strip).
+
+## Short numbers, tools that say what they do (2026-10-29)
+- Number boxes in the side panel no longer show float noise or digits finer than the plot needs:
+  tidyNum(v, span) (app.js) keeps a ten-thousandth of the axis range for positions (label x/y,
+  shaded-range From/To, guide line spot), 6 figures for the rest (whole numbers stay whole).
+  "3.9375999999999998" now reads 3.9376. Only what is shown changes; a box writes only when typed in.
+- Left tool strip: a row per tool with its picture, a clearer name and a few words on what it does
+  (Add words / a label on the plot, Add an arrow / to point at a spot, Shade a range, Legend,
+  Grid lines, Fit a curve, See the code, Save as PDF, Ask Claude). 186px wide; "Smaller" folds it.

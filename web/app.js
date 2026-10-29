@@ -905,7 +905,7 @@ function refreshInspector() {
   if (!multi) $('f-text').value = sel[0].obj.text ?? '';
 
   const size = common((s) => s.obj.size ?? 12);
-  $('f-size').value = size ?? '';
+  $('f-size').value = tidyNum(size);
   $('f-size').placeholder = size === undefined ? 'mixed' : '';
 
   const color = common((s) => normHex(s.obj.color ?? '#000000'));
@@ -918,8 +918,7 @@ function refreshInspector() {
   $('xy-group').hidden = !single;
   if (single) {
     const p = panelById(sel[0].panel);
-    $('f-x').value = sel[0].obj.xy[0];
-    $('f-y').value = sel[0].obj.xy[1];
+    putXY(sel[0]);
     $('f-xunit').innerHTML = p.xlabel?.text ? `(${mathHtml(p.xlabel.text)})` : '';
     $('f-yunit').innerHTML = p.ylabel?.text ? `(${mathHtml(p.ylabel.text)})` : '';
   }
@@ -945,7 +944,7 @@ function refreshInspector() {
       showBoxColor('f-box-fc', same((s) => boxColorName(s.obj.bbox.fc)));
       showBoxColor('f-box-ec', same((s) => boxColorName(s.obj.bbox.ec)));
       const pad = same((s) => boxPad(s.obj.bbox));
-      $('f-box-pad').value = pad ?? '';
+      $('f-box-pad').value = tidyNum(pad);
       $('f-box-pad').placeholder = pad === undefined ? 'mixed' : '';
     }
   }
@@ -992,10 +991,38 @@ function showBoxColor(fid, value) {
 /** Axis limits/scale/aspect for one or more selected panels. Bulk edits set
  *  each panel's own array index (e.g. xlim[0]) rather than sharing one array,
  *  so panels keep their own range on the axis you didn't touch. */
+/** A number as a box shows it: no float noise (3.9375999999999998) and no
+ *  digits finer than a ten-thousandth of `span` (the axis it sits on), so a
+ *  dragged position reads 3.938, not 3.93761234. Without a span, 6 figures
+ *  (but whole numbers stay whole: 1234568, not 1234570). */
+function tidyNum(v, span) {
+  if (typeof v !== 'number' || !Number.isFinite(v)) return v ?? '';
+  if (span > 0 && Number.isFinite(span)) {
+    const d = Math.min(10, Math.max(0, Math.ceil(-Math.log10(span / 10000))));
+    return String(parseFloat(v.toFixed(d)));
+  }
+  const whole = v === 0 ? 1 : Math.floor(Math.log10(Math.abs(v))) + 1;   // keep big whole numbers whole
+  return String(Number(v.toPrecision(Math.min(21, Math.max(6, whole)))));
+}
+/** How wide a panel's axis is on screen, in its own numbers ('x' or 'y'). */
+function axisSpan(pid, axis) {
+  const g = geometry?.panels?.[pid];
+  const lim = g?.[axis + 'lim'];
+  if (!lim) return undefined;
+  if (g[axis + 'scale'] === 'log') return undefined;   // 6 figures on a log axis
+  return Math.abs(lim[1] - lim[0]);
+}
+/** A label's spot: axes coordinates run 0-1, data ones the panel's ranges. */
+function putXY(s) {
+  const axes = s.coords === 'axes';
+  $('f-x').value = tidyNum(s.obj.xy[0], axes ? 1 : axisSpan(s.panel, 'x'));
+  $('f-y').value = tidyNum(s.obj.xy[1], axes ? 1 : axisSpan(s.panel, 'y'));
+}
+
 function refreshAxesInspector() {
   const setNum = (id, get) => {
     const v = common(get);
-    $(id).value = v ?? '';
+    $(id).value = tidyNum(v);
     $(id).placeholder = v === undefined ? 'mixed' : '';
   };
 
@@ -1040,7 +1067,7 @@ function refreshAxesInspector() {
   if (!$('twin-fields').hidden) {
     for (const [fid, i] of [['f-y2min', 0], ['f-y2max', 1]]) {
       const v = common((s) => s.obj.twin.ylim?.[i] ?? null);
-      $(fid).value = v ?? '';
+      $(fid).value = tidyNum(v);
     }
     $('f-y2scale').value = common((s) => s.obj.twin.yscale ?? 'linear') ?? 'linear';
   }
@@ -1215,7 +1242,7 @@ const LEGEND_KINDS = new Set(['line', 'step', 'errorbar', 'band', 'bar', 'scatte
 function refreshLegendInspector() {
   const sel = selected();
   const size = common((s) => s.obj.size ?? 10);
-  $('f-legend-size').value = size ?? '';
+  $('f-legend-size').value = tidyNum(size);
   $('f-legend-size').placeholder = size === undefined ? 'mixed' : '';
 
   const framed = common((s) => !!s.obj.frameon);
@@ -1274,8 +1301,8 @@ function refreshCmapFields() {
   $('f-cmap').value = common((s) => st(s).cmap ?? 'viridis') ?? 'viridis';
   $('f-cmap-log').checked = common((s) => st(s).norm === 'log') === true;
   const lo = common((s) => st(s).vmin ?? null), hi = common((s) => st(s).vmax ?? null);
-  $('f-cmap-min').value = lo ?? '';
-  $('f-cmap-max').value = hi ?? '';
+  $('f-cmap-min').value = tidyNum(lo);
+  $('f-cmap-max').value = tidyNum(hi);
   const bar = common((s) => !!s.obj.colorbar);
   $('f-cbar').checked = bar === true;
   $('f-cbar-label-field').hidden = bar !== true;
@@ -1410,17 +1437,17 @@ function refreshSeriesInspector() {
   if (mapped) refreshCmapFields();
 
   const lw = common((s) => s.obj.style?.lw ?? 1.5);
-  $('f-series-lw').value = lw ?? '';
+  $('f-series-lw').value = tidyNum(lw);
   $('f-series-lw').placeholder = lw === undefined ? 'mixed' : '';
 
   const ms = common((s) => s.obj.style?.ms ?? 6);
-  $('f-series-ms').value = ms ?? '';
+  $('f-series-ms').value = tidyNum(ms);
   $('f-series-ms').placeholder = ms === undefined ? 'mixed' : '';
 
   // matplotlib's own default is fully opaque (alpha unset means 1).
   const alpha = common((s) => s.obj.style?.alpha ?? 1);
   $('f-series-alpha').value = alpha ?? 1;
-  $('f-series-alpha-num').value = alpha ?? '';
+  $('f-series-alpha-num').value = tidyNum(alpha);
   $('f-series-alpha-num').placeholder = alpha === undefined ? 'mixed' : '';
 }
 
@@ -1432,13 +1459,15 @@ function refreshSpanInspector() {
   $('f-span-color').value = color ?? '#cccccc';
   $('f-span-color-hex').value = color ?? '';
   const alpha = common((s) => s.obj.alpha ?? 0.25);
-  $('f-span-alpha').value = alpha ?? '';
-  const one = selected().length === 1 ? selected()[0].obj : null;
+  $('f-span-alpha').value = tidyNum(alpha);
+  const sel1 = selected().length === 1 ? selected()[0] : null;
+  const one = sel1?.obj ?? null;
   for (const id of ['f-span-lo', 'f-span-hi', 'f-span-label']) $(id).closest('label').hidden = !one;
   if (one) {
     $('f-span-from-name').textContent = one.axis === 'y' ? 'From (up the side)' : 'From (along the bottom)';
-    $('f-span-lo').value = one.lo;
-    $('f-span-hi').value = one.hi;
+    const span = axisSpan(sel1.panel, one.axis === 'y' ? 'y' : 'x');
+    $('f-span-lo').value = tidyNum(one.lo, span);
+    $('f-span-hi').value = tidyNum(one.hi, span);
     $('f-span-label').value = one.label ?? '';
   }
 }
@@ -1450,7 +1479,7 @@ function refreshGuideInspector() {
   $('f-guide-color-hex').placeholder = color === undefined ? 'mixed' : '';
   $('f-guide-ls').value = common((s) => s.obj.ls ?? '-') ?? '-';
   const lw = common((s) => s.obj.lw ?? 1.0);
-  $('f-guide-lw').value = lw ?? '';
+  $('f-guide-lw').value = tidyNum(lw);
   $('f-guide-lw').placeholder = lw === undefined ? 'mixed' : '';
 
   // Where it sits only makes sense for one line.
@@ -1461,7 +1490,7 @@ function refreshGuideInspector() {
     const label = one.axis === 'v' ? p.xlabel?.text : p.ylabel?.text;
     $('f-guide-pos-name').textContent = one.axis === 'v' ? 'Across at' : 'Up at';
     $('f-guide-pos-unit').innerHTML = label ? `(${mathHtml(label)})` : '';
-    $('f-guide-pos').value = one.obj[one.axis === 'v' ? 'x' : 'y'];
+    $('f-guide-pos').value = tidyNum(one.obj[one.axis === 'v' ? 'x' : 'y'], axisSpan(one.panel, one.axis === 'v' ? 'x' : 'y'));
   }
 }
 
@@ -1474,11 +1503,11 @@ function refreshArrowInspector() {
   $('f-arrow-style').value = common((s) => s.obj.arrowstyle ?? '->') ?? '->';
 
   const lw = common((s) => s.obj.lw ?? 1.8);
-  $('f-arrow-lw').value = lw ?? '';
+  $('f-arrow-lw').value = tidyNum(lw);
   $('f-arrow-lw').placeholder = lw === undefined ? 'mixed' : '';
 
   const scale = common((s) => s.obj.mutation_scale ?? 12);
-  $('f-arrow-scale').value = scale ?? '';
+  $('f-arrow-scale').value = tidyNum(scale);
   $('f-arrow-scale').placeholder = scale === undefined ? 'mixed' : '';
 }
 
@@ -2328,8 +2357,7 @@ function showXY() {
   // commits one -- guard rather than assume, even though both call sites
   // currently run just after that write.
   if (sel.length === 1 && sel[0].draggable && sel[0].obj.xy) {
-    $('f-x').value = sel[0].obj.xy[0];
-    $('f-y').value = sel[0].obj.xy[1];
+    putXY(sel[0]);
   }
 }
 
@@ -3166,8 +3194,8 @@ $('dl-svg').onclick = () => exportAs('svg');
 
 function refreshFigureFields() {
   if (!spec) return;
-  $('f-fig-w').value = spec.size_in[0];
-  $('f-fig-h').value = spec.size_in[1];
+  $('f-fig-w').value = tidyNum(spec.size_in[0]);
+  $('f-fig-h').value = tidyNum(spec.size_in[1]);
   $('f-fig-preset').value = '';
   $('f-fig-font').value = spec.rcparams?.['font.family'] ?? 'sans-serif';
   // Rows of plots: 1 row = side by side; columns follow.

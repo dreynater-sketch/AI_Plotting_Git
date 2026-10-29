@@ -227,21 +227,21 @@ main {
 .canvas svg { display: block; }
 
 /* ------------------------------------------------- left tool strip */
-/* Wide (the usual): a picture on a soft coloured tile with its name under
-   it. Narrow: the tiles only. */
+/* Wide (the usual): a row per tool on a soft coloured tile -- its picture,
+   its name, and a few words on what it does. Narrow: the pictures only. */
 .toolstrip {
   flex: none; width: 64px; display: flex; flex-direction: column; gap: 5px;
   padding: 12px 8px; background: var(--surface); border-right: 2px solid var(--line-soft);
   overflow-y: auto; overflow-x: hidden;
 }
-.toolstrip.wide { width: 92px; }
+.toolstrip.wide { width: 186px; padding: 12px 10px; }
 .toolstrip .tool {
   --t: var(--ink-soft); --tbg: var(--tint);
-  flex: none; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+  flex: none; display: flex; align-items: center; justify-content: center; gap: 10px;
   width: 100%; height: 46px; padding: 0; border: none; border-radius: 16px;
-  background: var(--tbg); color: var(--t);
+  background: var(--tbg); color: var(--t); text-align: left;
 }
-.toolstrip.wide .tool { height: 54px; gap: 2px; }
+.toolstrip.wide .tool { justify-content: flex-start; height: 52px; padding: 0 10px 0 12px; }
 .toolstrip .tool:hover:not(:disabled) { background: var(--tbg); border: none; filter: brightness(0.96); transform: translateY(-1px); }
 .toolstrip .tool:active:not(:disabled) { transform: translateY(1px); }
 .toolstrip .t-pink   { --t: #c2255c; --tbg: #fff0f5; }
@@ -255,16 +255,18 @@ main {
   stroke-width: 2.1; stroke-linecap: round; stroke-linejoin: round;
 }
 .toolstrip .ti .fill { fill: currentColor; fill-opacity: 0.2; }
-.toolstrip .tl { font-size: 12.5px; font-weight: 800; color: var(--ink); white-space: nowrap; }
-.toolstrip:not(.wide) .tl { display: none; }
+.toolstrip .tw { display: flex; flex-direction: column; min-width: 0; line-height: 1.2; }
+.toolstrip .tl { font-size: 13.5px; font-weight: 800; color: var(--ink); white-space: nowrap; }
+.toolstrip .th { font-size: 11.5px; font-weight: 700; color: var(--ink-soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.toolstrip:not(.wide) .tl, .toolstrip:not(.wide) .tw { display: none; }
 .toolstrip hr { width: 100%; border: none; border-top: 2px solid var(--line-soft); margin: 4px 0; }
 .toolstrip .spacer { flex: 1; min-height: 8px; }
 .toolstrip .tool.tool-ai { --t: #fff; --tbg: var(--accent); }
 .toolstrip .tool.tool-ai .tl { color: #fff; font-weight: 900; }
-.toolstrip.wide .tool.tool-ai { height: 60px; }
+.toolstrip .tool.tool-ai .th { color: #fff; }
+.toolstrip.wide .tool.tool-ai { height: 58px; }
 #tool-expand { --tbg: transparent; height: 40px; }
-.toolstrip.wide #tool-expand { height: 40px; }
-#tool-expand .tl { color: var(--ink-soft); font-size: 11.5px; }
+#tool-expand .tl { color: var(--ink-soft); font-size: 12.5px; }
 #tool-expand .ti { width: 18px; height: 18px; transition: transform 0.12s; }
 .toolstrip:not(.wide) #tool-expand .ti { transform: rotate(180deg); }
 

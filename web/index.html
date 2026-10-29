@@ -163,20 +163,20 @@
 </header>
 
 <main>
-  <!-- Left: the tools used most, each a picture with its name under it.
-       The bottom button folds it to pictures only (and back). -->
+  <!-- Left: the tools used most, each a picture with its name and a few words
+       on what it does. The bottom button folds it to pictures only (and back). -->
   <nav class="toolstrip" id="toolstrip" aria-label="Tools">
-    <button id="tool-label" class="tool t-pink" title="Add some words"><svg class="ti" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 6h14M12 6v13"/></svg><span class="tl">Words</span></button>
-    <button id="tool-arrow" class="tool t-blue" title="Add an arrow"><svg class="ti" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 19 19 5M10 5h9v9"/></svg><span class="tl">Arrow</span></button>
-    <button id="tool-span" class="tool t-orange" title="Shade a range of the plot"><svg class="ti" viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="3" width="8" height="18" rx="2" class="fill"/><path d="M3 21h18"/></svg><span class="tl">Shade</span></button>
-    <button id="tool-legend" class="tool t-green" title="Show which line is which"><svg class="ti" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h3M4 12h3M4 17h3M10 7h10M10 12h10M10 17h10"/></svg><span class="tl">Legend</span></button>
-    <button id="tool-grid" class="tool t-purple" title="Grid lines across the plot"><svg class="ti" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="M4 12h16M12 4v16"/></svg><span class="tl">Grid</span></button>
-    <button id="tool-fit" class="tool t-blue" title="Work out a line or curve that follows the points"><svg class="ti" viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="16" r="1.5"/><circle cx="11" cy="11" r="1.5"/><circle cx="17" cy="9" r="1.5"/><path d="M3 19C9 12 14 8 21 7"/></svg><span class="tl">Fit</span></button>
+    <button id="tool-label" class="tool t-pink" title="Add some words"><svg class="ti" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 6h14M12 6v13"/></svg><span class="tw"><span class="tl">Add words</span><span class="th">a label on the plot</span></span></button>
+    <button id="tool-arrow" class="tool t-blue" title="Add an arrow"><svg class="ti" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 19 19 5M10 5h9v9"/></svg><span class="tw"><span class="tl">Add an arrow</span><span class="th">to point at a spot</span></span></button>
+    <button id="tool-span" class="tool t-orange" title="Shade a range of the plot"><svg class="ti" viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="3" width="8" height="18" rx="2" class="fill"/><path d="M3 21h18"/></svg><span class="tw"><span class="tl">Shade a range</span><span class="th">colour a stretch</span></span></button>
+    <button id="tool-legend" class="tool t-green" title="Show which line is which"><svg class="ti" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h3M4 12h3M4 17h3M10 7h10M10 12h10M10 17h10"/></svg><span class="tw"><span class="tl">Legend</span><span class="th">which line is which</span></span></button>
+    <button id="tool-grid" class="tool t-purple" title="Grid lines across the plot"><svg class="ti" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="M4 12h16M12 4v16"/></svg><span class="tw"><span class="tl">Grid lines</span><span class="th">lines at the numbers</span></span></button>
+    <button id="tool-fit" class="tool t-blue" title="Work out a line or curve that follows the points"><svg class="ti" viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="16" r="1.5"/><circle cx="11" cy="11" r="1.5"/><circle cx="17" cy="9" r="1.5"/><path d="M3 19C9 12 14 8 21 7"/></svg><span class="tw"><span class="tl">Fit a curve</span><span class="th">a line through dots</span></span></button>
     <hr>
-    <button id="tool-code" class="tool t-grey" title="See and change the Python code"><svg class="ti" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 7l-5 5 5 5M15 7l5 5-5 5"/></svg><span class="tl">Code</span></button>
-    <button id="tool-pdf" class="tool t-grey" title="Download the figure as a PDF"><svg class="ti" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg><span class="tl">PDF</span></button>
+    <button id="tool-code" class="tool t-grey" title="See and change the Python code"><svg class="ti" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 7l-5 5 5 5M15 7l5 5-5 5"/></svg><span class="tw"><span class="tl">See the code</span><span class="th">the Python behind it</span></span></button>
+    <button id="tool-pdf" class="tool t-grey" title="Download the figure as a PDF"><svg class="ti" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg><span class="tw"><span class="tl">Save as PDF</span><span class="th">for papers, LaTeX</span></span></button>
     <span class="spacer"></span>
-    <button id="tool-ai" class="tool tool-ai" title="Tell Claude what to change" hidden><svg class="ti" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8zM18 15l.8 2.2L21 18l-2.2.8L18 21l-.8-2.2L15 18l2.2-.8z"/></svg><span class="tl">Ask Claude</span></button>
+    <button id="tool-ai" class="tool tool-ai" title="Tell Claude what to change" hidden><svg class="ti" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8zM18 15l.8 2.2L21 18l-2.2.8L18 21l-.8-2.2L15 18l2.2-.8z"/></svg><span class="tw"><span class="tl">Ask Claude</span><span class="th">say what to change</span></span></button>
     <button id="tool-expand" class="tool" title="Hide the names" aria-expanded="true"><svg class="ti" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg><span class="tl">Smaller</span></button>
   </nav>
   <section class="stage" id="stage">
