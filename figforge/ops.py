@@ -10,7 +10,7 @@ compact view of a figure the assistant reads first.
 
 How the assistant plugs in later (nothing here calls a model yet): a
 server-side loop sends the user's request plus TOOLS to the Messages API
-(model "claude-opus-5"), runs every tool_use block through apply() via
+(model "claude-opus-5-5"), runs every tool_use block through apply() via
 POST /api/ops/<project>, and returns all results in one user message of
 tool_result blocks until the model stops asking for tools. The API key stays
 on the server; the browser never talks to Anthropic directly.

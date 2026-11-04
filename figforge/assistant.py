@@ -34,13 +34,14 @@ from figforge import csvimport, ops, render
 
 # FIGFORGE_AI_MODEL switches the model (e.g. claude-sonnet-5 for a test);
 # a session keeps the model it started with.
-MODEL = os.environ.get("FIGFORGE_AI_MODEL", "").strip() or "claude-opus-5"
+MODEL = os.environ.get("FIGFORGE_AI_MODEL", "").strip() or "claude-opus-5-5"
 
 # List prices, $ per million tokens (input, output). Sandbox time is billed
 # separately by Anthropic and isn't included in the cost shown.
-PRICES = {"claude-opus-5": (5.00, 25.00), "claude-sonnet-5": (2.00, 10.00),
+PRICES = {"claude-opus-5-5": (4.00, 20.00), "claude-opus-5": (5.00, 25.00), "claude-sonnet-5": (2.00, 10.00),
           "claude-sonnet-5-5": (2.00, 10.00), "claude-haiku-5-5": (0.10, 0.50)}
 CACHE_WRITE, CACHE_READ = 1.25, 0.10     # x the input price
+CACHE_READ_USD = {"claude-opus-5-5": 0.20}   # models whose cache reads cost less than that, $ per million
 
 MAX_STEPS = 20          # Claude calls per request (a figure, or one chat message)
 MAX_COST_USD = 2.00     # per request; the turn stops (and says so) past this
@@ -58,7 +59,13 @@ BETAS = ["server-side-fallback-2026-07-01"]
 # Models that take an effort change part-way through a conversation (a
 # system message) without losing the cached history.
 EFFORT_BETA = "mid-conversation-output-config-2026-07-01"
-PER_MESSAGE_EFFORT = {"claude-opus-5"}
+PER_MESSAGE_EFFORT = {"claude-opus-5-5", "claude-opus-5"}
+# These models refuse a thinking block whose earlier messages have changed, and
+# continue_chat has to change them: files from finished turns are deleted from
+# Anthropic's storage, so their upload blocks can't be replayed. Dropping those
+# old blocks costs only the old reasoning; Claude gets the figure again anyway.
+KEEPS_HISTORY_EXACT = {"claude-opus-5-5", "claude-sonnet-5-5"}
+THINKING_BETA = "thinking-binding-controls-2026-08-01"
 FIRST_EFFORT, TIDY_EFFORT = "medium", "low"   # making the data + figure; tidying it up
 CODE_EXECUTION = {"type": "code_execution_20260521", "name": "code_execution"}
 
@@ -289,10 +296,10 @@ def _client():
 
 
 def _cost(usage, model=MODEL):
-    price_in, price_out = PRICES.get(model, PRICES["claude-opus-5"])
-    cached_in = (getattr(usage, "cache_creation_input_tokens", 0) or 0) * CACHE_WRITE \
-        + (getattr(usage, "cache_read_input_tokens", 0) or 0) * CACHE_READ
-    return ((usage.input_tokens + cached_in) * price_in + usage.output_tokens * price_out) / 1e6
+    price_in, price_out = PRICES.get(model, PRICES["claude-opus-5-5"])
+    written = (getattr(usage, "cache_creation_input_tokens", 0) or 0) * CACHE_WRITE
+    read = (getattr(usage, "cache_read_input_tokens", 0) or 0) * CACHE_READ_USD.get(model, price_in * CACHE_READ)
+    return ((usage.input_tokens + written) * price_in + read + usage.output_tokens * price_out) / 1e6
 
 
 def _usage_row(state, usage, cost, effort, blocks, seconds):
@@ -502,6 +509,10 @@ def step(state, fig):
     # The request's own effort never changes (that would drop the cache);
     # tidy-up rounds lower it with a system message instead (see below).
     effort = state.get("effort") or FIRST_EFFORT
+    betas = BETAS + ([EFFORT_BETA] if model in PER_MESSAGE_EFFORT else [])
+    if model in KEEPS_HISTORY_EXACT:
+        betas = betas + [THINKING_BETA]
+        kw["thinking"] = {"type": "adaptive", "block_binding": {"prefix_mismatch_behavior": "drop_block"}}
     t0 = time.time()
     response = _client().beta.messages.create(
         model=model,
@@ -513,7 +524,7 @@ def step(state, fig):
         messages=state["messages"],
         output_config={"effort": FIRST_EFFORT},
         cache_control={"type": "ephemeral"},   # tools + system + history: a cached prefix
-        betas=BETAS + ([EFFORT_BETA] if model in PER_MESSAGE_EFFORT else []),
+        betas=betas,
         fallbacks="default",
         **kw,
     )

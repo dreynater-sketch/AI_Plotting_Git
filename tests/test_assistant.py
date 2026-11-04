@@ -180,7 +180,7 @@ check(p["series"][1]["style"]["ls"] == "--" and p["texts"][0]["text"] == "Cu", "
 spec, ev = run()
 check(state["done"] and state["reply"].startswith("The two spectra"), "final text is the reply")
 kw = fake.seen[-1]
-check(kw["model"] == "claude-opus-5" and kw["fallbacks"] == "default"
+check(kw["model"] == "claude-opus-5-5" and kw["fallbacks"] == "default"
       and any(t.get("type", "").startswith("code_execution") for t in kw["tools"]),
       "request: model, refusal fallback, sandbox tool")
 assistant.cleanup(state)

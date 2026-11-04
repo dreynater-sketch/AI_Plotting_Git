@@ -221,7 +221,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._mesh(path[len("/api/mesh/"):])
 
         if path == "/api/assistant/tools":
-            return self._json({"model": "claude-opus-5", "tools": ops.TOOLS})
+            return self._json({"model": "claude-opus-5-5", "tools": ops.TOOLS})
 
         if path.startswith("/api/howto/"):
             fig = self._figure(path[len("/api/howto/"):])

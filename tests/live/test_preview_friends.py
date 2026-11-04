@@ -81,7 +81,7 @@ try:
 
         tools = ctx.request.get(H + "/api/assistant/tools").json()
         from figforge import ops
-        check(tools["model"] == "claude-opus-5" and [t["name"] for t in tools["tools"]] == [t["name"] for t in ops.TOOLS],
+        check(tools["model"] == "claude-opus-5-5" and [t["name"] for t in tools["tools"]] == [t["name"] for t in ops.TOOLS],
               "deployed: assistant tool definitions served")
         r = ctx.request.post(H + "/api/ops/decay", data=json.dumps({"calls": [
             {"name": "set_axis", "input": {"panel_id": "a", "axis": "y", "min": 1, "max": 2000, "scale": "log", "tick_size": None}},

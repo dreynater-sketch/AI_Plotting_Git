@@ -386,3 +386,17 @@ figure → saved-code sync; a phone layout; photo-to-data-points.
   at the reload keeps running on the server, so steps take a lock (stepping_at) and a second
   asker gets {busy: true} and waits; otherwise Claude would be paid twice.
 - There is no way to buy tokens yet.
+
+## Opus 5.5 (2026-11-04)
+- The default model is now claude-opus-5-5 ($4/$20 per million, cache reads $0.20, not the usual
+  10% of input: CACHE_READ_USD). Sessions already started keep the model they started with.
+- Same prompts as the table above, at medium then low effort: circle 3 steps, 57 s, $0.210;
+  damped 3 steps, 29 s, $0.091 (it ran second, so it read the shared cache). A follow-up message
+  in the talk: $0.03-$0.04. A real sine wave through the chat on Opus 5: $0.14. So 100 tokens is
+  about 2-5 graphs, and "about 50" for a simple graph runs a little high, which is the safe side.
+- Opus 5.5 refuses thinking blocks when earlier messages changed (accounts made since 2026-08-31),
+  and continue_chat changes them: uploads deleted after a turn become placeholder text. Keeping
+  the files would mean leaving people's data at Anthropic for longer, so requests send
+  prefix_mismatch_behavior "drop_block" instead. Only old reasoning is lost; Claude gets the figure
+  again with every message. Those follow-ups miss the cache from the edited message on, as before.
+
