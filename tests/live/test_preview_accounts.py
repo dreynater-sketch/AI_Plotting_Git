@@ -56,6 +56,11 @@ try:
         check(pg.inner_text("#account-name") == "Preview Tester", f"preview: log-in works ({time.time()-t:.1f}s incl. first-time setup)")
         c = {x["name"]: x for x in ctx.cookies()}
         check(c["ff_at"]["secure"] and c["ff_at"]["httpOnly"], "preview: session cookie is Secure + HttpOnly")
+        check(pg.evaluate("document.body.classList.contains('at-home')") and pg.is_visible("#chat-input"),
+              "preview: logging in lands on the chat")
+        check("100 tokens" in pg.inner_text("#sb-tokens"), f"preview: a new member has 100 tokens ({pg.inner_text('#sb-tokens')})")
+        pg.goto(f"{H}/?tools=1&project=qcircle")
+        pg.wait_for_function("document.getElementById('status').dataset.ready === '1'", timeout=90000)
         tid = pg.evaluate("spec.panels[0].texts[0].id")
         pg.evaluate(f"setSelection(['{tid}'])"); t = time.time(); pg.click("#f-size-up")
         pg.wait_for_function("!savePending && !inFlight && !needsSave", timeout=60000)

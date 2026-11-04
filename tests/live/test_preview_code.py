@@ -41,6 +41,8 @@ try:
         pg.fill(f + " [name=email]", U["email"]); pg.fill(f + " [name=password]", U["password"])
         pg.click(f + " button[type=submit]")
         pg.wait_for_function("document.getElementById('status').dataset.ready === '1'", timeout=90000)
+        pg.goto(f"{H}/?tools=1&project=qcircle")
+        pg.wait_for_function("document.getElementById('status').dataset.ready === '1'", timeout=90000)
         pg.click("#btn-py")
         with ctx.expect_page() as newp:
             pg.click("#py-view")

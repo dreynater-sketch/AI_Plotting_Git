@@ -54,10 +54,12 @@ try:
         pg.keyboard.press("Escape")
         pg.mouse.click(5, 300)
 
+        pg.goto(f"{H}/?tools=1&project=qcircle")
+        pg.wait_for_function("document.getElementById('status').dataset.ready === '1'", timeout=90000)
         pg.click("#menu-file"); pg.click("#btn-new"); pg.set_input_files("#csv-file", csv_path)
         pg.wait_for_selector("#csv-pick:not([hidden])", timeout=30000)
         pg.click("#csv-create")
-        pg.wait_for_url("**/?tools=1&project=decay", timeout=60000)
+        pg.wait_for_url("**/?project=decay", timeout=60000)
         pg.wait_for_function("document.getElementById('status').dataset.ready === '1'", timeout=60000)
         check(pg.evaluate("spec.panels[0].series[0].label") == "counts", "deployed: New from CSV builds a figure")
         check(any(k.endswith("decay/data/source.csv") for k in store._walk(f"users/{uid}")), "deployed: source CSV stored in the user's space")
