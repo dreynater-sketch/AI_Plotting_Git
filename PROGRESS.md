@@ -368,3 +368,15 @@ figure → saved-code sync; a phone layout; photo-to-data-points.
 - After a new size the view fits the figure to the window again (it kept the old zoom, so a
   small figure showed tiny and a big one ran off screen). Zoom now goes up to 400%.
 - A note under the size boxes says when some words are under 5 pt.
+
+## Chat first, with tokens (2026-11-04)
+- The start screen is now a chat, because the point is an ordinary AI that lets you move the
+  graph by hand. The chat moves to the side once there is a graph, on the same page, and the
+  graph appears as soon as Claude first draws it. The two AI pop-ups are gone.
+- Tools hide until "More tools". Picking something puts its settings over the chat rather than
+  opening a new column: a column would re-fit the figure under the pointer in the middle of a drag.
+- Set token prices like image and video sites, not metered: you know the price before you send.
+  100 a month, 50 for a new graph, 10 for a change. At $0.07-$0.48 a figure (see the cost table
+  above), 100 tokens costs at most about $1 a month per person. Big figures cost the same 50.
+- Nothing is charged for a try that drew nothing or a question that changed nothing.
+- There is no way to buy tokens yet.

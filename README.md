@@ -29,6 +29,20 @@ Tests: `pip install -r requirements-dev.txt`, then `python tests/run_all.py`
 
 ## What you can do
 
+**It starts as a chat.** Say what you want, or drop in your data, and Claude
+draws it; the graph appears beside the talk and you drag anything on it. Only
+the chat, the graph, Undo and Save picture show. **More tools** brings back
+every menu and tool, and is remembered. Clicking something shows its settings.
+
+**Tokens** show at the bottom. You get 100 a month (`FIGFORGE_TOKENS_MONTHLY`).
+A new graph from Claude uses 50 (`FIGFORGE_TOKENS_NEW`), a change uses 10
+(`FIGFORGE_TOKENS_CHANGE`), and they're only taken when Claude actually drew or
+changed something. One spreadsheet dropped in is offered as a free graph, with
+no AI. Dragging, clicking and every other tool are free too. A person's
+`app_metadata.figforge_tokens` overrides the monthly number; admins and the local
+editor are counted but never stopped. The dollar limit
+(`FIGFORGE_AI_MONTHLY_USD`) stays as a safety net behind the tokens.
+
 - **Click** any label to select it, or **click a panel's plot area** to select
   its axes (for xlim/ylim/scale/aspect — see below). Pick either from the
   Elements list too, which is how you reach labels hidden under others.
@@ -64,7 +78,7 @@ Tests: `pip install -r requirements-dev.txt`, then `python tests/run_all.py`
   lines, `figforge/codemerge.py`); where you had changed the same lines
   yourself, your lines are kept and the code editor says where. An open code
   tab updates by itself; with unsaved typing it waits and merges on Save.
-- **✨ Change with AI is a talk**: after Claude answers, type the next thing
+- **The chat is a talk**: after Claude answers, type the next thing
   ("now make the labels bigger") and it carries on with what it knows. Each
   answer is one Ctrl+Z. "Start a new talk" forgets it. Limits are per message
   ($2, 20 steps) and $6 per talk.
