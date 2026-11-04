@@ -377,6 +377,7 @@ figure → saved-code sync; a phone layout; photo-to-data-points.
   opening a new column: a column would re-fit the figure under the pointer in the middle of a drag.
 - Set token prices like image and video sites, not metered: you know the price before you send.
   100 a month, 50 for a new graph, 10 for a change. At $0.07-$0.48 a figure (see the cost table
-  above), 100 tokens costs at most about $1 a month per person. Big figures cost the same 50.
+  above), 100 tokens usually costs about $1 a month per person or less. Big figures cost the same 50,
+  and one request can reach its $2 limit, so the monthly dollar limit stays behind the tokens.
 - Nothing is charged for a try that drew nothing or a question that changed nothing.
 - There is no way to buy tokens yet.

@@ -72,6 +72,9 @@ try:
         print("   reply:", d.get("reply"))
         check(d.get("done") and d.get("created"), "the session finished with a figure")
         check(any(e.startswith("Made a table") for e in events), "the sandbox produced a table")
+        check(d.get("tokens_spent") == 50 and d.get("tokens", {}).get("left") == 50,
+              f"the new graph used 50 of the 100 tokens ({d.get('tokens_spent')}, {d.get('tokens')})")
+        check(ctx.get(H + "/api/auth/me").json().get("tokens", {}).get("left") == 50, "...and that was saved")
         fig = ctx.get(H + "/api/figure/ai_live")
         spec = fig.json().get("spec", {}) if fig.ok else {}
         p = (spec.get("panels") or [{}])[0]
