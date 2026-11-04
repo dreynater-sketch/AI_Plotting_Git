@@ -60,6 +60,9 @@ try:
               "preview: logging in lands on the chat")
         check(pg.inner_text("#sb-tokens").endswith(" 0 tokens") and pg.is_disabled("#chat-input"),
               f"preview: a new member has no tokens, so no Claude ({pg.inner_text('#sb-tokens')})")
+        r = ctx.request.post(H + "/api/assistant/start", data=json.dumps({"name": "x", "idea": "a line", "files": []}),
+                             headers={"Content-Type": "application/json"})
+        check(r.status == 402, f"preview: and the server refuses before calling Claude ({r.status})")
         pg.goto(f"{H}/?tools=1&project=qcircle")
         pg.wait_for_function("document.getElementById('status').dataset.ready === '1'", timeout=90000)
         tid = pg.evaluate("spec.panels[0].texts[0].id")
