@@ -30,7 +30,7 @@ with sync_playwright() as pw:
     br = pw.chromium.launch(channel="msedge")
     ctx = br.new_context(viewport={"width": 1500, "height": 900}, accept_downloads=True)
     pg = ctx.new_page(); errs = []; pg.on("pageerror", lambda e: errs.append(str(e)))
-    pg.goto(f"{B}/?project=qcircle")
+    pg.goto(f"{B}/?tools=1&project=qcircle")
     pg.wait_for_function("document.getElementById('status').dataset.ready === '1'")
 
     pg.click("#menu-file"); pg.click("#btn-new")

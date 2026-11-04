@@ -91,12 +91,12 @@ try:
         keep = [c for c in ctx.cookies() if c["name"] != "ff_at"]
         ctx.clear_cookies(); ctx.add_cookies(keep)
         pg.reload(); loaded()
-        check(pg.inner_text("#account-name") == "Ada" and pg.evaluate("spec") is not None,
+        check(pg.inner_text("#account-name") == "Ada" and pg.evaluate("document.getElementById('home-mine').children.length") > 0,
               "expired sign-in: renewed once for all of the page's requests, still signed in")
 
         # --- Ada edits her figure (the Q-circle one; other starter projects
         # depend on what's in the local figures/ folder)
-        pg.goto(B + "/?project=qcircle"); loaded()
+        pg.goto(B + "/?tools=1&project=qcircle"); loaded()
         tid = pg.evaluate("spec.panels[0].texts[0].id"); s0 = pg.evaluate("spec.panels[0].texts[0].size")
         pg.evaluate(f"setSelection(['{tid}'])"); pg.click("#f-size-up"); settle()
 
@@ -130,7 +130,7 @@ try:
         signup("Bob", "bob@test.dev", "bob-password-1")
         pg.goto(mail("bob@test.dev", "signup")); loaded()
         check(pg.inner_text("#account-name") == "Bob", "Bob signed in")
-        pg.goto(B + "/?project=qcircle"); loaded()
+        pg.goto(B + "/?tools=1&project=qcircle"); loaded()
         me = pg.evaluate("fetch('/api/auth/me').then(r => r.json())")
         keyed = me.get("assistant") is True
         check(me.get("ai_usage", {}).get("cap") == 0 and (not keyed or pg.evaluate("!document.getElementById('btn-ai-edit').hidden")),
@@ -151,7 +151,7 @@ try:
         check(not any(o.startswith(f"users/{ada_id}/bobs") for o in objects()), "…not in Ada's")
         r = ctx.request.post(B + "/api/project/rename", data=json.dumps({"from": "bobs", "name": "bobs plot"}),
                              headers={"Content-Type": "application/json"})
-        pg.goto(B + "/?project=bobs%20plot"); loaded()
+        pg.goto(B + "/?tools=1&project=bobs%20plot"); loaded()
         tid = pg.evaluate("spec.panels[0].texts[0].id")
         pg.evaluate(f"setSelection(['{tid}'])"); pg.click("#f-size-up"); settle()
         bob_id = next(o for o in objects() if "/bobs plot/" in o).split("/")[1]
@@ -159,7 +159,7 @@ try:
         check(r.ok and pg.evaluate("FIGURE") == "bobs plot" and sp["panels"][0]["texts"][0]["size"] == s0 + 1
               and f"users/{bob_id}/bobs plot/spec.json" in objects(),
               "online: a name with a space can be renamed to, opened and saved")
-        pg.goto(B + "/?project=qcircle"); loaded()
+        pg.goto(B + "/?tools=1&project=qcircle"); loaded()
 
         # --- expired access token: refreshed transparently
         get(M + "/_expire")

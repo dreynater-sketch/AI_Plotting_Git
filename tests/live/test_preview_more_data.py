@@ -51,7 +51,7 @@ try:
         r = api("/api/project/from-csv", {"name": P, "csv": "t,signal\n" + "".join(f"{i},{i * i}\n" for i in range(10)),
                                          "filename": "run1.csv", "x": 0, "ys": [1]})
         check(r.ok, f"deployed: a figure from a first file ({r.status})")
-        pg.goto(f"{H}/?project={P.replace(' ', '%20')}")
+        pg.goto(f"{H}/?tools=1&project={P.replace(' ', '%20')}")
         pg.wait_for_function("document.getElementById('status').dataset.ready === '1'", timeout=90000)
 
         pg.click("#menu-insert"); pg.click("#menu-add-curves")

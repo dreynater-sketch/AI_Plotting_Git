@@ -84,9 +84,10 @@ try:
         fpg.click(f + " button[type=submit]"); loaded(fpg)
         # The starter projects are whatever sits in the local figures/ folder.
         seeded = [n for n in os.listdir("figures") if os.path.exists(f"figures/{n}/spec.json")]
-        check(fpg.inner_text("#account-name") == "Pal" and fpg.evaluate("FIGURE") in seeded
-              and fpg.evaluate("spec.panels.length") >= 1,
-              "friend lands in the editor with their own starter project")
+        mine = fpg.evaluate("[...document.querySelectorAll('#home-mine .mine')].map((b) => b.dataset.name)")
+        check(fpg.inner_text("#account-name") == "Pal" and fpg.evaluate("document.body.classList.contains('at-home')")
+              and mine and set(mine) <= set(seeded),
+              "friend lands on the chat, with their own starter projects listed")
         fpg.click("#btn-account")
         check(fpg.is_hidden("#admin-box"), "friend has no invite box")
         check(fctx.request.get(B + "/api/admin/users").status == 403, "friend can't list users")

@@ -957,14 +957,8 @@ sub, sup { font-size: 0.75em; line-height: 0; }
 #insp-empty .subhead { margin-top: 6px; }
 #insp-empty .check { margin: 2px 0 14px; }
 
-.ai-usage { margin: 4px 0 0; font-size: 12.5px; color: var(--ink-soft); min-height: 1em; }
-/* Change with AI: a back-and-forth talk, newest at the bottom. Yours on the
-   right in blue, Claude's on the left in white. */
-#ai-edit-modal .modal-card { max-width: 640px; }
-.chat {
-  max-height: 46vh; overflow-y: auto; display: flex; flex-direction: column; gap: 10px;
-  margin-bottom: 12px; padding: 14px; border-radius: 20px; background: #faf9ff;
-}
+/* The talk with Claude: yours on the right in blue, Claude's on the left in white. */
+.chat { display: flex; flex-direction: column; gap: 10px; }
 .chat:empty { display: none; }
 .chat-msg { padding: 10px 14px; font-size: 14px; line-height: 1.5; white-space: pre-wrap; max-width: 86%; }
 .chat-msg.you { align-self: flex-end; background: var(--sel); color: #fff; font-weight: 700; border-radius: 20px 20px 6px 20px; }
@@ -972,24 +966,119 @@ sub, sup { font-size: 0.75em; line-height: 0; }
 .chat-msg small { display: block; margin-top: 4px; color: var(--ink-soft); font-size: 12.5px; }
 .chat-msg.you small { color: rgba(255, 255, 255, 0.85); }
 .chat-msg .ai-log { white-space: normal; margin-bottom: 4px; }
-#ai-edit-modal textarea {
-  width: 100%; resize: vertical; font: inherit; font-size: 14px;
-  padding: 10px 12px; border: 2px solid var(--line); border-radius: 16px; background: #faf9ff;
-}
-.idea-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: -4px 0 4px; }
+.idea-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .idea-chips > span { font-size: 12.5px; font-weight: 800; color: var(--ink-soft); margin-right: 2px; }
 .idea-chips .idea {
   height: 32px; padding: 0 12px; border-radius: 16px; font-size: 13px;
   border: 2px solid #ffd1df; background: #fff;
 }
 .idea-chips .idea:hover:not(:disabled) { background: var(--accent-soft); border-color: #fcb6cc; }
-#ai-edit-go, #ai-make { padding: 0 20px; }
 
 /* Legend panel: one name box per curve, with its little line/dot picture. */
 .legend-entry { display: flex; flex-direction: row; align-items: center; gap: 8px; }
 .legend-entry .legend-swatch { flex: 0 0 22px; display: inline-flex; }
 .legend-entry .legend-swatch svg { width: 22px; height: 12px; }
 .legend-entry input { flex: 1; min-width: 0; }
+
+/* ------------------------------------------- the chat, start to finish */
+main { position: relative; }
+.chatside {
+  flex: none; width: 340px; display: flex; flex-direction: column; gap: 8px; padding: 14px;
+  background: var(--surface); border-right: 2px solid var(--line-soft); min-height: 0;
+}
+.chat-scroll { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }
+.chat-hello { display: none; text-align: center; }
+.chat-hello h1 { margin: 0 0 8px; font-size: 34px; font-weight: 900; }
+.chat-hello p { margin: 0; font-size: 16px; color: var(--ink-soft); }
+.chat-tip { margin: 0; padding: 10px 14px; border-radius: 16px; background: var(--tint); font-size: 13px; color: var(--ink-soft); }
+.chat-offer { white-space: normal; align-self: flex-start; }
+.chat-offer[hidden] { display: none; }
+.chat-offer button { display: block; margin: 10px 0 2px; height: 38px; padding: 0 16px; }
+.chat-files { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; font-size: 13px; }
+.chat-files[hidden] { display: none; }
+.chat-files li { display: flex; align-items: center; gap: 4px; padding: 3px 6px 3px 12px; border-radius: 14px; background: var(--tint); max-width: 100%; overflow: hidden; }
+.chat-files li.skip { color: var(--ink-soft); padding-right: 12px; }
+.chat-files button { width: 22px; height: 22px; padding: 0; border: none; background: none; border-radius: 50%; flex: none; }
+.composer {
+  flex: none; display: flex; align-items: flex-end; gap: 6px; padding: 6px;
+  border: 2px solid var(--line); border-radius: 22px; background: #faf9ff;
+}
+.composer:focus-within { border-color: #fcb6cc; }
+.composer.over { border-color: var(--accent); background: var(--accent-soft); }
+.composer textarea {
+  flex: 1; min-width: 0; resize: none; border: none; outline: none; background: none; box-shadow: none;
+  font: inherit; font-size: 14.5px; padding: 8px 4px; max-height: 160px;
+}
+.composer-attach {
+  flex: none; width: 38px; height: 38px; display: flex; align-items: center; justify-content: center;
+  border-radius: 50%; cursor: pointer; color: var(--ink-soft); position: relative;
+}
+.composer-attach[hidden] { display: none; }
+.composer-attach:hover { background: var(--tint); }
+.composer-attach input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.composer-attach svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+#chat-send { flex: none; height: 38px; padding: 0 16px; border-radius: 19px; }
+.chat-under { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; font-size: 12.5px; color: var(--ink-soft); }
+.chat-under .link { font-size: 12.5px; }
+.chat-price { flex: 1; min-width: 140px; }
+.chat-price.err { color: var(--danger); font-weight: 800; }
+#chat-msg { margin: 0; min-height: 0; }
+#chat-msg:empty { display: none; }
+.figure-ideas .idea { height: 28px; font-size: 12.5px; padding: 0 10px; }
+.home-ideas, .home-rail { display: none; }
+.idea-chips[hidden] { display: none !important; }
+.sb-tokens { color: var(--accent-ink); font-weight: 900; }
+.sb-tokens.low { color: var(--danger); }
+.free-note { margin: 8px 0 0; font-size: 13.5px; font-weight: 800; color: var(--ok); }
+.fig-name { font-weight: 800; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#btn-home { cursor: pointer; }
+#btn-more[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent-ink); }
+.canvas-wait { display: none; position: absolute; inset: 0; align-items: center; justify-content: center; font-size: 18px; font-weight: 800; color: #a7a1bd; }
+
+/* Claude is working on the graph: look, but don't touch yet. */
+body.ai-busy .canvas-wrap { pointer-events: none; }
+body.ai-busy #ai-edit-ideas { visibility: hidden; }
+
+/* No figure yet: the start screen, or Claude making the first one. */
+body.no-figure .menubar, body.no-figure .tools, body.no-figure #project-select, body.no-figure #btn-more,
+body.no-figure .toolstrip, body.no-figure .sidebar, body.no-figure .dock, body.no-figure .canvas-wrap,
+body.no-figure .zoomctl, body.no-figure #sb-picked, body.no-figure #sb-size, body.no-figure #sb-list,
+body.no-figure .figure-ideas, body.no-figure .chat-tip, body.no-figure .fig-name { display: none !important; }
+body.no-figure .canvas-wait { display: flex; }
+
+body.at-home .stage { display: none; }
+body.at-home .chatside { flex: 1; align-items: center; justify-content: center; padding: 24px; border-right: none; background: var(--bg); gap: 14px; }
+body.at-home .chat-scroll { flex: none; overflow: visible; width: min(680px, 100%); }
+body.at-home .chat-hello { display: block; margin-bottom: 8px; }
+body.at-home .composer, body.at-home .chat-under, body.at-home .chat-files, body.at-home #chat-msg, body.at-home .home-ideas { width: min(680px, 100%); }
+body.at-home .composer { background: #fff; padding: 10px; border-radius: 26px; }
+body.at-home .composer textarea { font-size: 16px; }
+body.at-home .chat-under { justify-content: center; text-align: center; }
+body.at-home .chat-price { flex: none; }
+body.at-home .home-ideas { display: flex; justify-content: center; }
+body.at-home .home-rail {
+  display: block; flex: none; width: 240px; padding: 18px 14px; overflow-y: auto;
+  background: var(--surface); border-right: 2px solid var(--line-soft);
+}
+.home-rail h2 { margin: 0 0 10px 6px; font-size: 14px; font-weight: 900; }
+.home-mine { display: flex; flex-direction: column; gap: 4px; }
+.home-mine .mine {
+  display: block; flex: none; width: 100%; height: auto; min-height: 36px; padding: 7px 10px; text-align: left; border: none; border-radius: 12px;
+  background: none; font-size: 13.5px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.home-mine .mine:hover:not(:disabled) { background: var(--tint); border: none; }
+.home-mine p { margin: 0 6px; font-size: 13px; color: var(--ink-soft); }
+
+/* Simple (until "More tools"): the chat, the graph, Undo and Save picture.
+   Picking something brings its settings over the chat, so the graph never
+   moves under the pointer. */
+body:not(.simple) .fig-name { display: none; }
+body.simple #project-select, body.simple .menubar:not(.save-bar), body.simple .toolstrip,
+body.simple .dock, body.simple #btn-redo, body.simple #sb-picked, body.simple #sb-xy,
+body.simple #sb-size, body.simple .zoomctl, body.simple #sb-list, body.simple #series-note { display: none !important; }
+body.simple .sidebar { display: none; position: absolute; left: 0; top: 0; bottom: 0; width: 340px; z-index: 6; border-left: none; border-right: 2px solid var(--line-soft); }
+body.simple.picked .sidebar { display: flex; }
+body.no-figure .save-bar { display: none !important; }
 
 /* Narrower windows: keep the top bar on one line. */
 @media (max-width: 1440px) {

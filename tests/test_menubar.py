@@ -30,7 +30,7 @@ try:
         br = pw.chromium.launch(channel="msedge")
         ctx = br.new_context(viewport={"width": 1400, "height": 850})
         pg = ctx.new_page(); errs = []; pg.on("pageerror", lambda e: errs.append(str(e)))
-        pg.goto(f"{B}/?project={P}")
+        pg.goto(f"{B}/?tools=1&project={P}")
         pg.wait_for_function("document.getElementById('status').dataset.ready === '1'")
         settle = lambda: pg.wait_for_function("!savePending && !inFlight && !needsSave", timeout=30000)
         ev = pg.evaluate
@@ -40,8 +40,8 @@ try:
         check(not shown("#dock") and not shown(".menu"), "starts clean: no list under the figure, no menu open")
         loose = ev("[...document.querySelectorAll('header button:not(.menu-title)')]"
                    ".filter((b) => b.checkVisibility()).map((b) => b.id)")
-        check(set(loose) <= {"btn-undo", "btn-redo", "btn-account"},
-              f"only the menu names, undo/redo and the profile show in the top bar ({loose})")
+        check(set(loose) <= {"btn-more", "btn-undo", "btn-redo", "btn-account"},
+              f"only the menu names, More tools, undo/redo and the profile show in the top bar ({loose})")
         check(ev("document.querySelector('.canvas-area').clientHeight") > 700, "the figure gets almost the whole height")
 
         # --- open, switch by pointing, close
@@ -110,7 +110,7 @@ try:
         pg.click("#menu-view"); pg.click("#menu-view-list")
 
         # --- the figure follows its space while the zoom is "fit"
-        pg.set_viewport_size({"width": 1400, "height": 600}); pg.wait_for_timeout(400)  # height-bound
+        pg.set_viewport_size({"width": 1900, "height": 600}); pg.wait_for_timeout(400)  # height-bound
         ev("setSelection([])"); pg.wait_for_timeout(300); z0 = ev("zoom")
         ev("setSelection(['a_meas'])"); pg.wait_for_selector("#data-panel:not([hidden])"); pg.wait_for_timeout(400)
         z1 = ev("zoom")

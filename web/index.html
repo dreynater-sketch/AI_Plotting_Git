@@ -12,7 +12,7 @@
 <body>
 
 <header class="topbar">
-  <div class="brand"><span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 18C8 6 11 6 13 12s5 6 7-6"/></svg></span>FigForge <span class="sub" id="storage-badge">local</span></div>
+  <div class="brand" id="btn-home" role="button" tabindex="0" title="Start a new graph"><span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 18C8 6 11 6 13 12s5 6 7-6"/></svg></span>FigForge <span class="sub" id="storage-badge">local</span></div>
   <!-- The menu bar. Everything you can do lives in a menu, so the screen
        stays clear for the figure. -->
   <nav class="menubar" id="menubar" role="menubar">
@@ -110,7 +110,9 @@
     </div>
   </nav>
   <div class="spacer"></div>
+  <span class="fig-name" id="fig-name"></span>
   <select id="project-select" title="Open another figure"></select>
+  <button id="btn-more" class="pill" aria-pressed="false" title="Show every tool, or just the simple ones">More tools</button>
   <div class="tools">
     <button id="btn-undo" class="pill" title="Undo (Ctrl+Z)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 14 4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/></svg>Undo</button>
     <button id="btn-redo" class="pill" title="Redo (Ctrl+Y)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 14 5-5-5-5"/><path d="M20 9H9a5 5 0 0 0 0 10h3"/></svg>Redo</button>
@@ -163,6 +165,54 @@
 </header>
 
 <main>
+  <!-- Your graphs, like past chats. Only on the start screen. -->
+  <aside class="home-rail" id="home-rail">
+    <h2>Your graphs</h2>
+    <div class="home-mine" id="home-mine"></div>
+  </aside>
+  <!-- The talk with Claude. It fills the start screen, then moves to the side
+       once there is a graph. -->
+  <section class="chatside" id="chatside">
+    <div class="chat-scroll" id="chat-scroll">
+      <div class="chat-hello" id="chat-hello">
+        <h1>What do you want to graph?</h1>
+        <p id="chat-hello-text"></p>
+      </div>
+      <p class="chat-tip" id="chat-tip"><b>Drag</b> anything on the graph to move it. <b>Click</b> it to change it. These are always free.</p>
+      <div class="chat" id="ai-chat" aria-live="polite"></div>
+      <div class="chat-msg ai chat-offer" id="chat-offer" hidden>
+        <span id="chat-offer-text"></span>
+        <button class="primary" id="offer-free">Yes, make it for free</button>
+        <small id="chat-offer-or"></small>
+      </div>
+    </div>
+    <ul class="chat-files" id="chat-files" hidden></ul>
+    <div class="composer" id="composer">
+      <label class="composer-attach" id="chat-attach" title="Add your data files">
+        <input type="file" id="ai-files" multiple>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11.5 12 19.5a5 5 0 0 1-7-7l8.5-8.5a3.3 3.3 0 0 1 4.7 4.7L9.7 17.2a1.6 1.6 0 0 1-2.3-2.3L15 7.3"/></svg>
+      </label>
+      <textarea id="chat-input" rows="1" spellcheck="true" maxlength="4000"></textarea>
+      <button class="primary" id="chat-send" disabled>Send</button>
+    </div>
+    <div class="chat-under">
+      <span class="chat-price" id="chat-price"></span>
+      <button class="link" id="chat-howto" hidden>📖 How this was made</button>
+      <button class="link" id="ai-new-talk" hidden title="Forget this talk and start again">Start a new talk</button>
+    </div>
+    <p class="csv-msg" id="chat-msg" role="status"></p>
+    <div class="idea-chips home-ideas" id="home-ideas">
+      <button type="button" class="idea">A sine wave and a cosine wave together</button>
+      <button type="button" class="idea">How a ball falls with and without air</button>
+      <button type="button" class="idea">A 3-D surface shaped like a hill</button>
+    </div>
+    <div class="idea-chips figure-ideas" id="ai-edit-ideas">
+      <button type="button" class="idea">Make it ready for a paper</button>
+      <button type="button" class="idea">Bigger words</button>
+      <button type="button" class="idea">Colours that are easy to tell apart</button>
+      <button type="button" class="idea">Fit a straight line to the dots</button>
+    </div>
+  </section>
   <!-- Left: the tools used most, each a picture with its name and a few words
        on what it does. The bottom button folds it to pictures only (and back). -->
   <nav class="toolstrip" id="toolstrip" aria-label="Tools">
@@ -181,6 +231,7 @@
   </nav>
   <section class="stage" id="stage">
     <div class="canvas-area">
+      <div class="canvas-wait" id="canvas-wait">Your graph will show up here</div>
       <div class="canvas-wrap" id="canvas-wrap">
         <div class="canvas" id="canvas"></div>
       </div>
@@ -806,6 +857,7 @@
   <span class="sb-item" id="sb-picked" title="What is picked">Nothing picked</span>
   <span class="sb-item sb-xy" id="sb-xy" title="Where the pointer is, in the plot's own numbers"></span>
   <span class="spacer"></span>
+  <span class="sb-item sb-tokens" id="sb-tokens"></span>
   <button class="sb-item sb-btn" id="sb-size" title="The figure's size when printed. Click to change it"></button>
   <div class="zoomctl" title="How big the figure looks on screen">
     <button id="zoom-out" class="icon" aria-label="Smaller">−</button>
@@ -845,7 +897,7 @@
 <div class="modal" id="csv-modal" hidden>
   <div class="modal-card" role="dialog" aria-labelledby="csv-title">
     <div class="modal-head">
-      <h3 id="csv-title">New figure from a CSV</h3>
+      <h3 id="csv-title">Make a graph for free</h3>
       <button class="link" id="csv-close" title="Close (Esc)">×</button>
     </div>
     <label class="csv-drop" id="csv-drop">
@@ -878,78 +930,10 @@
       </div>
     </div>
     <p class="csv-msg" id="csv-msg" role="status"></p>
+    <p class="free-note">This is free. It uses no tokens.</p>
     <div class="modal-foot">
       <button id="csv-cancel">Cancel</button>
-      <button class="primary" id="csv-create" disabled>Create figure</button>
-    </div>
-  </div>
-</div>
-
-<!-- New figure with the AI assistant: any files (zips are opened in the
-     browser), a description, then Claude works step by step. -->
-<div class="modal" id="ai-modal" hidden>
-  <div class="modal-card" role="dialog" aria-labelledby="ai-title">
-    <div class="modal-head">
-      <h3 id="ai-title">✨ New figure with AI</h3>
-      <button class="link" id="ai-close" title="Close (Esc)">×</button>
-    </div>
-    <label class="csv-drop" id="ai-drop">
-      <input type="file" id="ai-files" multiple>
-      <span id="ai-drop-text"><b>Choose your data files</b> or drop them here <em>(optional)</em><br>
-        <em>any files or a .zip · a picture of a figure you like helps too · no data? just describe it</em></span>
-    </label>
-    <div id="ai-picked" hidden>
-      <p class="csv-summary" id="ai-files-summary"></p>
-      <details class="ai-files"><summary>See which files</summary><ul id="ai-file-list"></ul></details>
-    </div>
-    <label class="field">
-      <span>Describe the figure you want</span>
-      <textarea id="ai-idea" rows="4" spellcheck="true"
-        placeholder="e.g. Overlay the RBS spectra of 1A_middle, 1A_bottom_right, 1A_bottom_left and 1B against channel, energy in MeV on top, label the O, Cu, Nb, Sn and Ta edges"></textarea>
-    </label>
-    <label class="field">
-      <span>Project name</span>
-      <input type="text" id="ai-name" spellcheck="false">
-    </label>
-    <div class="ai-run" id="ai-run" hidden>
-      <ol class="ai-log" id="ai-log"></ol>
-      <p class="ai-reply" id="ai-reply" hidden></p>
-    </div>
-    <p class="csv-msg" id="ai-msg" role="status"></p>
-    <p class="ai-usage" id="ai-usage"></p>
-    <div class="modal-foot">
-      <button id="ai-cancel">Cancel</button>
-      <button class="primary" id="ai-make" disabled>✨ Make it</button>
-    </div>
-  </div>
-</div>
-
-<!-- Change the figure on screen with the AI assistant. -->
-<div class="modal" id="ai-edit-modal" hidden>
-  <div class="modal-card" role="dialog" aria-labelledby="ai-edit-title">
-    <div class="modal-head">
-      <h3 id="ai-edit-title">✨ Change this figure with AI</h3>
-      <button class="link" id="ai-edit-close" title="Close (Esc)">×</button>
-    </div>
-    <div class="chat" id="ai-chat" aria-live="polite"></div>
-    <label class="field">
-      <span id="ai-edit-ask">What should change?</span>
-      <textarea id="ai-edit-request" rows="3" spellcheck="true"
-        placeholder="e.g. Make it fit one journal column, bigger axis labels, and add a linear fit to the measured points"></textarea>
-    </label>
-    <div class="idea-chips" id="ai-edit-ideas">
-      <span>Ideas to try</span>
-      <button type="button" class="idea">Make it ready for a paper</button>
-      <button type="button" class="idea">Bigger words</button>
-      <button type="button" class="idea">Colours that are easy to tell apart</button>
-      <button type="button" class="idea">Fit a straight line to the dots</button>
-    </div>
-    <p class="csv-msg" id="ai-edit-msg" role="status"></p>
-    <p class="ai-usage" id="ai-edit-usage"></p>
-    <div class="modal-foot">
-      <button id="ai-edit-new" hidden title="Forget this talk and start again">Start a new talk</button>
-      <button id="ai-edit-done">Close</button>
-      <button class="primary" id="ai-edit-go">✨ Send</button>
+      <button class="primary" id="csv-create" disabled>Make it for free</button>
     </div>
   </div>
 </div>

@@ -26,7 +26,7 @@ with sync_playwright() as pw:
     ctx = br.new_context(viewport={"width": 1500, "height": 900}, accept_downloads=True)
     main = ctx.new_page(); errs = []
     main.on("pageerror", lambda e: errs.append("main: " + str(e)))
-    main.goto(f"{B}/?project={P}")
+    main.goto(f"{B}/?tools=1&project={P}")
     main.wait_for_function("document.getElementById('status').dataset.ready === '1'")
 
     # --- the figure.py menu

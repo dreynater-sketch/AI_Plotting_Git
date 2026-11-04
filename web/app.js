@@ -859,6 +859,7 @@ function common(get) {
 
 function refreshInspector() {
   const sel = selected();
+  document.body.classList.toggle('picked', sel.length > 0);
   $('insp-empty').hidden = sel.length > 0;
   if (!sel.length) refreshFigureFields();
   $('insp-body').hidden = sel.length === 0;
@@ -2370,7 +2371,7 @@ function showXY() {
 
 document.addEventListener('keydown', (evt) => {
   if (!spec) return;  // signed out / still loading: nothing to edit yet
-  if (!$('csv-modal').hidden || !$('ai-modal').hidden || !$('ai-edit-modal').hidden) return;  // a dialog has the keyboard
+  if (!$('csv-modal').hidden) return;  // a dialog has the keyboard
   if (evt.key === 'Escape') { setSelection([]); return; }
 
   const typing = ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName);
@@ -2878,7 +2879,7 @@ $('f-arrow-scale').addEventListener('change', (e) => {
 // revision only ever counts up. (The code editor compares revs to tell
 // whether the figure has changed since code was saved.)
 function undo() {
-  if (!history.length) return;
+  if (!history.length || aiRunning) return;
   future.push(clone(spec));
   const rev = spec.rev;
   spec = history.pop();
@@ -2887,7 +2888,7 @@ function undo() {
 }
 
 function redo() {
-  if (!future.length) return;
+  if (!future.length || aiRunning) return;
   history.push(clone(spec));
   const rev = spec.rev;
   spec = future.pop();
@@ -3046,9 +3047,16 @@ window.addEventListener('keydown', (e) => {
 /* View: the list of everything (bottom) and the "Change it" panel (right).
  * Remembered per browser. */
 const VIEW_KEY = 'figforge.view';
-const view = { list: false, side: true, wide: true };
+const view = { list: false, side: true, wide: true, tools: false };
 try { Object.assign(view, JSON.parse(localStorage.getItem(VIEW_KEY) || '{}')); } catch { /* defaults */ }
+if (new URLSearchParams(location.search).get('tools') === '1') {
+  view.tools = true;
+  try { localStorage.setItem(VIEW_KEY, JSON.stringify(view)); } catch { /* fine */ }
+}
 function applyView() {
+  document.body.classList.toggle('simple', !view.tools);
+  $('btn-more').setAttribute('aria-pressed', String(view.tools));
+  $('btn-more').textContent = view.tools ? 'Fewer tools' : 'More tools';
   $('dock').classList.toggle('list-on', view.list);
   document.body.classList.toggle('no-side', !view.side);
   $('menu-view-list').setAttribute('aria-checked', String(view.list));
@@ -3069,6 +3077,7 @@ function toggleView(key) {
 applyView();
 $('menu-view-list').onclick = () => toggleView('list');
 $('menu-view-side').onclick = () => toggleView('side');
+$('btn-more').onclick = () => toggleView('tools');
 
 /* Left tool strip: the most-used things, one click each. The bottom button
  * shows or hides their names. Save picture (top) is the three downloads. */
@@ -3143,7 +3152,7 @@ $('start-mine').addEventListener('click', (e) => {
 });
 $('start-close').onclick = () => { $('start-modal').hidden = true; };
 $('start-file').onclick = () => { $('start-modal').hidden = true; $('btn-new').click(); };
-$('start-ai').onclick = () => { $('start-modal').hidden = true; $('btn-ai').click(); };
+$('start-ai').onclick = () => { $('start-modal').hidden = true; goHome(); };
 $('start-modal').addEventListener('click', (e) => {
   if (e.target === $('start-modal')) $('start-modal').hidden = true;
 });
@@ -3447,7 +3456,7 @@ $('btn-delete-project').onclick = async () => {
     const d = await r.json();
     if (!r.ok) throw new Error(d.error || r.statusText);
     try { localStorage.removeItem(LAST_PROJECT_KEY); } catch { /* fine */ }
-    location.search = '?project=' + encodeURIComponent(d.figures[0]);
+    location.href = location.pathname;
   } catch (e) { setStatus(e.message, 'err'); }
 };
 
@@ -3534,10 +3543,6 @@ $('dock-handle').addEventListener('pointerdown', (e) => {
 
 /* ----------------------------------------------------------- projects */
 
-function readLastProject() {
-  try { return localStorage.getItem(LAST_PROJECT_KEY); } catch { return null; }
-}
-
 function rememberProject(name) {
   try { localStorage.setItem(LAST_PROJECT_KEY, name); } catch { /* private window */ }
 }
@@ -3611,8 +3616,8 @@ function panelName(p, i) {
 
 function openCsvDialog(adding = false) {
   csvAdding = adding === true;
-  $('csv-title').textContent = csvAdding ? 'Add lines from another file' : 'New figure from a CSV';
-  $('csv-create').textContent = csvAdding ? 'Add the lines' : 'Create figure';
+  $('csv-title').textContent = csvAdding ? 'Add lines from another file' : 'Make a graph for free';
+  $('csv-create').textContent = csvAdding ? 'Add the lines' : 'Make it for free';
   $('csv-name-field').hidden = csvAdding;
   const flat = csvAdding ? spec.panels.filter((p) => !p.projection || p.projection === 'flat') : [];
   $('csv-panel').innerHTML = flat.map((p, i) =>
@@ -3795,6 +3800,7 @@ const AI_BINARY_OK = /\.(xlsx|xls|png|jpe?g|gif|webp|npz|npy|h5|hdf5|mat|pdf)$/i
 let aiFiles = [];        // [{name, bytes: Uint8Array}] to upload
 let aiSkipped = [];      // [{name, size, reason}]
 let aiRunning = false;
+let offerFile = null;    // the one table that could be drawn for free
 
 /** Minimal .zip reader: stored and deflated entries, via the browser's own
  *  DecompressionStream. Enough for zips made by Windows, macOS and Python. */
@@ -3843,7 +3849,8 @@ function looksBinary(bytes) {
 }
 
 async function addAiFiles(list) {
-  $('ai-msg').textContent = 'Reading…';
+  chatMessage('Reading…');
+  const hadFiles = aiFiles.length > 0;
   const candidates = [];   // {name, size, get: () => Promise<Uint8Array>}
   for (const file of list) {
     if (/\.zip$/i.test(file.name)) {
@@ -3852,7 +3859,7 @@ async function addAiFiles(list) {
           candidates.push({ name: e.name, size: e.size, get: () => inflate(e) });
         }
       } catch (err) {
-        aiMessage(`${file.name}: ${err.message}`, 'err');
+        chatMessage(`${file.name}: ${err.message}`, 'err');
         return;
       }
     } else {
@@ -3887,57 +3894,28 @@ async function addAiFiles(list) {
     used += cost;
     aiFiles.push({ name: c.name, bytes, binary, hash, cost });
   }
+  // One plain table and nothing else can be drawn with no AI at all: say so.
+  offerFile = !hadFiles && aiFiles.length === 1 && list.length === 1 && /\.(csv|tsv|txt|dat)$/i.test(list[0].name)
+    && list[0].size <= 4 * 1024 * 1024 ? list[0] : null;
   showAiFiles();
-  if (!$('ai-name').value && aiFiles.length) {
-    const first = list[0]?.name || aiFiles[0].name;
-    $('ai-name').value = projectNameFrom(first.split('/').pop());
-  }
-  aiMessage('');
-  refreshAiMake();
+  chatMessage('');
+  refreshChat();
 }
 
 function showAiFiles() {
-  const size = aiFiles.reduce((t, f) => t + f.bytes.length, 0);
   const kb = (n) => n < 1048576 ? `${Math.round(n / 1024)} KB` : `${(n / 1048576).toFixed(1)} MB`;
-  $('ai-picked').hidden = !aiFiles.length && !aiSkipped.length;
-  $('ai-drop-text').innerHTML = aiFiles.length
-    ? `<b>${aiFiles.length} file${aiFiles.length === 1 ? '' : 's'} ready</b> · add more`
-    : '<b>Choose your data files</b> or drop them here<br><em>any files or a .zip · a picture of a figure you like helps too</em>';
-  $('ai-files-summary').textContent = `Sending ${aiFiles.length} file${aiFiles.length === 1 ? '' : 's'} ` +
-    `(${kb(size)}) to Claude.` + (aiSkipped.length ? ` Left out ${aiSkipped.length}.` : '');
-  $('ai-file-list').innerHTML =
-    aiFiles.map((f) => `<li>${escapeHtml(f.name)} · ${kb(f.bytes.length)}</li>`).join('') +
-    aiSkipped.map((f) => `<li class="skip">${escapeHtml(f.name)} — left out: ${escapeHtml(f.reason)}</li>`).join('');
+  $('chat-files').hidden = !aiFiles.length && !aiSkipped.length;
+  $('chat-files').innerHTML =
+    aiFiles.map((f, i) => `<li>${escapeHtml(f.name)} · ${kb(f.bytes.length)}` +
+      `<button type="button" data-i="${i}" title="Take this file out" aria-label="Take ${escapeHtml(f.name)} out">×</button></li>`).join('') +
+    aiSkipped.map((f) => `<li class="skip">Left out ${escapeHtml(f.name)}: ${escapeHtml(f.reason)}</li>`).join('');
+  $('chat-offer').hidden = !offerFile;
+  if (offerFile) {
+    $('chat-offer-text').textContent = `I can draw a graph from ${offerFile.name} for free. It uses no tokens. Want that?`;
+    $('chat-offer-or').textContent = assistantOn && tokens
+      ? `Or tell me below what you want and I'll draw it for you. That uses ${tokens.new} tokens.` : '';
+  }
 }
-
-function aiMessage(msg, cls = '') {
-  $('ai-msg').textContent = msg;
-  $('ai-msg').className = 'csv-msg ' + cls;
-}
-
-function refreshAiMake() {
-  if ($('ai-make').dataset.open) return;
-  $('ai-make').disabled = aiRunning || !($('ai-idea').value.trim()
-    && NAME_OK.test(tidyName($('ai-name').value)));
-}
-
-function openAiDialog() {
-  aiFiles = []; aiSkipped = [];
-  $('ai-files').value = '';
-  $('ai-idea').value = '';
-  $('ai-name').value = '';
-  delete $('ai-name').dataset.auto;
-  $('ai-run').hidden = true;
-  delete $('ai-make').dataset.open;
-  $('ai-make').textContent = '✨ Make it';
-  showAiFiles();
-  $('ai-picked').hidden = true;
-  aiMessage('');
-  refreshAiMake();
-  $('ai-modal').hidden = false;
-}
-
-function closeAiDialog() { $('ai-modal').hidden = true; }
 
 function bytesToBase64(bytes) {
   let s = '';
@@ -3945,13 +3923,16 @@ function bytesToBase64(bytes) {
   return btoa(s);
 }
 
-let aiUsage = null;   // {used, cap} this month; cap null = no cap
+let tokens = null;   // {left, monthly, new, change, unlimited}
 
-function showAiUsage() {
-  const text = !aiUsage ? '' : aiUsage.cap === null || aiUsage.cap === undefined
-    ? (aiUsage.used ? `AI used this month: $${aiUsage.used.toFixed(2)}` : '')
-    : `AI this month: $${aiUsage.used.toFixed(2)} of $${aiUsage.cap.toFixed(2)}`;
-  for (const id of ['ai-usage', 'ai-edit-usage']) $(id).textContent = text;
+function showTokens() {
+  if (!tokens) return;
+  const el = $('sb-tokens');
+  el.textContent = `🪙 ${tokens.left} token${tokens.left === 1 ? '' : 's'}`;
+  el.classList.toggle('low', !tokens.unlimited && tokens.left < tokens.change);
+  el.title = `A new graph from Claude uses ${tokens.new} tokens. A change uses ${tokens.change}. ` +
+    'Graphs from a spreadsheet, dragging and clicking are free. ' +
+    (tokens.unlimited ? 'You have no limit.' : `You get ${tokens.monthly} every month, on the 1st.`);
 }
 
 async function aiPost(url, body) {
@@ -3963,14 +3944,15 @@ async function aiPost(url, body) {
 }
 
 /** Ask the server for one Claude round at a time until the session is done,
- *  listing what happened in `log`. -> the last step's answer. */
-async function aiSteps(name, log) {
+ *  listing what happened in `log`. onStep sees each answer. -> the last one. */
+async function aiSteps(name, log, onStep) {
   const line = (text, cls = '') => {
     log.querySelector('li.now')?.remove();
     const li = document.createElement('li');
     li.textContent = text;
     li.className = cls;
     log.appendChild(li);
+    $('chat-scroll').scrollTop = $('chat-scroll').scrollHeight;
   };
   let d = null, retries = 0;
   while (!d?.done) {
@@ -3984,13 +3966,14 @@ async function aiSteps(name, log) {
       throw e;
     }
     for (const ev of d.events) line(ev);
-    if (d.ai_usage) { aiUsage = d.ai_usage; showAiUsage(); }
+    if (d.tokens) { tokens = d.tokens; showTokens(); refreshChat(); }
+    if (onStep) await onStep(d);
   }
   log.querySelector('li.now')?.remove();
   return d;
 }
 
-/** One message in the Change-with-AI talk. -> the bubble. */
+/** One message in the talk. -> the bubble. */
 function chatBubble(role, text = '', meta = '') {
   const el = document.createElement('div');
   el.className = `chat-msg ${role === 'user' ? 'you' : 'ai'}`;
@@ -4001,39 +3984,105 @@ function chatBubble(role, text = '', meta = '') {
     el.appendChild(small);
   }
   $('ai-chat').appendChild(el);
-  $('ai-chat').scrollTop = $('ai-chat').scrollHeight;
+  $('chat-scroll').scrollTop = $('chat-scroll').scrollHeight;
   return el;
 }
 
-const stepsCost = (steps, cost) =>
-  `${steps} step${steps === 1 ? '' : 's'} · about $${(cost || 0).toFixed(2)}`;
+const tokensUsed = (n) => n ? `Used ${n} tokens` : '';
 
-function showAiReply(el, d) {
-  el.textContent = d.reply;
-  const cost = document.createElement('small');
-  cost.textContent = `${d.steps} step${d.steps === 1 ? '' : 's'} · about $${d.cost_usd.toFixed(2)}`;
-  el.appendChild(cost);
-  el.hidden = false;
+function workingBubble() {
+  const answer = chatBubble('assistant');
+  const log = document.createElement('ol');
+  log.className = 'ai-log';
+  answer.appendChild(log);
+  return { answer, log };
 }
 
-async function runAi() {
-  const name = tidyName($('ai-name').value);
-  const log = $('ai-log');
-  const line = (text, cls = '') => {
-    log.querySelector('li.now')?.remove();
-    const li = document.createElement('li');
-    li.textContent = text;
-    li.className = cls;
-    log.appendChild(li);
-  };
-  aiRunning = true;
-  refreshAiMake();
-  log.innerHTML = '';
-  $('ai-reply').hidden = true;
-  $('ai-run').hidden = false;
-  aiMessage('');
+function showAnswer(answer, d) {
+  answer.textContent = d.reply;
+  const meta = tokensUsed(d.tokens_spent);
+  if (meta) {
+    const small = document.createElement('small');
+    small.textContent = meta;
+    answer.appendChild(small);
+  }
+  $('chat-scroll').scrollTop = $('chat-scroll').scrollHeight;
+}
+
+function chatMessage(msg, cls = '') {
+  $('chat-msg').textContent = msg;
+  $('chat-msg').className = 'csv-msg ' + cls;
+}
+
+/** What the next message would cost, and whether it can go. */
+function refreshChat() {
+  const price = !tokens ? 0 : FIGURE ? tokens.change : tokens.new;
+  const short = tokens && !tokens.unlimited && tokens.left < price;
+  const text = $('chat-input').value.trim();
+  const ai = assistantOn;
+  $('chat-input').disabled = !ai || aiRunning;
+  $('chat-input').placeholder = !ai ? (FIGURE ? 'Claude isn\'t on here' : 'Drop in a spreadsheet to make a graph')
+    : FIGURE ? ($('ai-chat').children.length ? 'Anything else?' : 'What should change?')
+    : aiFiles.length ? 'What do you want from your data?' : 'A graph of…';
+  $('chat-send').hidden = !ai;
+  $('chat-send').disabled = !ai || aiRunning || !text || short;
+  $('chat-attach').hidden = aiRunning;
+  $('ai-new-talk').hidden = !FIGURE || aiRunning || !$('ai-chat').children.length;
+  $('chat-hello-text').textContent = ai
+    ? 'Say it in your own words, or drop in your data. Then drag anything on the graph to move it.'
+    : 'Drop in a spreadsheet and I\'ll draw it. Then drag anything on the graph to move it.';
+  $('home-ideas').hidden = !ai;
+  $('ai-edit-ideas').hidden = !ai || $('ai-chat').children.length > 0;
+  const el = $('chat-price');
+  el.classList.toggle('err', !!short);
+  el.textContent = !tokens || !ai ? ''
+    : short ? `This needs ${price} tokens and you have ${tokens.left}. More come on the 1st.`
+    : FIGURE ? `Each change uses ${tokens.change} tokens. You only pay if the graph changes.`
+    : `A new graph uses ${tokens.new} tokens. A spreadsheet on its own can be drawn for free.`;
+}
+
+function setAiRunning(on) {
+  aiRunning = on;
+  document.body.classList.toggle('ai-busy', on);
+  if (on && FIGURE) setSelection([]);   // the talk stays in view; nothing is half-dragged
+  refreshChat();
+}
+
+/* The start screen. Claude is only called when you send a message: a dropped
+ * spreadsheet gets offered as a free graph first. */
+function showHome(names) {
+  FIGURE = null;
+  document.body.classList.add('at-home', 'no-figure');
+  document.title = 'FigForge';
+  $('home-mine').innerHTML = names.length
+    ? names.map((n) => `<button class="mine" data-name="${escapeHtml(n)}" title="${escapeHtml(n)}">${escapeHtml(n)}</button>`).join('')
+    : '<p>The graphs you make will show up here.</p>';
+  refreshChat();
+  setStatus('');
+  $('status').dataset.ready = '1';
+  $('chat-input').focus();
+}
+
+async function goHome() {
+  if (aiRunning) return;
+  await flushPending();
+  location.href = location.pathname;
+}
+
+/** Say what the graph should be: Claude makes it, the page moves to the talk
+ *  on the side, and the graph appears as soon as it is first drawn. */
+async function runAiNew(idea) {
+  chatMessage('');
+  setAiRunning(true);
+  document.body.classList.remove('at-home');
+  const you = chatBubble('user', idea);
+  const { answer, log } = workingBubble();
+  $('chat-input').value = '';
+  const keptOffer = offerFile;
+  offerFile = null;
+  $('chat-offer').hidden = true;
+  $('chat-files').hidden = true;
   try {
-    line(aiFiles.length ? 'Sending your files…' : 'Starting…', 'now');
     const dec = new TextDecoder('utf-8', { fatal: true });
     const files = aiFiles.map((f) => {
       if (!f.binary) {
@@ -4041,64 +4090,65 @@ async function runAi() {
       }
       return { name: f.name, b64: bytesToBase64(f.bytes) };
     });
-    await aiPost('/api/assistant/start', { name, idea: $('ai-idea').value, files, skipped: aiSkipped });
-    line('Files sent');
-    const d = await aiSteps(name, log);
-    showAiReply($('ai-reply'), d);
-    if (d.created) {
-      // The "How this was made" notes: a tiny extra call. If it fails, the
-      // figure's 📖 button can still make them later.
-      line('Writing down how it was made…', 'now');
-      try { await makeHowto(name); line('Wrote down how it was made'); }
-      catch { log.querySelector('li.now')?.remove(); }
-      $('ai-make').dataset.open = '1';
-      $('ai-make').textContent = 'Open the figure';
-      $('ai-make').disabled = false;
-    } else {
-      aiMessage('No figure was made.', 'err');
+    const seed = aiFiles.length ? aiFiles[0].name.split('/').pop() : idea.trim().split(/\s+/).slice(0, 4).join(' ');
+    let name = projectNameFrom(seed);
+    // A name can be taken by a try that never drew anything: pick another.
+    for (let n = 2; ; n++) {
+      try {
+        await aiPost('/api/assistant/start', { name, idea, files, skipped: aiSkipped });
+        break;
+      } catch (e) {
+        if (e.status !== 409 || n > 9) throw e;
+        name = `${projectNameFrom(seed)}_${Date.now() % 10000}`;
+      }
     }
+    const d = await aiSteps(name, log, async (step) => {
+      if (step.created && !FIGURE) await openFigureHere(name, false);
+    });
+    if (!d.created) throw new Error(d.reply || 'no graph was made');
+    await reloadFigure();
+    showAnswer(answer, d);
+    aiChatGoesOn = !!d.can_continue;
+    aiFiles = []; aiSkipped = [];
+    // The "How this was made" notes: a tiny extra call. If it fails, the
+    // figure's 📖 button can still make them later.
+    makeHowto(name).then(checkHowto).catch(() => {});
   } catch (e) {
-    log.querySelector('li.now')?.remove();
-    aiMessage(`The AI couldn't finish: ${e.message}`, 'err');
+    if (FIGURE) {          // the graph is there; only the end of the work failed
+      answer.remove();
+      chatMessage(`Claude couldn't finish: ${e.message}`, 'err');
+    } else {               // nothing made: back to the start, nothing lost
+      you.remove(); answer.remove();
+      $('chat-input').value = idea;
+      document.body.classList.add('at-home');
+      offerFile = keptOffer;
+      showAiFiles();
+      chatMessage(`Claude couldn't make it: ${e.message}`, 'err');
+    }
   } finally {
-    aiRunning = false;
-    refreshAiMake();
+    setAiRunning(false);
+    $('chat-input').focus();
   }
 }
 
-/* ✨ Change with AI: a talk with Claude about the figure on screen. Each
- * message is one request; Claude remembers the talk, so "now make it
- * bigger" works. The figure as it was before each answer goes on the undo
- * stack, so one Ctrl+Z takes that answer's changes back. */
-let aiEditRunning = false;
+/* Changing the graph on screen: each message is one request; Claude remembers
+ * the talk, so "now make it bigger" works. The figure as it was before each
+ * answer goes on the undo stack, so one Ctrl+Z takes that answer's changes back. */
 let aiChatGoesOn = false;   // the next message adds to the talk shown
 
-function showChatState() {
-  const talking = !!$('ai-chat').children.length;
-  $('ai-edit-ask').textContent = talking ? 'Anything else?' : 'What should change?';
-  $('ai-edit-new').hidden = !talking || aiEditRunning;
-  $('ai-edit-go').disabled = aiEditRunning;
-}
-
-async function openAiEdit() {
-  $('ai-edit-request').value = '';
-  $('ai-edit-msg').textContent = '';
-  $('ai-edit-modal').hidden = false;
-  showAiUsage();
-  setTimeout(() => $('ai-edit-request').focus(), 0);
-  if (aiEditRunning) return;
+async function loadChat() {
   $('ai-chat').innerHTML = '';
   aiChatGoesOn = false;
-  try {
+  if (assistantOn) try {
     const r = await fetch(`/api/assistant/chat/${FIGURE}`);
     const d = r.ok ? await r.json() : { turns: [] };
     for (const t of d.turns) {
-      chatBubble(t.role, t.text, t.role === 'assistant' && t.steps ? stepsCost(t.steps, t.cost_usd) : '');
+      chatBubble(t.role, t.text, t.role === 'assistant' ? tokensUsed(t.tokens) : '');
     }
     aiChatGoesOn = !!d.can_continue;
-    if (d.running) runAiEdit(true);    // the page was closed while Claude worked: carry on
+    if (d.running) runAiEdit('', true);    // the page was closed while Claude worked: carry on
   } catch { /* an empty talk */ }
-  showChatState();
+  refreshChat();
 }
 
 async function reloadFigure() {
@@ -4115,81 +4165,47 @@ async function reloadFigure() {
   announceChange();
 }
 
-/** Send the typed message (or, resuming, keep stepping the session the
- *  server already has) and show Claude's answer in the talk. */
-async function runAiEdit(resume = false) {
-  const request = $('ai-edit-request').value.trim();
-  if ((!request && resume !== true) || aiEditRunning) return;
-  aiEditRunning = true;
-  $('ai-edit-msg').textContent = '';
-  $('ai-edit-msg').className = 'csv-msg';
-  showChatState();
-  if (resume !== true) chatBubble('user', request);
-  const answer = chatBubble('assistant');
-  const log = document.createElement('ol');
-  log.className = 'ai-log';
-  answer.appendChild(log);
+/** Send a message about this figure (or, resuming, keep stepping the session
+ *  the server already has) and show Claude's answer in the talk. */
+async function runAiEdit(request, resume = false) {
+  if ((!request && !resume) || aiRunning) return;
+  chatMessage('');
+  setAiRunning(true);
+  if (!resume) chatBubble('user', request);
+  const { answer, log } = workingBubble();
   const revBefore = spec.rev;
   try {
     await flushPending();
     pushHistory();                       // the figure as it was: one Ctrl+Z away
-    if (resume !== true) {
+    if (!resume) {
       await aiPost(`/api/assistant/edit/${encodeURIComponent(FIGURE)}`, { request, continue: aiChatGoesOn });
-      $('ai-edit-request').value = '';
+      $('chat-input').value = '';
     }
     const d = await aiSteps(FIGURE, log);
     // The changed figure first, then the reply: nothing reads or undoes
     // the old one in between.
     await reloadFigure();
     if (spec.rev === revBefore) { history.pop(); refreshUndoButtons(); }   // nothing changed
-    else setStatus('Changed by AI ✓ (Ctrl+Z to undo)');
-    answer.textContent = d.reply;
-    const small = document.createElement('small');
-    small.textContent = stepsCost(d.turn_steps ?? d.steps, d.turn_cost_usd ?? d.cost_usd);
-    answer.appendChild(small);
+    else setStatus('Changed by Claude ✓ (Ctrl+Z to undo)');
+    showAnswer(answer, d);
     aiChatGoesOn = !!d.can_continue;
-    if (!aiChatGoesOn) {
-      $('ai-edit-msg').textContent = 'This talk has got long. Your next message starts a new one.';
-    }
-    $('ai-chat').scrollTop = $('ai-chat').scrollHeight;
+    if (!aiChatGoesOn) chatMessage('This talk has got long. Your next message starts a new one.');
   } catch (e) {
     answer.remove();
-    $('ai-edit-msg').textContent = `The AI couldn't finish: ${e.message}`;
-    $('ai-edit-msg').className = 'csv-msg err';
+    chatMessage(`Claude couldn't finish: ${e.message}`, 'err');
     if (e.status === 409) aiChatGoesOn = false;    // that talk can't go on: the next try starts afresh
     try { await reloadFigure(); } catch { /* keep what's on screen */ }
   } finally {
-    aiEditRunning = false;
-    showChatState();
+    setAiRunning(false);
   }
 }
 
-$('btn-ai-edit').onclick = openAiEdit;
-$('ai-edit-close').onclick = () => { if (!aiEditRunning) $('ai-edit-modal').hidden = true; };
-$('ai-edit-done').onclick = () => { if (!aiEditRunning) $('ai-edit-modal').hidden = true; };
-$('ai-edit-go').onclick = () => runAiEdit();
-$('ai-edit-new').onclick = () => {
-  if (aiEditRunning) return;
-  $('ai-chat').innerHTML = '';
-  aiChatGoesOn = false;
-  $('ai-edit-msg').textContent = '';
-  showChatState();
-  $('ai-edit-request').focus();
-};
-// Enter sends; Shift+Enter starts a new line.
-// Ideas to try: a click puts the words in the box, ready to send or change.
-$('ai-edit-ideas').addEventListener('click', (e) => {
-  const b = e.target.closest('.idea');
-  if (!b) return;
-  $('ai-edit-request').value = b.textContent;
-  $('ai-edit-request').focus();
-});
-$('ai-edit-request').addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); runAiEdit(); }
-});
-document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && !$('ai-edit-modal').hidden && !aiEditRunning) $('ai-edit-modal').hidden = true;
-});
+function sendChat() {
+  const text = $('chat-input').value.trim();
+  if (!text || aiRunning || $('chat-send').disabled) return;
+  if (FIGURE) runAiEdit(text);
+  else runAiNew(text);
+}
 
 /* 📖 How this was made: for a figure made with AI -- the idea, the math,
  * the steps, the code Claude used (to open and Run in the code editor) and
@@ -4205,6 +4221,7 @@ async function checkHowto() {
     howto = d.howto;
     howtoCanMake = !howto && d.can_make && assistantOn;
     $('btn-howto').hidden = !(howto || howtoCanMake);
+    $('chat-howto').hidden = $('btn-howto').hidden;
     refreshAiMenu();
   } catch { /* no button */ }
 }
@@ -4263,33 +4280,92 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && !$('howto-modal').hidden) $('howto-modal').hidden = true;
 });
 
-$('btn-ai').onclick = openAiDialog;
-$('menu-ai-new').onclick = openAiDialog;
+/* The chat's buttons, and files dropped anywhere on the page. */
+$('btn-ai').onclick = $('menu-ai-new').onclick = goHome;
+$('btn-home').onclick = goHome;
+$('btn-home').addEventListener('keydown', (e) => { if (e.key === 'Enter') goHome(); });
+$('btn-ai-edit').onclick = () => $('chat-input').focus();
+$('chat-howto').onclick = () => $('btn-howto').click();
 function refreshAiMenu() {
   $('menu-ai-wrap').hidden = ['btn-ai-edit', 'btn-howto', 'menu-ai-new'].every((id) => $(id).hidden);
 }
-$('ai-close').onclick = closeAiDialog;
-$('ai-cancel').onclick = closeAiDialog;
-$('ai-files').onchange = (e) => addAiFiles([...e.target.files]);
-$('ai-idea').addEventListener('input', () => {
-  // No files to name it after: name it after the first words of the idea.
-  const nm = $('ai-name');
-  if (!aiFiles.length && (!nm.value || nm.dataset.auto)) {
-    const words = $('ai-idea').value.trim().split(/\s+/).slice(0, 4).join(' ');
-    nm.value = words ? projectNameFrom(words) : '';
-    nm.dataset.auto = '1';
+$('home-mine').addEventListener('click', (e) => {
+  const b = e.target.closest('.mine');
+  if (b) openProject(b.dataset.name);
+});
+$('chat-send').onclick = sendChat;
+$('chat-input').addEventListener('input', () => {
+  const t = $('chat-input');
+  t.style.height = 'auto';
+  t.style.height = `${t.scrollHeight}px`;
+  refreshChat();
+});
+// Enter sends; Shift+Enter starts a new line.
+$('chat-input').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat(); }
+});
+// Ideas to try: a click puts the words in the box, ready to send or change.
+for (const id of ['home-ideas', 'ai-edit-ideas']) {
+  $(id).addEventListener('click', (e) => {
+    const b = e.target.closest('.idea');
+    if (!b) return;
+    $('chat-input').value = b.textContent;
+    $('chat-input').focus();
+    refreshChat();
+  });
+}
+$('ai-new-talk').onclick = () => {
+  if (aiRunning) return;
+  $('ai-chat').innerHTML = '';
+  aiChatGoesOn = false;
+  chatMessage('');
+  refreshChat();
+  $('chat-input').focus();
+};
+$('chat-files').addEventListener('click', (e) => {
+  const b = e.target.closest('button');
+  if (!b) return;
+  aiFiles.splice(+b.dataset.i, 1);
+  offerFile = null;
+  if (!aiFiles.length) aiSkipped = [];
+  showAiFiles();
+  refreshChat();
+});
+$('offer-free').onclick = () => {
+  const file = offerFile;
+  if (!file) return;
+  openCsvDialog();
+  loadCsvFile(file);
+};
+
+/** Files for the chat. On the start screen they wait for your message or the
+ *  free offer. On a graph, a table adds lines to it, which is free. */
+function takeFiles(list) {
+  if (!list.length || aiRunning) return;
+  if (!FIGURE) { addAiFiles(list); return; }
+  if (['csv', 'csv-panels'].includes(spec?.source?.kind)) {
+    openCsvDialog(true);
+    loadCsvFile(list[0]);
+  } else {
+    chatMessage('Files can only be added to a graph made from a file of numbers.', 'err');
   }
-  refreshAiMake();
+}
+$('ai-files').onchange = (e) => { takeFiles([...e.target.files]); e.target.value = ''; };
+const noOtherDrop = () => $('csv-modal').hidden && $('auth-screen').hidden;
+['dragenter', 'dragover'].forEach((t) => document.addEventListener(t, (e) => {
+  if (!noOtherDrop() || !e.dataTransfer?.types?.includes('Files')) return;
+  e.preventDefault();
+  $('composer').classList.add('over');
+}));
+document.addEventListener('dragleave', (e) => {
+  if (!e.relatedTarget) $('composer').classList.remove('over');
 });
-$('ai-name').addEventListener('input', () => { delete $('ai-name').dataset.auto; refreshAiMake(); });
-$('ai-make').onclick = () => ($('ai-make').dataset.open ? openProject(tidyName($('ai-name').value)) : runAi());
-document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && !$('ai-modal').hidden && !aiRunning) closeAiDialog();
+document.addEventListener('drop', (e) => {
+  $('composer').classList.remove('over');
+  if (!noOtherDrop() || !e.dataTransfer?.files?.length) return;
+  e.preventDefault();
+  takeFiles([...e.dataTransfer.files]);
 });
-const aiDrop = $('ai-drop');
-['dragenter', 'dragover'].forEach((t) => aiDrop.addEventListener(t, (e) => { e.preventDefault(); aiDrop.classList.add('over'); }));
-['dragleave', 'drop'].forEach((t) => aiDrop.addEventListener(t, (e) => { e.preventDefault(); aiDrop.classList.remove('over'); }));
-aiDrop.addEventListener('drop', (e) => addAiFiles([...e.dataTransfer.files]));
 
 $('btn-saveas').onclick = async () => {
   const name = askName('Save a copy of this project as:', `${FIGURE}-copy`);
@@ -4323,10 +4399,8 @@ async function pickProject() {
   const names = listing.figures || [];
   // Only worth a badge when running on this computer; online is the norm.
   $('storage-badge').hidden = (listing.storage || 'local') !== 'local';
-  if (!names.length) throw new Error('no projects found in figures/');
-  const wanted = [new URLSearchParams(location.search).get('project'), readLastProject()];
-  const name = wanted.find((n) => n && names.includes(n)) || names[0];
-  return { name, names };
+  const wanted = new URLSearchParams(location.search).get('project');
+  return { name: names.includes(wanted) ? wanted : null, names };
 }
 
 /* ----------------------------------------------------------- accounts
@@ -4577,8 +4651,8 @@ async function boot() {
   $('tool-ai').hidden = !assistantOn;
   $('menu-ai-new').hidden = !assistantOn;
   refreshAiMenu();
-  aiUsage = me.ai_usage ?? null;
-  showAiUsage();
+  tokens = me.tokens ?? null;
+  showTokens();
   if (link?.type === 'recovery') { showAuth('reset'); return; }
   if (link?.type === 'invite') { showAuth('welcome'); return; }
   if (me.mode === 'online') {
@@ -4595,7 +4669,7 @@ async function boot() {
 let early = null;
 function startEarlyLoad() {
   if (location.hash.includes('access_token')) return;  // signing in first
-  const name = new URLSearchParams(location.search).get('project') || readLastProject();
+  const name = new URLSearchParams(location.search).get('project');
   early = { figures: fetch('/api/figures') };
   if (name && NAME_OK.test(name)) {
     early.name = name;
@@ -4626,12 +4700,30 @@ async function startEditor() {
   setStatus('Opening…', 'busy');
   try {
     const picked = await pickProject();
-    FIGURE = picked.name;
-    rememberProject(FIGURE);
     fillProjectSelect(picked.names);
+    if (picked.name) await openFigureHere(picked.name, true);
+    else showHome(picked.names);
+  } catch (e) {
+    setStatus(e.message, 'err');
+  }
+}
+
+/** Show a figure on this page. loadTalk: also bring back its talk with Claude
+ *  (not when that talk is going on right now). */
+async function openFigureHere(name, loadTalk) {
+  try {
+    FIGURE = name;
+    rememberProject(FIGURE);
+    if (![...$('project-select').options].some((o) => o.value === name)) {
+      $('project-select').add(new Option(name, name));
+    }
+    $('project-select').value = name;
+    $('fig-name').textContent = name;
     document.title = `FigForge — ${FIGURE}`;
     // `history` in this file is the undo stack; the browser's is window.history.
     window.history.replaceState(null, '', '?project=' + encodeURIComponent(FIGURE));
+    document.body.classList.remove('at-home', 'no-figure');
+    refreshChat();
 
     if (early && early.name !== FIGURE) early.figure = early.history = null;
     const [r, hr] = await Promise.all([
@@ -4654,6 +4746,7 @@ async function startEditor() {
     setStatus('');
     $('status').dataset.ready = '1';  // "the figure is on screen" (tests wait on it)
     checkHowto();
+    if (loadTalk) loadChat();
   } catch (e) {
     setStatus(e.message, 'err');
     canvas.innerHTML = `<div style="padding:40px;font:14px sans-serif;color:#b4392b">

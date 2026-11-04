@@ -83,7 +83,7 @@ disk = lambda: json.load(open(f"figures/{P}/spec.json", encoding="utf-8"))
 with sync_playwright() as pw:
     br = pw.chromium.launch(channel="msedge"); pg = br.new_page(viewport={"width": 1400, "height": 850})
     errs = []; pg.on("pageerror", lambda e: errs.append(str(e)))
-    pg.goto(f"{B}/?project={P}")
+    pg.goto(f"{B}/?tools=1&project={P}")
     pg.wait_for_function("document.getElementById('status').dataset.ready === '1'")
     settle = lambda: pg.wait_for_function("!savePending && !inFlight && !needsSave", timeout=30000)
     svg = lambda: pg.inner_html("#stage")

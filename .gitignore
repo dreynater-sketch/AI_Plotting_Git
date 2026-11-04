@@ -19,3 +19,6 @@ Thumbs.db
 # Test run output (screenshots, server logs) and any aborted test projects
 tests/_out/
 figures/zz_*/
+
+# Tokens used on this computer
+figures/.usage/

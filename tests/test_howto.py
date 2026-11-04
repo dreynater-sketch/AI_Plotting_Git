@@ -109,7 +109,7 @@ try:
         br = pw.chromium.launch(channel="msedge")
         ctx = br.new_context(viewport={"width": 1400, "height": 850})
         pg = ctx.new_page(); errs = []; pg.on("pageerror", lambda e: errs.append(str(e)))
-        pg.goto(f"{B}/?project={P}")
+        pg.goto(f"{B}/?tools=1&project={P}")
         pg.wait_for_function("document.getElementById('status').dataset.ready === '1'")
         pg.wait_for_timeout(500)
         check(pg.is_hidden("#btn-howto"), "no 📖 button on a figure that wasn't made with AI")

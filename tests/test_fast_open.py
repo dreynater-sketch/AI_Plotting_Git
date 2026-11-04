@@ -42,18 +42,18 @@ with sync_playwright() as pw:
     key = lambda u: u.split("?")[0].replace(B, "")
     pg.on("request", lambda q: (sent.setdefault(key(q.url), time.time()), all_sent.append(key(q.url))))
     pg.on("requestfinished", lambda q: done.setdefault(key(q.url), time.time()))
-    pg.goto(f"{B}/?project=qcircle")
+    pg.goto(f"{B}/?tools=1&project=qcircle")
     pg.wait_for_function("document.getElementById('status').dataset.ready === '1'")
     me, figs, fig = "/api/auth/me", "/api/figures", "/api/figure/qcircle"
     check(all(k in sent for k in (me, figs, fig, "/api/history/qcircle")), "asked for who, projects, figure and history")
     check(sent[fig] < done[me] and sent[fig] < done[figs],
           "the figure is asked for before the other answers come back")
     check(all_sent.count(fig) == 1, f"…and only once ({all_sent.count(fig)})")
-    # a figure name that doesn't exist: the early guess is dropped, the first project opens
-    pg.goto(f"{B}/?project=zz_not_there")
+    # a figure name that doesn't exist: the early guess is dropped, the start screen opens
+    pg.goto(f"{B}/?tools=1&project=zz_not_there")
     pg.wait_for_function("document.getElementById('status').dataset.ready === '1'")
-    check(pg.evaluate("FIGURE") != "zz_not_there" and pg.evaluate("spec") is not None,
-          "a project that isn't there: the first one opens instead")
+    check(pg.evaluate("FIGURE") is None and pg.evaluate("document.body.classList.contains('at-home')"),
+          "a project that isn't there: the start screen opens instead")
     check(not errs, f"no page errors {errs}")
     br.close()
 

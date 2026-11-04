@@ -42,7 +42,7 @@ except urllib.error.HTTPError as e:
 with sync_playwright() as pw:
     br = pw.chromium.launch(channel="msedge"); pg = br.new_page(viewport={"width": 1400, "height": 850})
     errs = []; pg.on("pageerror", lambda e: errs.append(str(e)))
-    pg.goto(f"{B}/?project={P}")
+    pg.goto(f"{B}/?tools=1&project={P}")
     pg.wait_for_function("document.getElementById('status').dataset.ready === '1'")
     settle = lambda: pg.wait_for_function("!savePending && !inFlight && !needsSave", timeout=30000)
 
@@ -92,7 +92,7 @@ with sync_playwright() as pw:
     check(disk()["rcparams"].get("font.family") == "serif", "font: serif")
 
     # --- delete a project
-    pg.goto(f"{B}/?project={P2}")
+    pg.goto(f"{B}/?tools=1&project={P2}")
     pg.wait_for_function("document.getElementById('status').dataset.ready === '1'")
     pg.once("dialog", lambda dlg: dlg.accept())
     pg.click("#menu-file"); pg.click("#btn-delete-project")

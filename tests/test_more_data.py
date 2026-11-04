@@ -56,7 +56,7 @@ with sync_playwright() as pw:
     br = pw.chromium.launch(channel="msedge")
     ctx = br.new_context(viewport={"width": 1500, "height": 900})
     pg = ctx.new_page(); errs = []; pg.on("pageerror", lambda e: errs.append(str(e)))
-    pg.goto(f"{B}/?project={P}")
+    pg.goto(f"{B}/?tools=1&project={P}")
     pg.wait_for_function("document.getElementById('status').dataset.ready === '1'")
     xlim0 = pg.evaluate("spec.panels[0].xlim")
 
@@ -157,19 +157,18 @@ with sync_playwright() as pw:
               open(f"figures/{P}/assistant.json", "w"))
     st, d = api(f"/api/assistant/chat/{P}")
     check(d["can_continue"] and len(d["turns"]) == 2 and not d["running"], "the server hands back the talk")
-    pg.evaluate("openAiEdit()")
+    pg.evaluate("assistantOn = true; loadChat()")
     pg.wait_for_function("document.querySelectorAll('#ai-chat .chat-msg').length === 2")
     check(pg.inner_text("#ai-chat .chat-msg.you") == "Make it red"
           and "Made the line red." in pg.inner_text("#ai-chat .chat-msg.ai")
-          and pg.inner_text("#ai-edit-ask") == "Anything else?" and pg.is_visible("#ai-edit-new"),
-          "the talk window shows the talk so far and asks for more")
+          and pg.get_attribute("#chat-input", "placeholder") == "Anything else?" and pg.is_visible("#ai-new-talk"),
+          "the chat shows the talk so far and asks for more")
     check(pg.evaluate("aiChatGoesOn"), "the next message would go on with it")
     pg.screenshot(path=S + "/ai_talk.png")
-    pg.click("#ai-edit-new")
+    pg.click("#ai-new-talk")
     check(pg.evaluate("document.querySelectorAll('#ai-chat .chat-msg').length") == 0
-          and not pg.evaluate("aiChatGoesOn") and pg.inner_text("#ai-edit-ask") == "What should change?",
+          and not pg.evaluate("aiChatGoesOn") and pg.get_attribute("#chat-input", "placeholder") == "What should change?",
           "Start a new talk clears it")
-    pg.click("#ai-edit-done")
 
     check(not errs, f"no page errors {errs}")
     br.close()

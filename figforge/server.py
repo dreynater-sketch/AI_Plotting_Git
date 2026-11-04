@@ -43,7 +43,7 @@ then requires a signed-in user and works in that user's own project space:
     POST /api/assistant/edit/<name>  {request, continue?} -> an AI session that changes an
                                existing figure; continue: true adds to the last chat instead
     GET  /api/assistant/chat/<name>  -> {turns: [{role, text}], can_continue, running}
-    POST /api/assistant/step/<name>  one Claude round -> {done, events, reply, cost_usd, ai_usage}
+    POST /api/assistant/step/<name>  one Claude round -> {done, events, reply, cost_usd, ai_usage, tokens, tokens_spent}
     POST /api/assistant/howto/<name>  "How this was made" for a finished AI figure (made once)
     GET  /api/howto/<name>       -> {howto or null, can_make}
     (AI: signed-in users within a monthly budget, see _ai_budget; admins unlimited)
@@ -89,6 +89,9 @@ NAME_RE = re.compile(r"^[A-Za-z0-9_-]+( [A-Za-z0-9_-]+)*$")
 ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")  # ids inside a figure (curves, labels)
 HISTORY_MAX = 100  # per stack; matches the editor's HISTORY_MAX
 OPEN_SIGNUP = os.environ.get("FIGFORGE_OPEN_SIGNUP") == "1"
+TOKENS_MONTHLY = int(os.environ.get("FIGFORGE_TOKENS_MONTHLY", "100"))
+TOKENS_NEW = int(os.environ.get("FIGFORGE_TOKENS_NEW", "50"))        # Claude makes a new graph
+TOKENS_CHANGE = int(os.environ.get("FIGFORGE_TOKENS_CHANGE", "10"))  # Claude changes a graph
 SCRIPT_MAX = 512 * 1024  # a hand-edited figure.py; the generated one is ~6 KB
 SESSION_MAX_AGE = 30 * 24 * 3600  # cookies; Supabase's refresh token outlives the 1 h access token
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -828,14 +831,16 @@ class Handler(BaseHTTPRequestHandler):
     def _auth_me(self):
         from figforge import assistant
         if AUTH is None:
-            return self._json({"mode": "local", "assistant": assistant.configured()})
+            return self._json({"mode": "local", "assistant": assistant.configured(),
+                               "tokens": self._tokens()})
         user = self._current_user()
         if not user:
             return self._json({"mode": "online", "user": None, "invite_only": not OPEN_SIGNUP}, 401)
         used, cap = self._ai_budget(user)
         return self._json({"mode": "online", "user": public_user(user), "invite_only": not OPEN_SIGNUP,
                            "assistant": assistant.configured() and self._ai_open_to(user),
-                           "ai_usage": {"used": round(used, 4), "cap": cap}})
+                           "ai_usage": {"used": round(used, 4), "cap": cap},
+                           "tokens": self._tokens(user)})
 
     def _require_admin(self):
         if AUTH is None:
@@ -887,6 +892,44 @@ class Handler(BaseHTTPRequestHandler):
         cap = own if isinstance(own, (int, float)) else float(os.environ.get("FIGFORGE_AI_MONTHLY_USD", "5"))
         return used, float(cap)
 
+    # Tokens are what people see: a set price for each thing Claude makes, like
+    # image and video sites. They're only taken when Claude actually drew or
+    # changed something, and come back on the 1st. The dollar budget above
+    # stays as the safety net behind them. Admins and the local editor are
+    # counted but never stopped.
+    def _usage_store(self, user=None):
+        if AUTH is None:
+            return STORE
+        # The user's own space, explicitly: /api/auth/me runs before _authorize.
+        return STORE.scoped((user or self._current_user())["id"])
+
+    def _tokens(self, user=None):
+        """-> {left, monthly, new, change, unlimited}."""
+        user = user or (self._current_user() if AUTH is not None else None)
+        raw = self._usage_store(user).read(f".usage/{time.strftime('%Y-%m')}.json")
+        spent = int(json.loads(raw).get("tokens", 0)) if raw else 0
+        own = (user.get("app_metadata") or {}).get("figforge_tokens") if user else None
+        monthly = own if isinstance(own, int) else TOKENS_MONTHLY
+        return {"left": max(0, monthly - spent), "monthly": monthly, "new": TOKENS_NEW,
+                "change": TOKENS_CHANGE, "unlimited": AUTH is None or is_admin(user)}
+
+    def _spend_tokens(self, n):
+        store = self._usage_store()
+        rel = f".usage/{time.strftime('%Y-%m')}.json"
+        raw = store.read(rel)
+        u = json.loads(raw) if raw else {"cost_usd": 0.0, "steps": 0, "figures": 0}
+        u["tokens"] = int(u.get("tokens", 0)) + n
+        store.write(rel, json.dumps(u).encode("utf-8"))
+
+    def _enough_tokens(self, price):
+        """Before Claude starts: can this person pay for what they asked?"""
+        t = self._tokens()
+        if t["unlimited"] or t["left"] >= price:
+            return True
+        self._error(402, f"This needs {price} tokens and you have {t['left']}. More come on the 1st. "
+                         "Making a graph from a spreadsheet is always free.")
+        return False
+
     def _ai_charge(self, usd, figure=False):
         """Add this step's cost to the user's month (online only)."""
         if AUTH is None or usd <= 0:
@@ -932,7 +975,7 @@ class Handler(BaseHTTPRequestHandler):
         """{name, idea, files: [{name, text} | {name, b64}], skipped: [...]}:
         the browser has already unpacked zips and left out installers,
         slides and duplicates so the upload fits Vercel's 4.5 MB body."""
-        if not self._assistant_allowed():
+        if not self._assistant_allowed() or not self._enough_tokens(TOKENS_NEW):
             return
         from figforge import assistant
         import anthropic
@@ -966,6 +1009,7 @@ class Handler(BaseHTTPRequestHandler):
             state = assistant.start(fig, files, skipped, idea)
         except anthropic.APIError as e:
             return self._error(502, f"couldn't hand the files to Claude: {e}")
+        state["price"] = TOKENS_NEW
         # Until the first figure is drawn the project has no spec.json, so
         # it stays out of the project list.
         fig.save_assistant(state)
@@ -976,7 +1020,7 @@ class Handler(BaseHTTPRequestHandler):
         through /api/assistant/step/<name> like a new figure's. With
         continue: true, the request is the next message in the figure's
         last conversation (a chat) instead."""
-        if not self._assistant_allowed():
+        if not self._assistant_allowed() or not self._enough_tokens(TOKENS_CHANGE):
             return
         from figforge import assistant
         import anthropic
@@ -997,6 +1041,7 @@ class Handler(BaseHTTPRequestHandler):
                      else assistant.start_edit(fig, request))
         except anthropic.APIError as e:
             return self._error(502, f"couldn't reach Claude: {e}")
+        state["price"], state["turn_changed"] = TOKENS_CHANGE, False
         fig.save_assistant(state)
         return self._json({"name": fig.name})
 
@@ -1019,7 +1064,8 @@ class Handler(BaseHTTPRequestHandler):
             fig.save_assistant(state)
             return self._json({"done": True, "events": [], "reply": state["reply"],
                                "created": state["created"], "steps": state["steps"],
-                               "cost_usd": state["cost_usd"], "ai_usage": {"used": used, "cap": cap}})
+                               "cost_usd": state["cost_usd"], "ai_usage": {"used": used, "cap": cap},
+                               "tokens": self._tokens(), "tokens_spent": 0})
         before, was_created = state["cost_usd"], state["created"]
         try:
             state, spec, events = assistant.step(state, fig)
@@ -1038,9 +1084,17 @@ class Handler(BaseHTTPRequestHandler):
             payload = self._payload(fig, spec)
             fig.save_spec(spec)
             fig.write_outputs(payload["svg"], codegen.generate(spec))
+            state["turn_changed"] = True
         self._ai_charge(state["cost_usd"] - before, figure=state["created"] and not was_created)
+        spent = 0
         if state["done"]:
             assistant.cleanup(state)
+            # A question answered, or a try that drew nothing, costs nothing.
+            if state.pop("turn_changed", False):
+                spent = state.pop("price", TOKENS_NEW)
+                self._spend_tokens(spent)
+                if state.get("chat"):
+                    state["chat"][-1]["tokens"] = spent
         fig.save_assistant(state)
         used, cap = self._ai_budget()
         turn_steps, turn_cost = assistant._turn(state)
@@ -1048,6 +1102,7 @@ class Handler(BaseHTTPRequestHandler):
                            "created": state["created"], "steps": state["steps"],
                            "cost_usd": state["cost_usd"], "ai_usage": {"used": round(used, 4), "cap": cap},
                            "turn_steps": turn_steps, "turn_cost_usd": round(turn_cost, 5),
+                           "tokens": self._tokens(), "tokens_spent": spent,
                            "can_continue": assistant.can_continue(state)})
 
     def _assistant_howto(self, name):

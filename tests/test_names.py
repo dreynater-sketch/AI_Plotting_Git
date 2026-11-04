@@ -36,7 +36,7 @@ try:
         ready = lambda: pg.wait_for_function("document.getElementById('status').dataset.ready === '1'")
         opened = lambda n: pg.wait_for_function(f"typeof FIGURE !== 'undefined' && FIGURE === {json.dumps(n)}"
                                                 " && document.getElementById('status').dataset.ready === '1'")
-        pg.goto(f"{B}/?project={P}"); ready()
+        pg.goto(f"{B}/?tools=1&project={P}"); ready()
 
         # Save as, typed with extra spaces: tidied to single ones
         pg.once("dialog", lambda d: d.accept("  zz   my plot "))

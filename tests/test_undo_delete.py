@@ -36,7 +36,7 @@ with sync_playwright() as pw:
     pg = br.new_page(viewport={"width": 1600, "height": 1000})
     errs = []
     pg.on("pageerror", lambda e: errs.append(str(e)))
-    pg.goto(f"{B}/?project={P}")
+    pg.goto(f"{B}/?tools=1&project={P}")
     pg.wait_for_function("document.getElementById('status').dataset.ready === '1'")
     settle = lambda: pg.wait_for_function(
         "!savePending && !inFlight && !needsSave && !historyPending", timeout=20000)
