@@ -59,6 +59,8 @@ steps_run = []
 
 
 def fake_step(state, fig):
+    if state["done"]:             # as the real one: a finished session calls nothing
+        return state, None, []
     steps_run.append(fig.name)
     if "slow" in state["idea"]:
         time.sleep(2.5)
