@@ -37,6 +37,7 @@ import os
 import shutil
 import tempfile
 import threading
+import time
 
 import numpy as np
 
@@ -71,6 +72,13 @@ class LocalStore:
         tmp = path + ".tmp"
         with open(tmp, "wb") as f:
             f.write(data)
+        # OneDrive or a virus scanner can hold a file just after it's written.
+        for wait in (0.05, 0.1, 0.2, 0.4, 0.8, 1.5):
+            try:
+                os.replace(tmp, path)
+                return
+            except PermissionError:
+                time.sleep(wait)
         os.replace(tmp, path)
 
     def has(self, rel):
