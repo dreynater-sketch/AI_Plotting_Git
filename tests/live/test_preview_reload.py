@@ -69,6 +69,16 @@ try:
         # A lost step would be paid for without being counted in the session,
         # so compare what was charged with what the session says it cost.
         check(abs((100 - left) - cost / 0.005) <= 2, f"tokens match the session's cost ({100 - left} vs {cost / 0.005:.1f})")
+
+        # A follow-up changes earlier messages (the first turn's files are gone):
+        # Opus 5.5 would refuse that if the old thinking were sent as it was.
+        n = pg.locator("#ai-chat .chat-msg").count()
+        pg.fill("#chat-input", "Make the title bigger")
+        pg.click("#chat-send")
+        pg.wait_for_function(f"document.querySelectorAll('#ai-chat .chat-msg').length === {n + 2} && !aiRunning", timeout=240000)
+        last = pg.locator("#ai-chat .chat-msg").last.inner_text()
+        check(pg.inner_text("#chat-msg") == "" and "Used" in last, f"a follow-up message works ({last[:70]!r})")
+        check(ctx.request.get(H + "/api/auth/me").json()["tokens"]["left"] < left, "...and takes its tokens")
         check(not errs, f"no page errors {errs}")
         br.close()
 finally:
