@@ -3493,11 +3493,15 @@ function setZoom(z, byHand = false) {
 
 $('btn-fit').onclick = fit;
 
+/* Fit inside the padding with a little to spare, rounding down: a figure a
+ * few pixels too big brings up a scrollbar, which shrinks the space, which
+ * re-fits it smaller, which takes the scrollbar away... and round it goes. */
 function fit() {
-  const w = $('canvas-wrap').clientWidth - 40;
-  const h = $('canvas-wrap').clientHeight - 40;
+  const wrap = $('canvas-wrap'), cs = getComputedStyle(wrap);
+  const w = wrap.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight) - 4;
+  const h = wrap.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom) - 4;
   const scale = Math.min(w / geometry.width, h / geometry.height);
-  setZoom(scale * 100);
+  setZoom(Math.floor(scale * 100));
   zoomFits = true;
 }
 

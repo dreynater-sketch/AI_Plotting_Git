@@ -77,9 +77,13 @@ with sync_playwright() as pw:
     check(abs(d["rcparams"]["lines.linewidth"] - 1.5 * k) < 0.01 and abs(d["rcparams"]["xtick.major.size"] - 3.5 * k) < 0.01,
           f"lines and tick marks shrink too ({d['rcparams'].get('lines.linewidth')})")
     check(abs(d["panels"][0]["frame_lw"] - 0.8 * k) < 0.01, "so does the frame")
-    pg.wait_for_function("svgEl && geometry && Math.abs(svgEl.getBoundingClientRect().width - "
-                         "Math.min($('canvas-wrap').clientWidth - 40, ($('canvas-wrap').clientHeight - 40) * geometry.width / geometry.height)) < 3")
-    check(True, "the smaller figure is fitted to the window again")
+    fitted = ("(() => { const w = $('canvas-wrap'), r = svgEl.getBoundingClientRect();"
+              " return w.scrollWidth <= w.clientWidth && w.scrollHeight <= w.clientHeight"
+              " && (r.width > w.clientWidth - 70 || r.height > w.clientHeight - 70); })()")
+    pg.wait_for_function(f"svgEl && geometry && {fitted}")
+    check(True, "the smaller figure is fitted to the window again, with no scrollbar")
+    z0 = pg.evaluate("zoom"); pg.wait_for_timeout(1000)
+    check(pg.evaluate("zoom") == z0, "and it stays still")
     check(pg.is_visible("#f-fig-small"), "three plots in one column width: a note says the words are too small")
     pg.fill("#f-fig-h", "3"); pg.press("#f-fig-h", "Enter"); settle()
     check(disk()["size_in"][1] == 3, "height can be typed")
