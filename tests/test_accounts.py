@@ -167,6 +167,7 @@ try:
         check(pg.inner_text("#account-name") == "Bob", "expired access token refreshed silently")
 
         # --- session revoked mid-edit: page sends you to log in
+        pg.wait_for_load_state("networkidle")   # a request still going out would log us out before the click
         get(M + "/_revoke")
         tid = pg.evaluate("spec.panels[0].texts[0].id")
         pg.evaluate(f"setSelection(['{tid}'])"); pg.click("#f-size-up")
