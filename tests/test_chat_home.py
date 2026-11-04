@@ -112,7 +112,7 @@ try:
         check(not any(shown(pg, s) for s in ("#menu-file", "#tool-label", "#btn-undo", "#btn-save-pic", "#btn-more", "#inspector")),
               "…with no tools in the way")
         check("100 tokens" in pg.inner_text("#sb-tokens"), f"100 tokens at the bottom ({pg.inner_text('#sb-tokens')})")
-        check("50 tokens" in pg.inner_text("#chat-price") and "free" in pg.inner_text("#chat-price"), "it says what a graph costs")
+        check("30 tokens" in pg.inner_text("#chat-price") and "free" in pg.inner_text("#chat-price"), "it says what a graph costs")
         check(pg.locator('#home-mine .mine[data-name="qcircle"]').count() == 1, "your graphs are listed")
         check(pg.is_disabled("#chat-send"), "nothing to send yet")
         pg.screenshot(path=S + "/chat_home.png")
@@ -121,7 +121,7 @@ try:
         pg.set_input_files("#ai-files", csv_path)
         pg.wait_for_selector("#chat-offer:not([hidden])")
         offer = pg.inner_text("#chat-offer")
-        check("for free" in offer and "no tokens" in offer and "50 tokens" in offer,
+        check("for free" in offer and "no tokens" in offer and "30 tokens" in offer,
               f"a spreadsheet on its own: offered for free, and says what Claude would cost")
         check("zz_chat_free.csv" in pg.inner_text("#chat-files"), "the file shows by the chat box")
         pg.screenshot(path=S + "/chat_offer.png")

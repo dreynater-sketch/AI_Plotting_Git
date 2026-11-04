@@ -91,7 +91,7 @@ HISTORY_MAX = 100  # per stack; matches the editor's HISTORY_MAX
 OPEN_SIGNUP = os.environ.get("FIGFORGE_OPEN_SIGNUP") == "1"
 TOKENS_TRIAL = int(os.environ.get("FIGFORGE_TOKENS_TRIAL", "100"))  # free, once, for everyone
 TOKEN_USD = float(os.environ.get("FIGFORGE_TOKEN_USD", "0.005"))    # what one token buys of Claude
-TOKENS_ABOUT_NEW = 50      # what a simple graph uses, to tell people up front
+TOKENS_ABOUT_NEW = 30      # what a simple graph uses, to tell people up front
 TOKENS_MIN_NEW = 25        # too little to start: it would stop before there's a graph
 TOKENS_MIN_CHANGE = 5
 STEP_LOCK_SECONDS = 300    # as long as a step can run on Vercel (vercel.json)

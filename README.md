@@ -37,7 +37,7 @@ every menu and tool, and is remembered. Clicking something shows its settings.
 **Tokens** show at the bottom. Everyone gets 100 free, once, when they first
 log in (`FIGFORGE_TOKENS_TRIAL`); they don't come back. Claude's real cost is
 taken from them as it works, at $0.005 of Claude per token (`FIGFORGE_TOKEN_USD`),
-so a simple graph uses about 40-50 and a bigger one more. A try that drew nothing
+so a simple graph uses about 20-40 and a bigger one more. A try that drew nothing
 still cost Claude's time, so it counts too. Running out part way stops Claude
 and keeps what's done. One spreadsheet dropped in is offered as a free graph, with
 no AI, and dragging, clicking and every other tool are free. A person's

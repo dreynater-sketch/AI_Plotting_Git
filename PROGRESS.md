@@ -393,7 +393,7 @@ figure → saved-code sync; a phone layout; photo-to-data-points.
 - Same prompts as the table above, at medium then low effort: circle 3 steps, 57 s, $0.210;
   damped 3 steps, 29 s, $0.091 (it ran second, so it read the shared cache). A follow-up message
   in the talk: $0.03-$0.04. A real sine wave through the chat on Opus 5: $0.14. So 100 tokens is
-  about 2-5 graphs, and "about 50" for a simple graph runs a little high, which is the safe side.
+  about 2-5 graphs, and the screen says "about 30" for a simple graph (TOKENS_ABOUT_NEW).
 - Opus 5.5 refuses thinking blocks when earlier messages changed (accounts made since 2026-08-31),
   and continue_chat changes them: uploads deleted after a turn become placeholder text. Keeping
   the files would mean leaving people's data at Anthropic for longer, so requests send
