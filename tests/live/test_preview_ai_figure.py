@@ -72,9 +72,10 @@ try:
         print("   reply:", d.get("reply"))
         check(d.get("done") and d.get("created"), "the session finished with a figure")
         check(any(e.startswith("Made a table") for e in events), "the sandbox produced a table")
-        check(d.get("tokens_spent") == 50 and d.get("tokens", {}).get("left") == 50,
-              f"the new graph used 50 of the 100 tokens ({d.get('tokens_spent')}, {d.get('tokens')})")
-        check(ctx.get(H + "/api/auth/me").json().get("tokens", {}).get("left") == 50, "...and that was saved")
+        real = math.ceil(d.get("cost_usd", 0) / 0.005)
+        check(d.get("tokens_spent") == real and d.get("tokens", {}).get("left") == 100 - real,
+              f"the graph took what Claude cost: ${d.get('cost_usd')} = {real} tokens ({d.get('tokens')})")
+        check(ctx.get(H + "/api/auth/me").json().get("tokens", {}).get("left") == 100 - real, "...and that was saved")
         fig = ctx.get(H + "/api/figure/ai_live")
         spec = fig.json().get("spec", {}) if fig.ok else {}
         p = (spec.get("panels") or [{}])[0]

@@ -375,9 +375,14 @@ figure → saved-code sync; a phone layout; photo-to-data-points.
   graph appears as soon as Claude first draws it. The two AI pop-ups are gone.
 - Tools hide until "More tools". Picking something puts its settings over the chat rather than
   opening a new column: a column would re-fit the figure under the pointer in the middle of a drag.
-- Set token prices like image and video sites, not metered: you know the price before you send.
-  100 a month, 50 for a new graph, 10 for a change. At $0.07-$0.48 a figure (see the cost table
-  above), 100 tokens usually costs about $1 a month per person or less. Big figures cost the same 50,
-  and one request can reach its $2 limit, so the monthly dollar limit stays behind the tokens.
-- Nothing is charged for a try that drew nothing or a question that changed nothing.
+- Tokens were set prices for one day, then changed to Claude's real cost at the user's request:
+  100 free, once, no top-ups; 1 token = $0.005 of Claude (FIGFORGE_TOKEN_USD), rounded up per
+  request. At that rate the trial costs $0.50 a person. The plan is to sell tokens at 10x or more
+  through Stripe later: that's the price of a token, the count here stays the same.
+- The cost counted is Claude's words only. Sandbox time is billed separately by Anthropic and
+  isn't in it, and neither is hosting, so this isn't quite break-even yet.
+- Claude's steps are asked for by the page, so a reload used to stop the work. Now it carries on
+  (figforge.making in localStorage, ?project= set as soon as it starts). A step that was running
+  at the reload keeps running on the server, so steps take a lock (stepping_at) and a second
+  asker gets {busy: true} and waits; otherwise Claude would be paid twice.
 - There is no way to buy tokens yet.

@@ -1,5 +1,5 @@
 """The start screen is a chat: ask for a graph, or drop a spreadsheet and get a
-free one; tokens at the bottom; only the simple tools until "More tools".
+free one; a free trial of tokens taken at what Claude costs; a reload carries on; only the simple tools until "More tools".
 Claude is faked here (figforge.assistant start/step), so no money is spent;
 the server, its token counting and the page are real."""
 import os as _os
@@ -20,7 +20,7 @@ from figforge import assistant, server
 
 S = OUT_DIR
 AI_NAME, FREE_NAME = "zz_chat line", "zz_chat_free"
-USAGE = f"figures/.usage/{time.strftime('%Y-%m')}.json"
+USAGE = "figures/.usage/tokens.json"
 kept_usage = open(USAGE, "rb").read() if os.path.exists(USAGE) else None
 
 
@@ -55,9 +55,15 @@ def fake_continue(fig, state, message):
     return state
 
 
+steps_run = []
+
+
 def fake_step(state, fig):
+    steps_run.append(fig.name)
+    if "slow" in state["idea"]:
+        time.sleep(2.5)
     state["steps"] += 1
-    state["cost_usd"] += 0.01
+    state["cost_usd"] += 0.05     # 10 tokens
     if "nothing" in state["idea"]:
         return assistant._finish(state, "I couldn't draw that."), None, []
     if state["steps"] == 1 and not state["created"]:
@@ -160,7 +166,7 @@ try:
         pg.wait_for_function("document.getElementById('chat-msg').textContent.includes('couldn')")
         check(pg.evaluate("document.body.classList.contains('at-home')") and pg.input_value("#chat-input") == "zz_chat nothing please"
               and pg.locator("#ai-chat .chat-msg").count() == 0, "no graph made: back at the start with your words kept")
-        check("100 tokens" in pg.inner_text("#sb-tokens"), "…and no tokens used")
+        check("90 tokens" in pg.inner_text("#sb-tokens"), f"…and it took only what Claude cost ({pg.inner_text('#sb-tokens')})")
         rmtree("figures/zz_chat nothing")
 
         pg.fill("#chat-input", "zz_chat line of something")
@@ -172,32 +178,68 @@ try:
         check(not pg.evaluate("document.body.classList.contains('at-home')") and pg.locator("#canvas svg").count() == 1
               and "project=" in pg.url, "…beside the chat")
         msgs = pg.locator("#ai-chat .chat-msg")
-        check(msgs.count() == 2 and "All done." in msgs.nth(1).inner_text() and "50 tokens" in msgs.nth(1).inner_text(),
-              "…the answer says it used 50 tokens")
-        check("50 tokens" in pg.inner_text("#sb-tokens"), f"…and the count went down ({pg.inner_text('#sb-tokens')})")
+        check(msgs.count() == 2 and "All done." in msgs.nth(1).inner_text() and "20 tokens" in msgs.nth(1).inner_text(),
+              "…the answer says what it really used")
+        check("70 tokens" in pg.inner_text("#sb-tokens"), f"…and the count went down by that ({pg.inner_text('#sb-tokens')})")
         pg.screenshot(path=S + "/chat_figure.png")
 
         # ------------------------------------------------------------ talking to it
         pg.fill("#chat-input", "just a question")
         pg.click("#chat-send"); pg.wait_for_function("document.querySelectorAll('#ai-chat .chat-msg').length === 4 && !aiRunning")
-        check("50 tokens" in pg.inner_text("#sb-tokens"), "a change that changes nothing is free")
+        check("60 tokens" in pg.inner_text("#sb-tokens"), "a question costs what Claude cost too")
         pg.fill("#chat-input", "make it bigger")
         pg.click("#chat-send"); pg.wait_for_function("document.querySelectorAll('#ai-chat .chat-msg').length === 6 && !aiRunning")
-        check("40 tokens" in pg.inner_text("#sb-tokens") and "10 tokens" in pg.locator("#ai-chat .chat-msg").nth(5).inner_text(),
-              "a real change uses 10 tokens")
+        check("40 tokens" in pg.inner_text("#sb-tokens") and "20 tokens" in pg.locator("#ai-chat .chat-msg").nth(5).inner_text(),
+              "a change takes what it cost")
         check(pg.evaluate("spec.panels[0].title.text") == "Changed", "…and shows on the graph")
         pg.evaluate("undo()")
         check(pg.evaluate("spec.panels[0].title.text") != "Changed", "Undo takes it back")
         pg.reload(); pg.wait_for_function(ready)
         pg.wait_for_function("document.querySelectorAll('#ai-chat .chat-msg').length === 6")
-        check("10 tokens" in pg.locator("#ai-chat .chat-msg").nth(5).inner_text(), "the talk and its tokens come back on reload")
+        check("20 tokens" in pg.locator("#ai-chat .chat-msg").nth(5).inner_text(), "the talk and its tokens come back on reload")
+
+        # --------------------------------------------- a reload carries on with it
+        pg.click("#btn-home"); pg.wait_for_function("document.body.classList.contains('at-home')")
+        steps_run.clear()
+        pg.fill("#chat-input", "zz_chat slow one")
+        pg.click("#chat-send")
+        pg.wait_for_function("location.search.includes('project=')")
+        check(pg.evaluate("FIGURE") is None and pg.evaluate("localStorage.getItem('figforge.making')") == "zz_chat slow one",
+              "while it's being made, the page remembers it")
+        time.sleep(0.4)
+        pg.reload()
+        pg.wait_for_function("document.querySelectorAll('#ai-chat .chat-msg').length === 2", timeout=20000)
+        check(pg.locator("#ai-chat .chat-msg.you").inner_text() == "zz_chat slow one" and pg.evaluate("aiRunning"),
+              "reloading before the graph is drawn: the talk is back and it keeps working")
+        pg.wait_for_function("FIGURE !== null", timeout=30000)
+        pg.wait_for_selector("#canvas svg", timeout=20000)
+        check(pg.locator("#canvas svg").count() == 1, "…and the graph appears")
+        time.sleep(0.4)
+        pg.reload(); pg.wait_for_function(ready)
+        pg.wait_for_function("document.querySelector('#ai-chat .chat-msg.ai') && !aiRunning", timeout=30000)
+        check("All done." in pg.locator("#ai-chat .chat-msg").last.inner_text(), "reloading after it's drawn: it finishes too")
+        check(len(steps_run) == 2, f"Claude ran each step once, reloads or not ({len(steps_run)})")
+        check("20 tokens" in pg.inner_text("#sb-tokens"), f"…and was paid for once ({pg.inner_text('#sb-tokens')})")
+        check(pg.evaluate("localStorage.getItem('figforge.making')") is None, "…and is forgotten once done")
+        pg.goto(B + "/"); pg.wait_for_function(ready)
+        check(pg.evaluate("document.body.classList.contains('at-home')"), "a finished graph doesn't reopen by itself")
+
+        # --------------------------------------------- nothing is topped back up
+        check(json.load(open(USAGE))["spent"] == 80, "the trial isn't by the month: one count for good")
 
         # ------------------------------------------------------------ out of tokens
         limited["on"] = True
-        server.TOKENS_MONTHLY = 65   # 60 used so far: 5 left, less than a change
-        pg.reload(); pg.wait_for_function(ready)
+        pg.goto(B + "/?project=" + name.replace(" ", "%20")); pg.wait_for_function(ready)
+        server.TOKENS_TRIAL = 85     # 80 used: 5 left, just enough to start
+        pg.reload(); pg.wait_for_function(ready); pg.wait_for_function("!aiRunning")
+        pg.fill("#chat-input", "make it bigger")
+        pg.click("#chat-send"); pg.wait_for_function("document.querySelectorAll('#ai-chat .chat-msg.you').length === 4 && !aiRunning")
+        last = pg.locator("#ai-chat .chat-msg").last.inner_text()
+        check("ran out of tokens" in last and pg.evaluate("spec.panels[0].title.text") == "Changed",
+              f"running out part way: stops and keeps what's done ({last!r})")
+        check("0 tokens" in pg.inner_text("#sb-tokens"), f"…at 0 ({pg.inner_text('#sb-tokens')})")
         pg.fill("#chat-input", "one more")
-        check(pg.is_disabled("#chat-send") and "you have 5" in pg.inner_text("#chat-price"), "not enough tokens: says so, can't send")
+        check(pg.is_disabled("#chat-send") and "0 tokens left" in pg.inner_text("#chat-price"), "with none left: says so, can't send")
         st = pg.evaluate("""async () => { const r = await fetch('/api/assistant/edit/' + encodeURIComponent(FIGURE),
               {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({request:'x'})});
               return [r.status, (await r.json()).error]; }""")

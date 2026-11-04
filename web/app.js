@@ -3913,7 +3913,7 @@ function showAiFiles() {
   if (offerFile) {
     $('chat-offer-text').textContent = `I can draw a graph from ${offerFile.name} for free. It uses no tokens. Want that?`;
     $('chat-offer-or').textContent = assistantOn && tokens
-      ? `Or tell me below what you want and I'll draw it for you. That uses ${tokens.new} tokens.` : '';
+      ? `Or tell me below what you want and I'll draw it for you. That uses about ${tokens.about_new} tokens.` : '';
   }
 }
 
@@ -3923,16 +3923,16 @@ function bytesToBase64(bytes) {
   return btoa(s);
 }
 
-let tokens = null;   // {left, monthly, new, change, unlimited}
+let tokens = null;   // {left, about_new, min_new, min_change, unlimited}
 
 function showTokens() {
   if (!tokens) return;
   const el = $('sb-tokens');
   el.textContent = `🪙 ${tokens.left} token${tokens.left === 1 ? '' : 's'}`;
-  el.classList.toggle('low', !tokens.unlimited && tokens.left < tokens.change);
-  el.title = `A new graph from Claude uses ${tokens.new} tokens. A change uses ${tokens.change}. ` +
+  el.classList.toggle('low', !tokens.unlimited && tokens.left < tokens.min_change);
+  el.title = `Claude uses tokens as it works. A simple graph uses about ${tokens.about_new}, bigger ones more. ` +
     'Graphs from a spreadsheet, dragging and clicking are free. ' +
-    (tokens.unlimited ? 'You have no limit.' : `You get ${tokens.monthly} every month, on the 1st.`);
+    (tokens.unlimited ? 'You have no limit.' : 'Everyone starts with a free trial of 100.');
 }
 
 async function aiPost(url, body) {
@@ -3966,6 +3966,7 @@ async function aiSteps(name, log, onStep) {
       throw e;
     }
     for (const ev of d.events) line(ev);
+    if (d.busy) { await new Promise((ok) => setTimeout(ok, 3000)); continue; }   // the step from before a reload
     if (d.tokens) { tokens = d.tokens; showTokens(); refreshChat(); }
     if (onStep) await onStep(d);
   }
@@ -4016,8 +4017,7 @@ function chatMessage(msg, cls = '') {
 
 /** What the next message would cost, and whether it can go. */
 function refreshChat() {
-  const price = !tokens ? 0 : FIGURE ? tokens.change : tokens.new;
-  const short = tokens && !tokens.unlimited && tokens.left < price;
+  const short = tokens && !tokens.unlimited && tokens.left < (FIGURE ? tokens.min_change : tokens.min_new);
   const text = $('chat-input').value.trim();
   const ai = assistantOn;
   $('chat-input').disabled = !ai || aiRunning;
@@ -4036,9 +4036,9 @@ function refreshChat() {
   const el = $('chat-price');
   el.classList.toggle('err', !!short);
   el.textContent = !tokens || !ai ? ''
-    : short ? `This needs ${price} tokens and you have ${tokens.left}. More come on the 1st.`
-    : FIGURE ? `Each change uses ${tokens.change} tokens. You only pay if the graph changes.`
-    : `A new graph uses ${tokens.new} tokens. A spreadsheet on its own can be drawn for free.`;
+    : short ? `You have ${tokens.left} tokens left, which isn't enough for this. Making a graph from a spreadsheet is always free.`
+    : FIGURE ? 'Changes use tokens too, more for big ones. Dragging and clicking are free.'
+    : `A simple graph uses about ${tokens.about_new} tokens, bigger ones more. A spreadsheet on its own can be drawn for free.`;
 }
 
 function setAiRunning(on) {
@@ -4069,9 +4069,24 @@ async function goHome() {
   location.href = location.pathname;
 }
 
+/* A graph being made is remembered, so a reload (or coming back later) carries
+ * on with it. Claude's steps are asked for by this page, so without this the
+ * work would just stop. */
+const MAKING_KEY = 'figforge.making';
+const readMaking = () => { try { return localStorage.getItem(MAKING_KEY); } catch { return null; } };
+function rememberMaking(name) {
+  try {
+    if (name) localStorage.setItem(MAKING_KEY, name);
+    else localStorage.removeItem(MAKING_KEY);
+  } catch { /* private window */ }
+}
+let leaving = false;   // a reload cuts off what's running: that isn't a failure
+window.addEventListener('beforeunload', () => { leaving = true; });
+
 /** Say what the graph should be: Claude makes it, the page moves to the talk
- *  on the side, and the graph appears as soon as it is first drawn. */
-async function runAiNew(idea) {
+ *  on the side, and the graph appears as soon as it is first drawn. With
+ *  `resuming`, the name of one already under way: just keep it going. */
+async function runAiNew(idea, resuming = null) {
   chatMessage('');
   setAiRunning(true);
   document.body.classList.remove('at-home');
@@ -4083,24 +4098,29 @@ async function runAiNew(idea) {
   $('chat-offer').hidden = true;
   $('chat-files').hidden = true;
   try {
-    const dec = new TextDecoder('utf-8', { fatal: true });
-    const files = aiFiles.map((f) => {
-      if (!f.binary) {
-        try { return { name: f.name, text: dec.decode(f.bytes) }; } catch { /* not UTF-8: send as bytes */ }
+    let name = resuming;
+    if (!name) {
+      const dec = new TextDecoder('utf-8', { fatal: true });
+      const files = aiFiles.map((f) => {
+        if (!f.binary) {
+          try { return { name: f.name, text: dec.decode(f.bytes) }; } catch { /* not UTF-8: send as bytes */ }
+        }
+        return { name: f.name, b64: bytesToBase64(f.bytes) };
+      });
+      const seed = aiFiles.length ? aiFiles[0].name.split('/').pop() : idea.trim().split(/\s+/).slice(0, 4).join(' ');
+      name = projectNameFrom(seed);
+      // A name can be taken by a try that never drew anything: pick another.
+      for (let n = 2; ; n++) {
+        try {
+          await aiPost('/api/assistant/start', { name, idea, files, skipped: aiSkipped });
+          break;
+        } catch (e) {
+          if (e.status !== 409 || n > 9) throw e;
+          name = `${projectNameFrom(seed)}_${Date.now() % 10000}`;
+        }
       }
-      return { name: f.name, b64: bytesToBase64(f.bytes) };
-    });
-    const seed = aiFiles.length ? aiFiles[0].name.split('/').pop() : idea.trim().split(/\s+/).slice(0, 4).join(' ');
-    let name = projectNameFrom(seed);
-    // A name can be taken by a try that never drew anything: pick another.
-    for (let n = 2; ; n++) {
-      try {
-        await aiPost('/api/assistant/start', { name, idea, files, skipped: aiSkipped });
-        break;
-      } catch (e) {
-        if (e.status !== 409 || n > 9) throw e;
-        name = `${projectNameFrom(seed)}_${Date.now() % 10000}`;
-      }
+      rememberMaking(name);
+      window.history.replaceState(null, '', '?project=' + encodeURIComponent(name));
     }
     const d = await aiSteps(name, log, async (step) => {
       if (step.created && !FIGURE) await openFigureHere(name, false);
@@ -4114,6 +4134,7 @@ async function runAiNew(idea) {
     // figure's 📖 button can still make them later.
     makeHowto(name).then(checkHowto).catch(() => {});
   } catch (e) {
+    if (leaving) return;
     if (FIGURE) {          // the graph is there; only the end of the work failed
       answer.remove();
       chatMessage(`Claude couldn't finish: ${e.message}`, 'err');
@@ -4121,13 +4142,17 @@ async function runAiNew(idea) {
       you.remove(); answer.remove();
       $('chat-input').value = idea;
       document.body.classList.add('at-home');
+      window.history.replaceState(null, '', location.pathname);
       offerFile = keptOffer;
       showAiFiles();
       chatMessage(`Claude couldn't make it: ${e.message}`, 'err');
     }
   } finally {
-    setAiRunning(false);
-    $('chat-input').focus();
+    if (!leaving) {
+      rememberMaking(null);
+      setAiRunning(false);
+      $('chat-input').focus();
+    }
   }
 }
 
@@ -4196,6 +4221,7 @@ async function runAiEdit(request, resume = false) {
     if (e.status === 409) aiChatGoesOn = false;    // that talk can't go on: the next try starts afresh
     try { await reloadFigure(); } catch { /* keep what's on screen */ }
   } finally {
+    if (!leaving) rememberMaking(null);
     setAiRunning(false);
   }
 }
@@ -4399,8 +4425,8 @@ async function pickProject() {
   const names = listing.figures || [];
   // Only worth a badge when running on this computer; online is the norm.
   $('storage-badge').hidden = (listing.storage || 'local') !== 'local';
-  const wanted = new URLSearchParams(location.search).get('project');
-  return { name: names.includes(wanted) ? wanted : null, names };
+  const wanted = new URLSearchParams(location.search).get('project') || readMaking();
+  return { name: names.includes(wanted) ? wanted : null, wanted, names };
 }
 
 /* ----------------------------------------------------------- accounts
@@ -4702,10 +4728,28 @@ async function startEditor() {
     const picked = await pickProject();
     fillProjectSelect(picked.names);
     if (picked.name) await openFigureHere(picked.name, true);
-    else showHome(picked.names);
+    else {
+      showHome(picked.names);
+      await resumeMaking(picked.wanted);
+    }
   } catch (e) {
     setStatus(e.message, 'err');
   }
+}
+
+/** A graph that Claude hadn't drawn yet when the page was closed: carry on. */
+async function resumeMaking(name) {
+  if (!name || !NAME_OK.test(name) || !assistantOn) return;
+  const r = await fetch(`/api/assistant/chat/${encodeURIComponent(name)}`).catch(() => null);
+  const d = r?.ok ? await r.json() : null;
+  if (!d?.running) {
+    rememberMaking(null);
+    window.history.replaceState(null, '', location.pathname);
+    return;
+  }
+  if (early) early.figure = early.history = null;   // asked for before it existed
+  rememberMaking(name);
+  await runAiNew(d.turns[0]?.text || '', name);
 }
 
 /** Show a figure on this page. loadTalk: also bring back its talk with Claude

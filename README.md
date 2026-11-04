@@ -34,14 +34,17 @@ draws it; the graph appears beside the talk and you drag anything on it. Only
 the chat, the graph, Undo and Save picture show. **More tools** brings back
 every menu and tool, and is remembered. Clicking something shows its settings.
 
-**Tokens** show at the bottom. You get 100 a month (`FIGFORGE_TOKENS_MONTHLY`).
-A new graph from Claude uses 50 (`FIGFORGE_TOKENS_NEW`), a change uses 10
-(`FIGFORGE_TOKENS_CHANGE`), and they're only taken when Claude actually drew or
-changed something. One spreadsheet dropped in is offered as a free graph, with
-no AI. Dragging, clicking and every other tool are free too. A person's
-`app_metadata.figforge_tokens` overrides the monthly number; admins and the local
-editor are counted but never stopped. The dollar limit
-(`FIGFORGE_AI_MONTHLY_USD`) stays as a safety net behind the tokens.
+**Tokens** show at the bottom. Everyone gets 100 free, once, when they first
+log in (`FIGFORGE_TOKENS_TRIAL`); they don't come back. Claude's real cost is
+taken from them as it works, at $0.005 of Claude per token (`FIGFORGE_TOKEN_USD`),
+so a simple graph uses about 40-50 and a bigger one more. A try that drew nothing
+still cost Claude's time, so it counts too. Running out part way stops Claude
+and keeps what's done. One spreadsheet dropped in is offered as a free graph, with
+no AI, and dragging, clicking and every other tool are free. A person's
+`app_metadata.figforge_tokens` replaces the 100; admins and the local editor are
+counted but never stopped. There is no way to buy more yet.
+
+A graph being made carries on after a reload, or when you come back later.
 
 - **Click** any label to select it, or **click a panel's plot area** to select
   its axes (for xlim/ylim/scale/aspect — see below). Pick either from the
