@@ -981,7 +981,6 @@ sub, sup { font-size: 0.75em; line-height: 0; }
 .legend-entry input { flex: 1; min-width: 0; }
 
 /* ------------------------------------------- the chat, start to finish */
-main { position: relative; }
 .chatside {
   flex: none; width: 340px; display: flex; flex-direction: column; gap: 8px; padding: 14px;
   background: var(--surface); border-right: 2px solid var(--line-soft); min-height: 0;
@@ -1070,17 +1069,25 @@ body.at-home .home-rail {
 .home-mine p { margin: 0 6px; font-size: 13px; color: var(--ink-soft); }
 
 /* Simple (until "More tools"): the chat, the graph, Undo and Save picture.
-   Picking something brings its settings over the chat, so the graph never
-   moves under the pointer. */
+   The chat is never covered. Picking something opens its settings on the right,
+   and they stay open until closed, so the graph resizes once, not on every click. */
 body:not(.simple) .fig-name { display: none; }
 body.simple #project-select, body.simple .menubar:not(.save-bar), body.simple .toolstrip,
 body.simple .dock, body.simple #btn-redo, body.simple #sb-picked, body.simple #sb-xy,
 body.simple #sb-size, body.simple .zoomctl, body.simple #sb-list, body.simple #series-note { display: none !important; }
-body.simple .sidebar { display: none; position: absolute; left: 0; top: 0; bottom: 0; width: 340px; z-index: 6; border-left: none; border-right: 2px solid var(--line-soft); }
-body.simple.picked .sidebar { display: flex; }
+body.simple .sidebar { display: none; }
+body.simple.side-open .sidebar { display: flex; }
+body.simple #insp-empty > :not(.empty) { display: none !important; }
+.panel h2:has(#btn-side-close) { display: flex; align-items: center; justify-content: space-between; }
+#btn-side-close { font-size: 22px; line-height: 1; padding: 0 6px; }
+body:not(.simple) #btn-side-close { display: none; }
 body.no-figure .save-bar { display: none !important; }
 
 /* Narrower windows: keep the top bar on one line. */
+@media (max-width: 1280px) {
+  .chatside { width: 290px; }
+  .sidebar { width: 280px; }
+}
 @media (max-width: 1440px) {
   #account-name { display: none; }
   #btn-account { padding: 0 4px; }

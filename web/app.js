@@ -857,9 +857,30 @@ function common(get) {
   return vals.every((v) => v === vals[0]) ? vals[0] : undefined;
 }
 
+/* The settings panel on the right (simple view). Opening it makes the graph
+ * re-fit, which must not happen under the pointer in the middle of a drag, so
+ * a pick made with the button still down waits for the button to come up. */
+let pointerHeld = false, sideWaiting = false;
+function openSide() {
+  if (pointerHeld) sideWaiting = true;
+  else document.body.classList.add('side-open');
+}
+window.addEventListener('pointerdown', () => { pointerHeld = true; }, true);
+for (const type of ['pointerup', 'pointercancel']) {
+  window.addEventListener(type, () => {
+    pointerHeld = false;
+    if (sideWaiting && selected().length) openSide();
+    sideWaiting = false;
+  }, true);
+}
+$('btn-side-close').onclick = () => {
+  setSelection([]);
+  document.body.classList.remove('side-open');
+};
+
 function refreshInspector() {
   const sel = selected();
-  document.body.classList.toggle('picked', sel.length > 0);
+  if (sel.length) openSide();
   $('insp-empty').hidden = sel.length > 0;
   if (!sel.length) refreshFigureFields();
   $('insp-body').hidden = sel.length === 0;

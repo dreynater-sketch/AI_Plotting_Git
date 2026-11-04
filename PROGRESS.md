@@ -373,8 +373,9 @@ figure → saved-code sync; a phone layout; photo-to-data-points.
 - The start screen is now a chat, because the point is an ordinary AI that lets you move the
   graph by hand. The chat moves to the side once there is a graph, on the same page, and the
   graph appears as soon as Claude first draws it. The two AI pop-ups are gone.
-- Tools hide until "More tools". Picking something puts its settings over the chat rather than
-  opening a new column: a column would re-fit the figure under the pointer in the middle of a drag.
+- Tools hide until "More tools". Settings first went over the chat, to keep the figure still, but
+  that hid the chat with no clear way back. They now open on the right, once the mouse button is up,
+  and stay open until closed, so the figure re-fits once rather than on every click.
 - Tokens were set prices for one day, then changed to Claude's real cost at the user's request:
   100 free, once, no top-ups; 1 token = $0.005 of Claude (FIGFORGE_TOKEN_USD), rounded up per
   request. At that rate the trial costs $0.50 a person. The plan is to sell tokens at 10x or more

@@ -143,17 +143,42 @@ try:
               "with a graph: Undo, Save picture and the chat stay")
         check(not any(shown(pg, s) for s in ("#menu-file", "#tool-label", "#zoom", "#sb-list", "#inspector")),
               "…the rest is hidden")
+        chat0 = pg.locator("#chatside").bounding_box()
         box = pg.locator("#canvas svg").bounding_box()
-        # Pick the first thing the list offers, as a click on the figure would.
-        pg.evaluate("document.querySelector('#element-list [data-id], #element-list button, #element-list li')?.click()")
-        pg.wait_for_function("document.body.classList.contains('picked')")
-        check(shown(pg, "#inspector") and pg.locator("#insp-body").is_visible(), "picking something brings its settings")
+        # A real press on the line, at its point (1, 3), and a drag.
+        at = pg.evaluate("""(() => { const g = Object.values(geometry.panels)[0], r = svgEl.getBoundingClientRect(), k = r.width / geometry.width;
+              return [r.left + (g.bbox[0] + (1 - g.xlim[0]) / (g.xlim[1] - g.xlim[0]) * g.bbox[2]) * k,
+                      r.top + (g.bbox[1] + (1 - (3 - g.ylim[0]) / (g.ylim[1] - g.ylim[0])) * g.bbox[3]) * k]; })()""")
+        pg.mouse.move(*at); pg.mouse.down(); pg.mouse.move(at[0] + 15, at[1] + 10, steps=3)
+        pg.wait_for_timeout(200)
+        check(pg.locator("#canvas svg").bounding_box() == box and pg.is_hidden("#inspector"),
+              "with the button held down, the graph doesn't move or change size")
+        pg.mouse.up()
+        pg.wait_for_selector("#inspector", state="visible")
+        check(pg.evaluate("selected().length") == 1 and pg.locator("#insp-body").is_visible(), "letting go shows its settings")
+        pg.wait_for_timeout(300)
         side, chat = pg.locator(".sidebar").bounding_box(), pg.locator("#chatside").bounding_box()
-        check(side["x"] == chat["x"] and side["width"] == chat["width"], "…over the chat")
-        check(pg.locator("#canvas svg").bounding_box() == box, "…and the graph doesn't move or change size")
+        wrap = pg.locator("#canvas-wrap").bounding_box()
+        check(chat == chat0 and shown(pg, "#chat-input") and shown(pg, "#chat-send"), "the chat stays where it was, not covered")
+        check(side["x"] >= wrap["x"] + wrap["width"] - 1 and side["x"] >= chat["x"] + chat["width"],
+              "…the settings are on the right, beside the graph")
+        box2 = pg.locator("#canvas svg").bounding_box()
+        check(box2["x"] + box2["width"] <= side["x"] + 1, "…and the whole graph still shows")
         pg.screenshot(path=S + "/chat_picked.png")
+        pg.fill("#chat-input", "you can type here while it's open")
+        pg.fill("#chat-input", "")
         pg.keyboard.press("Escape")
-        check(pg.is_hidden("#inspector") and shown(pg, "#chat-input"), "letting go brings the chat back")
+        pg.wait_for_timeout(300)
+        check(pg.evaluate("selected().length") == 0 and shown(pg, "#inspector") and pg.locator("#canvas svg").bounding_box() == box2,
+              "letting go of it keeps the panel, so the graph doesn't jump")
+        check(not pg.locator("#insp-empty .subhead").first.is_visible(), "…with just a hint in it")
+        pg.evaluate("document.querySelector('#element-list [data-id], #element-list button, #element-list li')?.click()")
+        pg.wait_for_timeout(300)
+        check(pg.locator("#canvas svg").bounding_box() == box2, "picking again doesn't move the graph either")
+        pg.click("#btn-side-close")
+        pg.wait_for_timeout(300)
+        check(pg.is_hidden("#inspector") and pg.evaluate("selected().length") == 0
+              and pg.locator("#canvas svg").bounding_box()["width"] > box2["width"], "× closes it and the graph gets its room back")
         pg.click("#btn-more")
         check(all(shown(pg, s) for s in ("#menu-file", "#tool-label", "#zoom", "#inspector")), "More tools shows everything")
         pg.screenshot(path=S + "/chat_more.png")
