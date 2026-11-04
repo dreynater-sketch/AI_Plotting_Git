@@ -46,7 +46,8 @@ try:
         pg.fill(f + " [name=email]", U["email"]); pg.fill(f + " [name=password]", U["password"])
         pg.click(f + " button[type=submit]")
         pg.wait_for_function("document.getElementById('status').dataset.ready === '1'", timeout=90000)
-        check("100 tokens" in pg.inner_text("#sb-tokens"), "starts with the free 100")
+        check(pg.inner_text("#sb-tokens").endswith("No limit"), "the admin has no limit")
+        spent = lambda: json.loads(store.scoped(uid).read(".usage/tokens.json") or b'{"spent": 0}')["spent"]
 
         pg.fill("#chat-input", "A sine wave from 0 to 10, with the first peak labelled")
         pg.click("#chat-send")
@@ -64,11 +65,11 @@ try:
         d = ctx.request.get(f"{H}/api/assistant/chat/{name}").json()
         check(not d["running"] and d["turns"][-1]["role"] == "assistant", "the talk finished with an answer")
         cost = d["turns"][-1].get("cost_usd", 0)
-        left = ctx.request.get(H + "/api/auth/me").json()["tokens"]["left"]
-        print(f"   ${cost}, {left} tokens left, answer: {d['turns'][-1]['text'][:80]}", flush=True)
+        used = spent()
+        print(f"   ${cost}, {used:.1f} tokens used, answer: {d['turns'][-1]['text'][:80]}", flush=True)
         # A lost step would be paid for without being counted in the session,
         # so compare what was charged with what the session says it cost.
-        check(abs((100 - left) - cost / 0.005) <= 2, f"tokens match the session's cost ({100 - left} vs {cost / 0.005:.1f})")
+        check(abs(used - cost / 0.005) <= 2, f"tokens match the session's cost ({used:.1f} vs {cost / 0.005:.1f})")
 
         # A follow-up changes earlier messages (the first turn's files are gone):
         # Opus 5.5 would refuse that if the old thinking were sent as it was.
@@ -78,7 +79,7 @@ try:
         pg.wait_for_function(f"document.querySelectorAll('#ai-chat .chat-msg').length === {n + 2} && !aiRunning", timeout=240000)
         last = pg.locator("#ai-chat .chat-msg").last.inner_text()
         check(pg.inner_text("#chat-msg") == "" and "Used" in last, f"a follow-up message works ({last[:70]!r})")
-        check(ctx.request.get(H + "/api/auth/me").json()["tokens"]["left"] < left, "...and takes its tokens")
+        check(spent() > used, "...and counts its tokens")
         check(not errs, f"no page errors {errs}")
         br.close()
 finally:

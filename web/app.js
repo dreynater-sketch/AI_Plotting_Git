@@ -3912,7 +3912,7 @@ function showAiFiles() {
   $('chat-offer').hidden = !offerFile;
   if (offerFile) {
     $('chat-offer-text').textContent = `I can draw a graph from ${offerFile.name} for free. It uses no tokens. Want that?`;
-    $('chat-offer-or').textContent = assistantOn && tokens
+    $('chat-offer-or').textContent = assistantOn && tokens && (tokens.unlimited || tokens.left >= tokens.min_new)
       ? `Or tell me below what you want and I'll draw it for you. That uses about ${tokens.about_new} tokens.` : '';
   }
 }
@@ -3928,11 +3928,11 @@ let tokens = null;   // {left, about_new, min_new, min_change, unlimited}
 function showTokens() {
   if (!tokens) return;
   const el = $('sb-tokens');
-  el.textContent = `🪙 ${tokens.left} token${tokens.left === 1 ? '' : 's'}`;
+  el.textContent = tokens.unlimited ? '🪙 No limit' : `🪙 ${tokens.left} token${tokens.left === 1 ? '' : 's'}`;
   el.classList.toggle('low', !tokens.unlimited && tokens.left < tokens.min_change);
   el.title = `Claude uses tokens as it works. A simple graph uses about ${tokens.about_new}, bigger ones more. ` +
     'Graphs from a spreadsheet, dragging and clicking are free. ' +
-    (tokens.unlimited ? 'You have no limit.' : 'Everyone starts with a free trial of 100.');
+    (tokens.unlimited ? 'You have no limit.' : 'Buying tokens is coming soon.');
 }
 
 async function aiPost(url, body) {
@@ -4020,23 +4020,23 @@ function refreshChat() {
   const short = tokens && !tokens.unlimited && tokens.left < (FIGURE ? tokens.min_change : tokens.min_new);
   const text = $('chat-input').value.trim();
   const ai = assistantOn;
-  $('chat-input').disabled = !ai || aiRunning;
-  $('chat-input').placeholder = !ai ? (FIGURE ? 'Claude isn\'t on here' : 'Drop in a spreadsheet to make a graph')
+  $('chat-input').disabled = !ai || aiRunning || !!short;
+  $('chat-input').placeholder = !ai || short ? (FIGURE ? 'Claude needs tokens' : 'Drop in a spreadsheet to make a graph')
     : FIGURE ? ($('ai-chat').children.length ? 'Anything else?' : 'What should change?')
     : aiFiles.length ? 'What do you want from your data?' : 'A graph of…';
   $('chat-send').hidden = !ai;
   $('chat-send').disabled = !ai || aiRunning || !text || short;
   $('chat-attach').hidden = aiRunning;
   $('ai-new-talk').hidden = !FIGURE || aiRunning || !$('ai-chat').children.length;
-  $('chat-hello-text').textContent = ai
+  $('chat-hello-text').textContent = ai && !short
     ? 'Say it in your own words, or drop in your data. Then drag anything on the graph to move it.'
     : 'Drop in a spreadsheet and I\'ll draw it. Then drag anything on the graph to move it.';
-  $('home-ideas').hidden = !ai;
-  $('ai-edit-ideas').hidden = !ai || $('ai-chat').children.length > 0;
+  $('home-ideas').hidden = !ai || !!short;
+  $('ai-edit-ideas').hidden = !ai || !!short || $('ai-chat').children.length > 0;
   const el = $('chat-price');
   el.classList.toggle('err', !!short);
   el.textContent = !tokens || !ai ? ''
-    : short ? `You have ${tokens.left} tokens left, which isn't enough for this. Making a graph from a spreadsheet is always free.`
+    : short ? `Claude needs tokens, and you have ${tokens.left}. Buying them is coming soon. Making a graph from a spreadsheet is always free.`
     : FIGURE ? 'Changes use tokens too, more for big ones. Dragging and clicking are free.'
     : `A simple graph uses about ${tokens.about_new} tokens, bigger ones more. A spreadsheet on its own can be drawn for free.`;
 }

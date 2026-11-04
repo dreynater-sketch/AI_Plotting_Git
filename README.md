@@ -34,15 +34,15 @@ draws it; the graph appears beside the talk and you drag anything on it. Only
 the chat, the graph, Undo and Save picture show. **More tools** brings back
 every menu and tool, and is remembered. Clicking something shows its settings.
 
-**Tokens** show at the bottom. Everyone gets 100 free, once, when they first
-log in (`FIGFORGE_TOKENS_TRIAL`); they don't come back. Claude's real cost is
-taken from them as it works, at $0.005 of Claude per token (`FIGFORGE_TOKEN_USD`),
-so a simple graph uses about 20-40 and a bigger one more. A try that drew nothing
-still cost Claude's time, so it counts too. Running out part way stops Claude
-and keeps what's done. One spreadsheet dropped in is offered as a free graph, with
-no AI, and dragging, clicking and every other tool are free. A person's
-`app_metadata.figforge_tokens` replaces the 100; admins and the local editor are
-counted but never stopped. There is no way to buy more yet.
+**Tokens** show at the bottom. New accounts start with none for now, and buying
+them isn't built yet, so only people given some can ask Claude
+(`app_metadata.figforge_tokens`, or `FIGFORGE_TOKENS_TRIAL` for everyone). Claude's
+real cost is taken from them as it works, at $0.005 of Claude per token
+(`FIGFORGE_TOKEN_USD`), so a simple graph uses about 20-40 and a bigger one more.
+A try that drew nothing still cost Claude's time, so it counts too. Running out
+part way stops Claude and keeps what's done. One spreadsheet dropped in is offered
+as a free graph, with no AI, and dragging, clicking and every other tool are free.
+Admins and the local editor have no limit.
 
 A graph being made carries on after a reload, or when you come back later.
 

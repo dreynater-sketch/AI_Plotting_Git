@@ -400,3 +400,9 @@ figure → saved-code sync; a phone layout; photo-to-data-points.
   prefix_mismatch_behavior "drop_block" instead. Only old reasoning is lost; Claude gets the figure
   again with every message. Those follow-ups miss the cache from the edited message on, as before.
 
+## No free tokens for now (2026-11-04)
+- The user removed the free trial: FIGFORGE_TOKENS_TRIAL now defaults to 0, so until Stripe is in
+  only admins, the local editor and anyone given app_metadata.figforge_tokens can ask Claude.
+- With too few tokens the chat box is switched off and only the free spreadsheet graph is offered.
+  Admins and local see "No limit" rather than a count.
+

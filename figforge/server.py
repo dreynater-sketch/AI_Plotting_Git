@@ -89,7 +89,7 @@ NAME_RE = re.compile(r"^[A-Za-z0-9_-]+( [A-Za-z0-9_-]+)*$")
 ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")  # ids inside a figure (curves, labels)
 HISTORY_MAX = 100  # per stack; matches the editor's HISTORY_MAX
 OPEN_SIGNUP = os.environ.get("FIGFORGE_OPEN_SIGNUP") == "1"
-TOKENS_TRIAL = int(os.environ.get("FIGFORGE_TOKENS_TRIAL", "100"))  # free, once, for everyone
+TOKENS_TRIAL = int(os.environ.get("FIGFORGE_TOKENS_TRIAL", "0"))    # free tokens for a new account
 TOKEN_USD = float(os.environ.get("FIGFORGE_TOKEN_USD", "0.005"))    # what one token buys of Claude
 TOKENS_ABOUT_NEW = 30      # what a simple graph uses, to tell people up front
 TOKENS_MIN_NEW = 25        # too little to start: it would stop before there's a graph
@@ -899,10 +899,11 @@ class Handler(BaseHTTPRequestHandler):
         cap = own if isinstance(own, (int, float)) else float(os.environ.get("FIGFORGE_AI_MONTHLY_USD", "5"))
         return used, float(cap)
 
-    # Tokens are what people see. Everyone gets a free trial, once, and Claude's
-    # real cost is taken from it as it works, so a token is worth TOKEN_USD of
-    # Claude. Selling them for more than that is up to the payment side, not
-    # this count. The dollar budget above stays as the safety net behind them.
+    # Tokens are what people see. Claude's real cost is taken from them as it
+    # works, so a token is worth TOKEN_USD of Claude. Nobody gets any free for
+    # now, and they can't be bought yet: app_metadata.figforge_tokens gives some.
+    # Selling them for more than that is up to the payment side, not this count.
+    # The dollar budget above stays as the safety net behind them.
     # Admins and the local editor are counted but never stopped.
     def _usage_store(self, user=None):
         if AUTH is None:
@@ -933,7 +934,7 @@ class Handler(BaseHTTPRequestHandler):
         t = self._tokens()
         if t["unlimited"] or t["left"] >= least:
             return True
-        self._error(402, f"You have {t['left']} tokens left, which isn't enough for this. "
+        self._error(402, f"Claude needs tokens, and you have {t['left']}. Buying them is coming soon. "
                          "Making a graph from a spreadsheet is always free.")
         return False
 

@@ -1,5 +1,5 @@
 """The start screen is a chat: ask for a graph, or drop a spreadsheet and get a
-free one; a free trial of tokens taken at what Claude costs; a reload carries on; only the simple tools until "More tools".
+free one; tokens taken at what Claude costs; a reload carries on; only the simple tools until "More tools".
 Claude is faked here (figforge.assistant start/step), so no money is spent;
 the server, its token counting and the page are real."""
 import os as _os
@@ -83,7 +83,9 @@ assistant.configured = lambda: True
 assistant.start, assistant.start_edit, assistant.step = fake_start, fake_edit, fake_step
 assistant.cleanup = lambda state: None
 assistant.continue_chat = fake_continue
-limited = {"on": False}
+real_default = server.TOKENS_TRIAL
+limited = {"on": True}       # a member, not the admin
+server.TOKENS_TRIAL = 100
 real_tokens = server.Handler._tokens
 server.Handler._tokens = lambda self, user=None: {**real_tokens(self, user), "unlimited": not limited["on"]}
 
@@ -230,7 +232,6 @@ try:
         check(json.load(open(USAGE))["spent"] == 80, "the trial isn't by the month: one count for good")
 
         # ------------------------------------------------------------ out of tokens
-        limited["on"] = True
         pg.goto(B + "/?project=" + name.replace(" ", "%20")); pg.wait_for_function(ready)
         server.TOKENS_TRIAL = 85     # 80 used: 5 left, just enough to start
         pg.reload(); pg.wait_for_function(ready); pg.wait_for_function("!aiRunning")
@@ -240,8 +241,8 @@ try:
         check("ran out of tokens" in last and pg.evaluate("spec.panels[0].title.text") == "Changed",
               f"running out part way: stops and keeps what's done ({last!r})")
         check("0 tokens" in pg.inner_text("#sb-tokens"), f"…at 0 ({pg.inner_text('#sb-tokens')})")
-        pg.fill("#chat-input", "one more")
-        check(pg.is_disabled("#chat-send") and "0 tokens left" in pg.inner_text("#chat-price"), "with none left: says so, can't send")
+        check(pg.is_disabled("#chat-input") and pg.is_disabled("#chat-send") and "you have 0" in pg.inner_text("#chat-price"),
+              "with none left: says so, can't type or send")
         st = pg.evaluate("""async () => { const r = await fetch('/api/assistant/edit/' + encodeURIComponent(FIGURE),
               {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({request:'x'})});
               return [r.status, (await r.json()).error]; }""")
@@ -250,6 +251,19 @@ try:
         pg.set_input_files("#ai-files", csv_path)
         pg.wait_for_selector("#chat-offer:not([hidden])")
         check(shown(pg, "#offer-free"), "the free graph is still on offer with no tokens")
+        check("tokens" not in pg.inner_text("#chat-offer-or") and "spreadsheet" in pg.inner_text("#chat-hello")
+              and not shown(pg, "#home-ideas") and pg.is_disabled("#chat-input"),
+              "the start screen only offers what works with no tokens")
+        pg.screenshot(path=S + "/chat_no_tokens.png")
+
+        # ------------------------------------------- nobody gets any free by default
+        check(real_default == 0, f"a new account starts with none ({real_default})")
+
+        # ----------------------------------------------- the admin is never stopped
+        limited["on"] = False
+        pg.reload(); pg.wait_for_function(ready)
+        check(pg.inner_text("#sb-tokens").endswith("No limit") and not pg.is_disabled("#chat-input"),
+              "no limit: says so, and the chat works at any count")
 
         check(not errs, f"no page errors {errs}")
         br.close()
