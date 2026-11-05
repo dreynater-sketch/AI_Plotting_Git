@@ -26,6 +26,7 @@ it) or "polar" (x is the angle in radians, y the distance from the middle);
 without one it is an ordinary flat plot.
 """
 
+import math
 import numpy as np
 
 LINE_STYLE = {"color", "lw", "linewidth", "ls", "linestyle", "marker", "ms",
@@ -188,6 +189,18 @@ KINDS = {
 }
 
 PROJECTIONS = ("3d", "polar")
+
+
+def end_on_axis(view):
+    """"x", "y" or "z" when a 3-D view looks straight along that axis (a CAD
+    program's front, side or top view), else None."""
+    elev = math.radians(view.get("elev", VIEW_ELEV))
+    azim = math.radians(view.get("azim", VIEW_AZIM))
+    eye = (math.cos(elev) * math.cos(azim), math.cos(elev) * math.sin(azim), math.sin(elev))
+    for name, e in zip("xyz", eye):
+        if abs(e) > 0.999:
+            return name
+    return None
 
 
 def projection(panel):

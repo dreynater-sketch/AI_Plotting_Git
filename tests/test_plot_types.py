@@ -16,6 +16,8 @@ import numpy as np
 from figforge import codegen, codesync, csvimport, layers, ops, render
 from figforge.project import Figure, LocalStore
 
+S = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_out")
+os.makedirs(S, exist_ok=True)
 fails = []
 def check(c, m): print(("PASS " if c else "FAIL ") + m); c or fails.append(m)
 
@@ -154,14 +156,16 @@ try:
 
         box = pg.locator("#t_a_l0").bounding_box()
         # the surface's middle (any painted part of it picks it)
-        pts = ev("[...document.querySelectorAll('#t_a_l0 path')].slice(40, 41).map((p) => {"
-                 " const r = p.getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; })")
+        pts = ev("[...document.querySelectorAll('#t_a_l0 path')].map((p) => {"
+                 " const r = p.getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; })"
+                 ".filter(([x, y]) => !document.elementFromPoint(x, y)?.closest('.triad')).slice(40, 41)")
         pg.mouse.click(*(pts[0] if pts else (box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)))
         check(ev("selection[0]") == "a_l0" and ev("kindLabel('series', spec.panels[0].series[0])") == "3-D surface",
               f"clicking the 3-D surface picks it ({ev('selection')})")
 
-        # an empty corner of the 3-D plot: a click picks the plot, a drag turns it
-        x, y = at(0.04, 0.96)
+        # an empty spot of the 3-D plot: a click picks the plot, a drag turns it
+        # (the bottom left corner holds the x / y / z marker)
+        x, y = at(0.03, 0.5)
         pg.mouse.click(x, y)
         check(ev("selection[0]") == "panel:a" and pg.locator("#axes-3d-fields").is_visible()
               and pg.input_value("#f-turn") == "-60" and pg.input_value("#f-tilt") == "25",
@@ -169,7 +173,7 @@ try:
         check(not pg.locator("#btn-add-span").is_visible() and not pg.locator("#f-aspect").is_visible(),
               "…flat-only settings are hidden")
         pg.wait_for_timeout(500)            # the figure re-fits beside the opened settings
-        x, y = at(0.04, 0.96)
+        x, y = at(0.5, 0.06)
         posts = []
         pg.on("request", lambda r: posts.append(1) if "/api/figure" in r.url and r.method == "POST" else None)
         pg.mouse.move(x, y); pg.mouse.down(); pg.mouse.move(x + 20, y - 10, steps=3)
@@ -179,12 +183,39 @@ try:
               "while turning, a quick wire picture follows the mouse (nothing redrawn on the server yet)")
         pg.mouse.up(); settle()
         pg.wait_for_timeout(300)
+        pg.wait_for_timeout(300)
         check(not ev("!!document.getElementById('turn-preview')") and len(posts) == 1,
-              "letting go draws the real picture once, replacing the wire one")
+              "letting go draws the real picture once, which fades in over the quick one")
         v = disk()["panels"][0].get("view")
         check(v == {"elev": 15, "azim": -80}, f"dragging turns it and saves the view ({v})")
         pg.click("#btn-undo"); settle()
         check(disk()["panels"][0].get("view") in (None, {"elev": 25, "azim": -60}), "Undo turns it back")
+
+        # --- the x / y / z marker in the corner, as in CAD programs
+        tri = pg.locator(".triad").bounding_box(); box = pg.locator("#canvas svg").bounding_box()
+        g = ev("geometry.panels.a.bbox"); kz = box["width"] / ev("geometry.width")
+        left, top, w, h = box["x"] + g[0] * kz, box["y"] + g[1] * kz, g[2] * kz, g[3] * kz
+        check(tri and tri["x"] >= left - 1 and tri["x"] + tri["width"] < left + w * 0.5
+              and tri["y"] + tri["height"] <= top + h + 1 and tri["y"] + tri["height"] > top + h * 0.9
+              and tri["width"] <= max(44, 0.3 * min(w, h)) + 1
+              and [pg.inner_text(f'.triad-axis[data-axis="{a}"]') for a in "xyz"] == ["x", "y", "z"],
+              f"a 3-D plot has an x / y / z marker, bottom left, small in a small plot, with the axes named ({tri})")
+        ev("setZoom(200, true)"); pg.wait_for_timeout(200)
+        posts.clear()
+        pg.click('.triad-axis[data-axis="z"]')
+        pg.wait_for_timeout(150)
+        check(ev("!!document.getElementById('turn-preview')") and not posts, "clicking z swings it round smoothly first")
+        pg.wait_for_function("!swing"); settle(); pg.wait_for_timeout(300)
+        check(disk()["panels"][0].get("view") == {"elev": 90, "azim": -90} and len(posts) == 1,
+              f"…to look straight down: the flat x-y map ({disk()['panels'][0].get('view')})")
+        pg.screenshot(path=S + "/plot3d_top.png")
+        pg.click('.triad-axis[data-axis="y"]'); pg.wait_for_function("!swing"); settle(); pg.wait_for_timeout(300)
+        check(disk()["panels"][0].get("view") == {"elev": 0, "azim": -90}, "y: the x-z side")
+        pg.click(".triad-home"); pg.wait_for_function("!swing"); settle(); pg.wait_for_timeout(300)
+        check(disk()["panels"][0].get("view") == {"elev": 25, "azim": -60}, "the middle dot: back to the usual view")
+        pg.click("#btn-undo"); settle()
+        check(disk()["panels"][0].get("view") == {"elev": 0, "azim": -90}, "each swing is one Undo")
+        ev("fit()"); pg.wait_for_timeout(200)
 
         ev("setSelection(['panel:a'])")
         pg.fill("#f-turn", "30"); pg.press("#f-turn", "Enter"); settle()

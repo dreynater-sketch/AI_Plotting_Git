@@ -407,3 +407,17 @@ figure → saved-code sync; a phone layout; photo-to-data-points.
 - With too few tokens the chat box is switched off and only the free spreadsheet graph is offered.
   Admins and local see "No limit" rather than a count.
 
+## Smooth 3-D turning and a CAD-style x / y / z marker (2026-11-05)
+- matplotlib takes about 0.6 s per 3-D picture (1.1 MB of SVG for the critical surface), too slow
+  to follow the mouse. The old quick picture was a white box over the plot with wire lines only, so
+  the numbers, names and legend vanished while turning and came back on letting go.
+- Now the page draws the whole plot itself while turning: back walls, grid, filled surfaces from
+  back to front, the axes on matplotlib's own edges (axis3d's highs / juggled rule) with the real
+  tick numbers and names (geometry ticks / labels), and the box corners the server measured
+  (geometry corners), so it starts exactly where the real one is. The moving parts of the real
+  picture are hidden underneath; title, legend and words stay. The real picture fades in after.
+- Bottom left of each 3-D plot, an x / y / z marker that turns with it. Clicking an axis swings the
+  plot round (0.45 s) to look straight along it: z gives the flat x-y map. The dot goes back to
+  the usual view. Looking straight along an axis draws flat (proj_type ortho) and leaves that
+  axis out, in the editor and in figure.py (layers.end_on_axis).
+

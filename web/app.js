@@ -415,7 +415,7 @@ function clientToSvg(evt) {
 
 let shownSize = null;   // the figure's size in pixels, as last shown
 function applySvg(svgText) {
-  if (!turn) removeTurnPreview();      // the real picture replaces the quick one
+  if (!turn && !swing) removeTurnPreview(true);   // the real picture fades in over the quick one
   canvas.innerHTML = svgText;
   svgEl = canvas.querySelector('svg');
   refreshSizeLabel();
@@ -442,12 +442,14 @@ function applySvg(svgText) {
   }
   reconcilePreviews();
   drawOutlines();
+  drawTriads();
 }
 
 function applyZoom() {
   if (!svgEl || !geometry) return;
   svgEl.style.width = (geometry.width * zoom / 100) + 'px';
   svgEl.style.height = (geometry.height * zoom / 100) + 'px';
+  canvas.querySelectorAll('.triad').forEach(placeTriad);
 }
 
 function groupFor(id) {
@@ -1118,38 +1120,166 @@ function refreshAxesInspector() {
 }
 
 /* ---------------------------------------------- turning a 3-D plot smoothly
- * While an empty spot of a 3-D plot is dragged, a quick wire picture of its
- * curves is drawn right here in the browser at every mouse move, over the
- * plot; the real matplotlib picture is drawn once, on letting go, and
- * replaces it. The wire picture uses the same view angles as matplotlib
- * (looking from azimuth / elevation, z up, the box 4 : 4 : 3). */
-let turnMesh = null;                 // {pid, series} from /api/mesh
+ * matplotlib takes over half a second to draw a 3-D plot, too slow to follow
+ * the mouse. So while one is turned, this page draws its own picture of it at
+ * every move: the grey back walls, the axes with their numbers and names, and
+ * the surfaces filled in their colours, from the same view angles matplotlib
+ * uses (looking from azimuth / elevation, z up, the box 4 : 4 : 3). The real
+ * picture is drawn once, on letting go, and fades in over this one. The
+ * numbers and their places come from the server (geometry ticks), so they
+ * match the real picture. */
+const meshes = new Map();            // pid -> {key, series} from /api/mesh
 
-async function loadTurnMesh(pid) {
-  turnMesh = { pid, series: null };
-  try {
-    const r = await fetch(`/api/mesh/${FIGURE}/${pid}`);
-    if (r.ok && turnMesh?.pid === pid) {
-      turnMesh.series = (await r.json()).series;
-      if (turn?.moved) drawTurnPreview(pid);
-    }
-  } catch { /* the wire picture is a nicety; the real one still comes */ }
+/** Fetch a 3-D panel's thinned-out data once per change of its data, so a
+ *  turn starts with everything already there. */
+function ensureMesh(pid) {
+  const p = panelById(pid);
+  if (!p || !FIGURE) return;
+  const key = `${FIGURE}|${JSON.stringify(p.series)}|${JSON.stringify(spec.arrays_rev ?? '')}`;
+  const have = meshes.get(pid);
+  if (have && have.key === key) return;
+  const entry = { key, series: null };
+  meshes.set(pid, entry);
+  fetch(`/api/mesh/${encodeURIComponent(FIGURE)}/${pid}`)
+    .then((r) => (r.ok ? r.json() : null))
+    .then((d) => {
+      if (!d || meshes.get(pid) !== entry) return;
+      entry.series = d.series;
+      if (turn?.pid === pid && turn.moved) drawTurnPreview(pid);
+    })
+    .catch(() => { /* the quick picture is a nicety; the real one still comes */ });
 }
 
-function removeTurnPreview() {
-  document.getElementById('turn-preview')?.remove();
+function removeTurnPreview(fade = false) {
+  const cv = document.getElementById('turn-preview');
+  if (!cv) return;
+  if (!fade) { cv.remove(); showRealPlot(); return; }
+  cv.id = '';                        // a new turn starts a new one
+  cv.style.transition = 'opacity 0.18s ease-out';
+  cv.style.opacity = '0';
+  setTimeout(() => cv.remove(), 200);
 }
 
-const VIRIDIS = ['#440154', '#3b528b', '#21918c', '#5ec962', '#fde725'];
-function viridisAt(f) {
-  const i = Math.max(0, Math.min(VIRIDIS.length - 1.001, f * (VIRIDIS.length - 1)));
-  const [a, b] = [VIRIDIS[Math.floor(i)], VIRIDIS[Math.floor(i) + 1]];
+/* A few stops along each colour map, enough for a quick picture. */
+const CMAPS = {
+  viridis: ['#440154', '#3b528b', '#21918c', '#5ec962', '#fde725'],
+  plasma: ['#0d0887', '#7e03a8', '#cc4778', '#f89540', '#f0f921'],
+  inferno: ['#000004', '#57106e', '#bc3754', '#f98e09', '#fcffa4'],
+  magma: ['#000004', '#51127c', '#b73779', '#fc8961', '#fcfdbf'],
+  cividis: ['#00224e', '#434e6c', '#7d7c78', '#bcaf6f', '#fee838'],
+  turbo: ['#30123b', '#28bceb', '#a4fc3c', '#fb7e21', '#7a0403'],
+  coolwarm: ['#3b4cc0', '#8db0fe', '#dddddd', '#f49a7b', '#b40426'],
+  RdBu_r: ['#053061', '#6aaed6', '#f7f7f7', '#f4a582', '#67001f'],
+  seismic: ['#00004c', '#0000ff', '#ffffff', '#ff0000', '#7f0000'],
+  Greys: ['#ffffff', '#d9d9d9', '#969696', '#525252', '#000000'],
+  Blues: ['#f7fbff', '#c6dbef', '#6baed6', '#2171b5', '#08306b'],
+  hot: ['#0b0000', '#be0000', '#ff7c00', '#ffff40', '#ffffff'],
+};
+function cmapAt(name, f) {
+  const stops = CMAPS[name] || CMAPS.viridis;
+  const i = Math.max(0, Math.min(stops.length - 1.001, f * (stops.length - 1)));
+  const [a, b] = [stops[Math.floor(i)], stops[Math.floor(i) + 1]];
   const t = i - Math.floor(i);
   const mix = (k) => Math.round(parseInt(a.substr(k, 2), 16) * (1 - t) + parseInt(b.substr(k, 2), 16) * t);
   return `rgb(${mix(1)},${mix(3)},${mix(5)})`;
 }
 
-function drawTurnPreview(pid) {
+/** matplotlib's math text as plain words for the canvas: 10^{3} -> 10³. */
+const SUPS = { 0: '⁰', 1: '¹', 2: '²', 3: '³', 4: '⁴', 5: '⁵', 6: '⁶', 7: '⁷', 8: '⁸', 9: '⁹', '-': '⁻', '−': '⁻', '+': '⁺' };
+const SUBS = { 0: '₀', 1: '₁', 2: '₂', 3: '₃', 4: '₄', 5: '₅', 6: '₆', 7: '₇', 8: '₈', 9: '₉' };
+function plainMath(s) {
+  if (!s) return '';
+  const html = mathHtml(String(s).replace(/\\mathdefault/g, ''))
+    .replace(/<sup>(.*?)<\/sup>/g, (_, t) => [...t].map((c) => SUPS[c] ?? c).join(''))
+    .replace(/<sub>(.*?)<\/sub>/g, (_, t) => [...t].map((c) => SUBS[c] ?? c).join(''));
+  const box = document.createElement('div');
+  box.innerHTML = html;
+  return box.textContent;
+}
+
+/** How a 3-D panel looks from `view`: screen x / y of a point in the
+ *  box's own -0.5..0.5 cube, and which way the eye is. */
+function viewMaths(view) {
+  const az = view.azim * Math.PI / 180, el = view.elev * Math.PI / 180;
+  const u = [-Math.sin(az), Math.cos(az), 0];
+  const w = [-Math.sin(el) * Math.cos(az), -Math.sin(el) * Math.sin(az), Math.cos(el)];
+  const eye = [Math.cos(el) * Math.cos(az), Math.cos(el) * Math.sin(az), Math.sin(el)];
+  const ASPECT = [1, 1, 0.75];
+  const project = (a, b, c) => {
+    const q = [a * ASPECT[0], b * ASPECT[1], c * ASPECT[2]];
+    return [q[0] * u[0] + q[1] * u[1], q[0] * w[0] + q[1] * w[1] + q[2] * w[2]];
+  };
+  const depth = (a, b, c) => a * ASPECT[0] * eye[0] + b * ASPECT[1] * eye[1] + c * ASPECT[2] * eye[2];
+  return { u, w, eye, project, depth };
+}
+
+let turnFrame = 0;
+/** Draw at the next animation frame: mouse moves come faster than frames. */
+function queueTurnPreview(pid, view) {
+  if (turnFrame) cancelAnimationFrame(turnFrame);
+  turnFrame = requestAnimationFrame(() => { turnFrame = 0; drawTurnPreview(pid, view); });
+}
+
+/** Hide the parts of a 3-D plot's real picture that move when it turns (walls,
+ *  axes, data), keeping the title, legend and any words, which stay put. The
+ *  quick picture is drawn in their place; the real one comes back with the
+ *  next render, which replaces the whole picture. */
+function hideRealPlot(pid) {
+  const g = geometry?.panels[pid];
+  if (!g || !svgEl || svgEl.dataset.turning === pid) return;
+  svgEl.dataset.turning = pid;
+  // matplotlib doesn't group a 3-D plot's parts, so a part belongs to it when
+  // its middle is inside the plot's box (and it isn't the whole background).
+  const [x0, y0, w, h] = g.bbox;
+  const STAYS = new Set(['legend', 'title', 'text', 'suptitle']);
+  const top = svgEl.querySelector('#figure_1') || svgEl;
+  const parts = [...top.children].flatMap((c) => (/^axes/.test(c.id) ? [...c.children] : [c]));
+  for (const child of parts) {
+    const ids = [child.id, ...[...child.querySelectorAll('[id^="t_"]')].map((e) => e.id)].filter((id) => id?.startsWith('t_'));
+    const kinds = ids.map((id) => resolve(id.slice(2)));
+    if (kinds.some((r) => STAYS.has(r?.kind))) continue;
+    // Its axes' numbers and names, wherever they are (some sit outside the box).
+    if (kinds.some((r) => r?.panel === pid || ids.some((id) => id.startsWith(`t_${pid}__`)))) {
+      child.style.visibility = 'hidden';
+      child.dataset.turnHidden = '1';
+      continue;
+    }
+    let bb;
+    try { bb = child.getBBox(); } catch { continue; }
+    if (!bb.width && !bb.height) continue;
+    const cx = bb.x + bb.width / 2, cy = bb.y + bb.height / 2;
+    if (bb.width * bb.height > 1.5 * w * h) continue;
+    if (cx >= x0 && cx <= x0 + w && cy >= y0 && cy <= y0 + h) {
+      child.style.visibility = 'hidden';
+      child.dataset.turnHidden = '1';
+    }
+  }
+}
+
+function showRealPlot() {
+  if (!svgEl) return;
+  delete svgEl.dataset.turning;
+  svgEl.querySelectorAll('[data-turn-hidden]').forEach((el) => { el.style.visibility = ''; delete el.dataset.turnHidden; });
+}
+
+
+/** Scale and middle that turn the page's own picture of the box into the real
+ *  one, from the box corners the server measured on the real picture. */
+function boxFit(pid) {
+  const g = geometry.panels[pid];
+  const rendered = renderedSpec?.panels.find((q) => q.id === pid);
+  if (!g?.corners) return null;
+  const { project } = viewMaths({ ...VIEW, ...rendered?.view });
+  const P = g.corners.map(({ s }) => project(...s.map((v) => v * 0.5)));
+  const Q = g.corners.map(({ p }) => p);
+  const mean = (a, i) => a.reduce((t, v) => t + v[i], 0) / a.length;
+  const [qx, qy] = [mean(Q, 0), mean(Q, 1)];
+  let num = 0, den = 0;
+  P.forEach((v, n) => { num += v[0] * (Q[n][0] - qx) - v[1] * (Q[n][1] - qy); den += v[0] ** 2 + v[1] ** 2; });
+  return den > 0 ? { s: num / den, cx: qx, cy: qy } : null;
+}
+
+function drawTurnPreview(pid, viewOverride) {
   const g = geometry?.panels[pid];
   const p = panelById(pid);
   if (!g || !p || !svgEl) return;
@@ -1160,26 +1290,37 @@ function drawTurnPreview(pid) {
   if (!cv) {
     cv = document.createElement('canvas');
     cv.id = 'turn-preview';
-    cv.style.cssText = 'position:fixed;pointer-events:none;background:#fff;z-index:5';
+    cv.style.cssText = 'position:fixed;pointer-events:none;z-index:5';
     document.body.appendChild(cv);
   }
+  hideRealPlot(pid);
+  // Room around the box: the axes' numbers and names reach outside it.
+  const M = Math.round(0.3 * Math.min(bw, bh));
   const dpr = window.devicePixelRatio || 1;
-  Object.assign(cv.style, { left: `${r.left + bx}px`, top: `${r.top + by}px`, width: `${bw}px`, height: `${bh}px` });
-  cv.width = Math.round(bw * dpr); cv.height = Math.round(bh * dpr);
+  Object.assign(cv.style, { left: `${r.left + bx - M}px`, top: `${r.top + by - M}px`,
+                            width: `${bw + 2 * M}px`, height: `${bh + 2 * M}px` });
+  cv.width = Math.round((bw + 2 * M) * dpr); cv.height = Math.round((bh + 2 * M) * dpr);
   const ctx = cv.getContext('2d');
   ctx.scale(dpr, dpr);
+  ctx.translate(M, M);
+  // Never paint over the legend: it stays on the real picture, underneath.
+  const lb = g.legend?.bbox;
+  if (lb) {
+    ctx.beginPath();
+    ctx.rect(-M, -M, bw + 2 * M, bh + 2 * M);
+    ctx.rect(lb[0] * k - bx, lb[1] * k - by, lb[2] * k, lb[3] * k);
+    ctx.clip('evenodd');
+  }
 
-  const view = { ...VIEW, ...p.view };
-  const az = view.azim * Math.PI / 180, el = view.elev * Math.PI / 180;
-  const u = [-Math.sin(az), Math.cos(az), 0];
-  const w = [-Math.sin(el) * Math.cos(az), -Math.sin(el) * Math.sin(az), Math.cos(el)];
-  const ASPECT = [1, 1, 0.75];
-  const scaleOf = (xyz) => p[`${xyz}scale`] === 'log';
+  const view = viewOverride || { ...VIEW, ...p.view };
+  const { eye, project, depth } = viewMaths(view);
+  const mesh = meshes.get(pid)?.series || [];
+  const scaleOf = (xyz) => (g[`${xyz}scale`] || p[`${xyz}scale`]) === 'log';
   const lims = {};
   for (const xyz of 'xyz') {
-    let lim = p[`${xyz}lim`];
+    let lim = g[`${xyz}lim`] || p[`${xyz}lim`];
     if (!lim) {
-      const vals = (turnMesh?.series || []).flatMap((sr) => sr[xyz].flat()).filter((v) => v != null);
+      const vals = mesh.flatMap((sr) => sr[xyz].flat()).filter((v) => v != null);
       lim = vals.length ? [Math.min(...vals), Math.max(...vals)] : [0, 1];
     }
     lims[xyz] = scaleOf(xyz) ? lim.map((v) => Math.log10(Math.max(v, 1e-300))) : lim;
@@ -1191,77 +1332,278 @@ function drawTurnPreview(pid) {
     const [lo, hi] = lims[xyz];
     return Math.max(0, Math.min(1, (t - lo) / ((hi - lo) || 1))) - 0.5;
   };
-  const project = (a, b, c) => {
-    const q = [a * ASPECT[0], b * ASPECT[1], c * ASPECT[2]];
-    return [q[0] * u[0] + q[1] * u[1], q[0] * w[0] + q[1] * w[1] + q[2] * w[2]];
-  };
-  const corners = [];
-  for (const a of [-0.5, 0.5]) for (const b of [-0.5, 0.5]) for (const c of [-0.5, 0.5]) corners.push(project(a, b, c));
-  const xs = corners.map((c) => c[0]), ys = corners.map((c) => c[1]);
-  const sc = 0.88 * Math.min(bw / (Math.max(...xs) - Math.min(...xs)), bh / (Math.max(...ys) - Math.min(...ys)));
-  const cx = bw / 2 - sc * (Math.max(...xs) + Math.min(...xs)) / 2;
-  const cy = bh / 2 + sc * (Math.max(...ys) + Math.min(...ys)) / 2;
-  const toScreen = ([px, py]) => [cx + sc * px, cy - sc * py];
-
-  // the box, with its three axes darker and named
-  ctx.lineWidth = 1;
-  ctx.strokeStyle = '#d0d0d0';
-  const edge = (p0, p1) => {
-    const [a0, b0] = toScreen(project(...p0)), [a1, b1] = toScreen(project(...p1));
-    ctx.beginPath(); ctx.moveTo(a0, b0); ctx.lineTo(a1, b1); ctx.stroke();
-  };
+  // The same size and middle as the real picture had when the turn started.
+  let toScreen;
+  const fit = boxFit(pid);
+  if (fit) {
+    toScreen = ([px, py]) => [(fit.cx + fit.s * px) * k - bx, (fit.cy - fit.s * py) * k - by];
+  } else {
+    const sc = 0.62 * Math.min(bw, bh);
+    toScreen = ([px, py]) => [bw / 2 + sc * px, bh / 2 - sc * py];
+  }
   const H = 0.5;
-  for (const a of [-H, H]) for (const b of [-H, H]) {
-    edge([a, b, -H], [a, b, H]); edge([a, -H, b], [a, H, b]); edge([-H, a, b], [H, a, b]);
-  }
-  ctx.strokeStyle = '#555';
-  ctx.fillStyle = '#333';
-  ctx.font = '12px sans-serif';
-  for (const [xyz, to] of [['x', [H, -H, -H]], ['y', [-H, H, -H]], ['z', [-H, -H, H]]]) {
-    edge([-H, -H, -H], to);
-    const [tx, ty] = toScreen(project(...to.map((v) => v * 1.12)));
-    ctx.fillText(xyz, tx, ty);
+  const pt3 = (v) => toScreen(project(v[0], v[1], v[2]));
+
+  // Which side of the box is at the back, for each axis -- matplotlib's rule,
+  // including its special case for looking straight at one face.
+  const flatOn = eye.map((e) => Math.abs(e) > 0.999);
+  let high = eye.map((e) => e < 0);              // the max side is the far one
+  if (flatOn[2]) high = [true, true, high[2]];
+  else if (flatOn[1]) high = [true, high[1], false];
+  else if (flatOn[0]) high = [high[0], false, false];
+  const back = high.map((h) => (h ? H : -H));
+  const front = back.map((v) => -v);
+
+  // The three back walls.
+  ctx.lineWidth = 1;
+  for (let i = 0; i < 3; i++) {
+    const [j, l] = [0, 1, 2].filter((n) => n !== i);
+    const quad = [[-H, -H], [H, -H], [H, H], [-H, H]].map(([s, t]) => {
+      const v = [0, 0, 0]; v[i] = back[i]; v[j] = s; v[l] = t; return pt3(v);
+    });
+    ctx.fillStyle = 'rgba(242,242,242,0.9)';
+    ctx.strokeStyle = '#e6e6e6';
+    ctx.beginPath(); quad.forEach((q, n) => (n ? ctx.lineTo(...q) : ctx.moveTo(...q))); ctx.closePath();
+    ctx.fill(); ctx.stroke();
   }
 
-  // the curves
-  for (const sr of turnMesh?.series || []) {
-    const colorAt = (zn) => (sr.color || !sr.cmap ? (sr.color || '#4C78A8') : viridisAt(zn + 0.5));
-    const pt = (x, y, z) => {
-      const a = norm(x, 'x'), b = norm(y, 'y'), c = norm(z, 'z');
-      return a == null || b == null || c == null ? null : { s: toScreen(project(a, b, c)), c };
-    };
-    const line = (pts) => {
-      ctx.beginPath();
-      let on = false;
-      for (const q of pts) {
-        if (!q) { on = false; continue; }
-        ctx.strokeStyle = colorAt(q.c);
-        if (on) ctx.lineTo(...q.s); else ctx.moveTo(...q.s);
-        on = true;
-      }
-      ctx.stroke();
-    };
-    ctx.lineWidth = 1;
-    if (Array.isArray(sr.x[0])) {           // a mesh: its rows and its columns
-      const rows = sr.z.length, cols = sr.z[0].length;
-      const P = sr.z.map((row, i) => row.map((z, j) => pt(sr.x[i][j], sr.y[i][j], z)));
-      for (let i = 0; i < rows; i++) line(P[i]);
-      for (let j = 0; j < cols; j++) line(P.map((row) => row[j]));
-    } else if (sr.kind === 'line3d') {
-      line(sr.x.map((x, i) => pt(x, sr.y[i], sr.z[i])));
-    } else {                                // dots (and a surface from points)
-      for (let i = 0; i < sr.x.length; i++) {
-        const q = pt(sr.x[i], sr.y[i], sr.z[i]);
-        if (!q) continue;
-        ctx.fillStyle = colorAt(q.c);
-        ctx.fillRect(q.s[0] - 1.5, q.s[1] - 1.5, 3, 3);
+  // Each axis runs along one edge, again as matplotlib places it: x at the
+  // front in y and the back in z, y at the front in x and the back in z, z at
+  // the front in x and the back in y. Its numbers sit just outside, along
+  // y for x, and along x for y and z.
+  const AX = {
+    x: { i: 0, base: [0, front[1], back[2]], out: 1 },
+    y: { i: 1, base: [front[0], 0, back[2]], out: 0 },
+    z: { i: 2, base: [front[0], back[1], 0], out: 0 },
+  };
+  const ticks = g.ticks || {};
+
+  if (p.grid) {
+    ctx.strokeStyle = '#d4d4d4';
+    for (const xyz of 'xyz') {
+      const i = AX[xyz].i;
+      for (const [v] of ticks[xyz] || []) {
+        const t = norm(v, xyz);
+        if (t == null) continue;
+        for (const j of [0, 1, 2].filter((n) => n !== i)) {
+          const l = 3 - i - j;
+          const a = [0, 0, 0], b = [0, 0, 0];
+          a[i] = b[i] = t; a[j] = b[j] = back[j]; a[l] = -H; b[l] = H;
+          ctx.beginPath(); ctx.moveTo(...pt3(a)); ctx.lineTo(...pt3(b)); ctx.stroke();
+        }
       }
     }
   }
+
+  // The data: surfaces filled from the back forward, so near parts cover far ones.
+  const zColour = (sr, zn) => (sr.color && !sr.cmap ? sr.color : cmapAt(sr.cmap || 'viridis', zn + 0.5));
+  for (const sr of mesh) {
+    const pt = (x, y, z) => {
+      const a = norm(x, 'x'), b = norm(y, 'y'), c = norm(z, 'z');
+      return a == null || b == null || c == null ? null : { s: pt3([a, b, c]), n: [a, b, c] };
+    };
+    if (Array.isArray(sr.x[0])) {
+      const P = sr.z.map((row, i) => row.map((z, j) => pt(sr.x[i][j], sr.y[i][j], z)));
+      if (sr.kind === 'wireframe') {
+        ctx.strokeStyle = sr.color || '#1f77b4';
+        const line = (pts) => {
+          ctx.beginPath(); let on = false;
+          for (const q of pts) { if (!q) { on = false; continue; } if (on) ctx.lineTo(...q.s); else ctx.moveTo(...q.s); on = true; }
+          ctx.stroke();
+        };
+        P.forEach(line);
+        P[0].forEach((_, j) => line(P.map((row) => row[j])));
+        continue;
+      }
+      const quads = [];
+      for (let i = 0; i + 1 < P.length; i++) {
+        for (let j = 0; j + 1 < P[i].length; j++) {
+          const q = [P[i][j], P[i][j + 1], P[i + 1][j + 1], P[i + 1][j]];
+          if (q.some((v) => !v)) continue;
+          const c = q.map((v) => v.n).reduce((s, n) => s.map((x, m) => x + n[m] / 4), [0, 0, 0]);
+          quads.push({ q, d: depth(...c), z: c[2] });
+        }
+      }
+      quads.sort((a, b) => a.d - b.d);
+      ctx.lineWidth = 0.6;
+      for (const { q, z } of quads) {
+        ctx.fillStyle = ctx.strokeStyle = zColour(sr, z);
+        ctx.beginPath(); q.forEach((v, n) => (n ? ctx.lineTo(...v.s) : ctx.moveTo(...v.s))); ctx.closePath();
+        ctx.fill(); ctx.stroke();
+      }
+      ctx.lineWidth = 1;
+    } else if (sr.kind === 'line3d') {
+      ctx.strokeStyle = sr.color || '#1f77b4';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath(); let on = false;
+      sr.x.forEach((x, i) => {
+        const q = pt(x, sr.y[i], sr.z[i]);
+        if (!q) { on = false; return; }
+        if (on) ctx.lineTo(...q.s); else ctx.moveTo(...q.s); on = true;
+      });
+      ctx.stroke();
+      ctx.lineWidth = 1;
+    } else {                                // dots, and surfaces made from points
+      const dots = sr.x.map((x, i) => pt(x, sr.y[i], sr.z[i])).filter(Boolean)
+        .map((q) => ({ ...q, d: depth(...q.n) })).sort((a, b) => a.d - b.d);
+      for (const q of dots) {
+        ctx.fillStyle = zColour(sr, q.n[2]);
+        ctx.beginPath(); ctx.arc(q.s[0], q.s[1], 2.2, 0, 2 * Math.PI); ctx.fill();
+      }
+    }
+  }
+
+  // The axes: a line along the edge, small ticks, the numbers, and the name
+  // turned to run along the axis. An axis seen end-on has no length to show.
+  ctx.strokeStyle = '#333';
+  ctx.fillStyle = '#222';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  for (const xyz of 'xyz') {
+    const { i, base, out } = AX[xyz];
+    if (flatOn[i]) continue;
+    const at = (t, outBy = 0) => {
+      const v = [...base]; v[i] = t; v[out] = base[out] * (1 + outBy); return pt3(v);
+    };
+    const [p0, p1] = [at(-H), at(H)];
+    ctx.lineWidth = 0.8;
+    ctx.beginPath(); ctx.moveTo(...p0); ctx.lineTo(...p1); ctx.stroke();
+    const size = (g.tick_size?.[xyz] ?? 11) * k;
+    ctx.font = `${size}px "DejaVu Sans", Arial, sans-serif`;
+    for (const [v, label] of ticks[xyz] || []) {
+      const t = norm(v, xyz);
+      if (t == null) continue;
+      const [s, s2] = [at(t), at(t, 0.06)];
+      ctx.beginPath(); ctx.moveTo(...s); ctx.lineTo(...s2); ctx.stroke();
+      ctx.fillText(plainMath(label), ...at(t, 0.22));
+    }
+    const name = plainMath(g.labels?.[xyz]);
+    if (name) {
+      const ls = (g.label_size?.[xyz] ?? 12) * k;
+      ctx.font = `${ls}px "DejaVu Sans", Arial, sans-serif`;
+      const [lx, ly] = at(0, 0.5);
+      let ang = Math.atan2(p1[1] - p0[1], p1[0] - p0[0]);
+      if (ang > Math.PI / 2) ang -= Math.PI;
+      if (ang < -Math.PI / 2) ang += Math.PI;
+      ctx.save(); ctx.translate(lx, ly); ctx.rotate(ang); ctx.fillText(name, 0, 0); ctx.restore();
+    }
+  }
+  drawTriad(pid, view);
 }
 
 /** FigForge's starting 3-D view (layers.VIEW_ELEV / VIEW_AZIM). */
 const VIEW = { elev: 25, azim: -60 };
+
+/* ----------------------------------------------- the little x / y / z marker
+ * Bottom left of every 3-D plot, as in CAD programs: it turns with the plot,
+ * and a click on an axis swings the plot round to look straight along it --
+ * z gives the flat x-y map. The dot in the middle goes back to the usual view. */
+const FACING = {
+  x: { elev: 0, azim: 0, words: 'Look along x: the y-z side' },
+  y: { elev: 0, azim: -90, words: 'Look along y: the x-z side' },
+  z: { elev: 90, azim: -90, words: 'Look down z: the flat x-y map' },
+};
+const AXIS_COLOUR = { x: '#e03131', y: '#2f9e44', z: '#1c7ed6' };
+
+function drawTriads() {
+  canvas.querySelectorAll('.triad').forEach((t) => t.remove());
+  if (!geometry || !svgEl) return;
+  for (const [pid, g] of Object.entries(geometry.panels)) {
+    if (g.projection !== '3d') continue;
+    ensureMesh(pid);
+    const el = document.createElement('div');
+    el.className = 'triad';
+    el.dataset.pid = pid;
+    el.innerHTML = '<canvas class="triad-lines" width="160" height="160" aria-hidden="true"></canvas>' +
+      Object.entries(FACING).map(([a, f]) =>
+        `<button type="button" class="triad-axis" data-axis="${a}" title="${f.words}" aria-label="${f.words}">${a}</button>`).join('') +
+      '<button type="button" class="triad-home" title="Back to the usual 3-D view" aria-label="Back to the usual 3-D view"></button>';
+    canvas.appendChild(el);
+    placeTriad(el);
+    const p = panelById(pid);
+    drawTriad(pid, { ...VIEW, ...p?.view });
+  }
+}
+
+function placeTriad(el) {
+  const g = geometry.panels[el.dataset.pid];
+  const k = zoom / 100;
+  // Smaller in a small plot, so it never covers much of it.
+  const size = Math.max(44, Math.min(80, 0.3 * Math.min(g.bbox[2], g.bbox[3]) * k));
+  el.style.transform = `scale(${size / 80})`;
+  el.style.left = `${(g.bbox[0] + 4) * k}px`;
+  el.style.top = `${(g.bbox[1] + g.bbox[3]) * k - size - 4}px`;
+}
+
+function drawTriad(pid, view) {
+  const el = canvas.querySelector(`.triad[data-pid="${CSS.escape(pid)}"]`);
+  if (!el) return;
+  const { project, depth } = viewMaths(view);
+  const R = 26;
+  const ends = Object.keys(FACING).map((a, i) => {
+    const v = [0, 0, 0]; v[i] = 1;
+    const [sx, sy] = project(...v);
+    return { a, x: sx * R / 0.95, y: -sy * R / 0.95, d: depth(...v) };
+  });
+  // Far axes first, so a near one is drawn (and clicked) on top.
+  ends.sort((p, q) => p.d - q.d);
+  const ctx = el.querySelector('.triad-lines').getContext('2d');
+  ctx.setTransform(2, 0, 0, 2, 80, 80);       // drawn at twice the size, for sharp lines
+  ctx.clearRect(-40, -40, 80, 80);
+  ctx.lineWidth = 3;
+  ctx.lineCap = 'round';
+  for (const e of ends) {
+    ctx.strokeStyle = AXIS_COLOUR[e.a];
+    ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(e.x, e.y); ctx.stroke();
+  }
+  ends.forEach((e, n) => {
+    const b = el.querySelector(`.triad-axis[data-axis="${e.a}"]`);
+    b.style.left = `${40 + e.x * 1.25}px`;
+    b.style.top = `${40 + e.y * 1.25}px`;
+    b.style.zIndex = String(n + 1);
+    b.style.background = AXIS_COLOUR[e.a];
+    b.style.opacity = Math.hypot(e.x, e.y) < 6 ? '0.55' : '1';   // pointing at you: shown, but small
+  });
+}
+
+let swing = null;     // a running swing of the view to a side
+function swingTo(pid, target) {
+  const p = panelById(pid);
+  if (!p || aiRunning) return;
+  const from = { ...VIEW, ...p.view };
+  let dAz = ((target.azim - from.azim + 540) % 360) - 180;   // the short way round
+  const dEl = target.elev - from.elev;
+  if (Math.abs(dAz) < 0.5 && Math.abs(dEl) < 0.5) return;
+  if (swing) cancelAnimationFrame(swing.frame);
+  ensureMesh(pid);
+  pushHistory();
+  const t0 = performance.now(), ms = 450;
+  const step = (now) => {
+    const f = Math.min(1, (now - t0) / ms);
+    const e = f < 0.5 ? 2 * f * f : 1 - (-2 * f + 2) ** 2 / 2;   // gentle start and end
+    const v = { elev: from.elev + dEl * e, azim: from.azim + dAz * e };
+    drawTurnPreview(pid, v);
+    if (f < 1) { swing.frame = requestAnimationFrame(step); return; }
+    swing = null;
+    p.view = { elev: Math.round(target.elev), azim: Math.round(((target.azim + 540) % 360) - 180) };
+    setStatus(`${capitalize(plotName(pid))}: ${p.view.elev === 90 ? 'seen from above' : 'turned'}`);
+    refreshInspector();
+    scheduleSave(0);              // the real picture fades in over this one
+  };
+  swing = { frame: requestAnimationFrame(step) };
+}
+
+canvas.addEventListener('pointerdown', (e) => {
+  if (e.target.closest('.triad')) e.stopPropagation();   // not the start of a turn
+}, true);
+canvas.addEventListener('click', (e) => {
+  const tri = e.target.closest('.triad');
+  if (!tri) return;
+  const pid = tri.dataset.pid;
+  const axis = e.target.closest('.triad-axis')?.dataset.axis;
+  if (axis) swingTo(pid, FACING[axis]);
+  else if (e.target.closest('.triad-home')) swingTo(pid, VIEW);
+});
 
 const LEGEND_KINDS = new Set(['line', 'step', 'errorbar', 'band', 'bar', 'scatter', 'box', 'hist', 'quiver',
                               'surface', 'wireframe', 'trisurf', 'line3d', 'scatter3d']);
@@ -2262,7 +2604,7 @@ canvas.addEventListener('pointerdown', (evt) => {
   if (hit && geometry.panels[hit].projection === '3d' && !isMulti(evt)) {
     const p = panelById(hit);
     turn = { pid: hit, start: { x: evt.clientX, y: evt.clientY }, base: { ...VIEW, ...p.view }, moved: false };
-    loadTurnMesh(hit);
+    ensureMesh(hit);
     svgEl.setPointerCapture(evt.pointerId);
     return;
   }
@@ -2289,7 +2631,7 @@ canvas.addEventListener('pointermove', (evt) => {
     p.view = { elev: Math.round(Math.max(-90, Math.min(90, turn.base.elev + dy * 0.5))),
                azim: Math.round(((turn.base.azim - dx * 0.5 + 540) % 360) - 180) };
     setStatus(`Turning ${plotName(turn.pid)}: ${p.view.azim}° round, ${p.view.elev}° up`);
-    drawTurnPreview(turn.pid);     // instant; the real picture comes on letting go
+    queueTurnPreview(turn.pid);    // instant; the real picture comes on letting go
     return;
   }
   if (drag) {

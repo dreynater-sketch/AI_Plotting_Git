@@ -46,6 +46,10 @@ part way stops Claude and keeps what's done. One spreadsheet dropped in is offer
 as a free graph, with no AI, and dragging, clicking and every other tool are free.
 Admins and the local editor have no limit.
 
+Drag an empty spot of a 3-D plot to turn it; everything stays on screen while it
+turns. The x / y / z marker in its bottom left swings it to look straight along an
+axis (z: the flat x-y map); its middle dot goes back to the usual view.
+
 A graph being made carries on after a reload, or when you come back later.
 
 - **Click** any label to select it, or **click a panel's plot area** to select

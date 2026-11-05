@@ -216,6 +216,7 @@ main {
 }
 
 .canvas {
+  position: relative;
   background: #fff;
   border-radius: 18px;
   box-shadow: var(--shadow);
@@ -1035,6 +1036,22 @@ sub, sup { font-size: 0.75em; line-height: 0; }
 #btn-home { cursor: pointer; }
 #btn-more[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent-ink); }
 .canvas-wait { display: none; position: absolute; inset: 0; align-items: center; justify-content: center; font-size: 18px; font-weight: 800; color: #a7a1bd; }
+
+/* The little x / y / z marker in a 3-D plot's corner. */
+.triad { position: absolute; width: 80px; height: 80px; z-index: 4; line-height: normal; transform-origin: 0 0; }
+.triad-lines { position: absolute; inset: 0; width: 80px; height: 80px; pointer-events: none; }
+.triad-axis {
+  position: absolute; width: 20px; height: 20px; margin: -10px 0 0 -10px; padding: 0;
+  border: 2px solid #fff; border-radius: 50%; color: #fff; font: 800 11px/1 var(--font);
+  display: flex; align-items: center; justify-content: center; cursor: pointer;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+}
+.triad-axis:hover:not(:disabled) { transform: scale(1.18); border: 2px solid #fff; }
+.triad-home {
+  position: absolute; left: 34px; top: 34px; width: 12px; height: 12px; padding: 0; z-index: 10;
+  border: 2px solid #fff; border-radius: 50%; background: #868e96; cursor: pointer;
+}
+.triad-home:hover:not(:disabled) { background: #495057; border: 2px solid #fff; transform: none; }
 
 /* Claude is working on the graph: look, but don't touch yet. */
 body.ai-busy .canvas-wrap { pointer-events: none; }

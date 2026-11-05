@@ -539,6 +539,13 @@ def _draw_round_or_3d(ax, p, arrays, preview):
     if three_d:
         view = p.get("view") or {}
         ax.view_init(elev=view.get("elev", layers.VIEW_ELEV), azim=view.get("azim", layers.VIEW_AZIM))
+        end_on = layers.end_on_axis(view)
+        if end_on:
+            # Looking straight along an axis, as in a CAD program's front or
+            # top view: drawn flat, and that axis (only a point now) unlabelled.
+            ax.set_proj_type("ortho")
+            getattr(ax, f"set_{end_on}ticks")([])
+            getattr(ax, f"{end_on}axis").label.set_visible(False)
     ax.grid(bool(p.get("grid")))
     for i, lbl in enumerate(ax.get_xticklabels()):
         lbl.set_gid(f't_{p["id"]}__xtick_{i}')
@@ -594,6 +601,27 @@ def _geometry(fig, axes_by_id, spec):
         }
         if layers.projection(p):
             panels[p["id"]]["projection"] = layers.projection(p)
+        if layers.projection(p) == "3d":
+            # What the page needs to draw the plot itself while it's turned.
+            info = panels[p["id"]]
+            info["zlim"], info["zscale"] = _f(ax.get_zlim()), ax.get_zscale()
+            info["ticks"], info["labels"], info["tick_size"], info["label_size"] = {}, {}, {}, {}
+            for xyz in "xyz":
+                axis = getattr(ax, f"{xyz}axis")
+                lo, hi = sorted(getattr(ax, f"get_{xyz}lim")())
+                vals = [float(v) for v in axis.get_majorticklocs() if lo - 1e-9 * abs(hi - lo) <= v <= hi + 1e-9 * abs(hi - lo)]
+                words = axis.get_major_formatter().format_ticks(vals) if vals else []
+                info["ticks"][xyz] = [[v, str(w)] for v, w in zip(vals, words)]
+                info["labels"][xyz] = getattr(ax, f"get_{xyz}label")()
+                info["tick_size"][xyz] = float(p.get(f"{xyz}tick_size", 11))
+                info["label_size"][xyz] = float(axis.label.get_size())
+            # Where the real picture puts the box's corners, so the page's own
+            # picture starts at exactly the same size and place.
+            ax.M = ax.get_proj()
+            cube = ax._transformed_cube((*ax.get_xbound(), *ax.get_ybound(), *ax.get_zbound()))
+            screen = ax.transData.transform(cube[:, :2])
+            signs = [(-1, -1, -1), (1, -1, -1), (1, 1, -1), (-1, 1, -1), (-1, -1, 1), (1, -1, 1), (1, 1, 1), (-1, 1, 1)]
+            info["corners"] = [{"s": list(sg), "p": _f([x, H - y])} for sg, (x, y) in zip(signs, screen)]
         lg = ax.get_legend()
         if lg is not None:
             lb = lg.get_window_extent()

@@ -319,6 +319,11 @@ def _round_or_3d(p, proj):
     if three_d:
         view = p.get("view") or {}
         L.append(f"ax.view_init(elev={view.get('elev', VIEW_ELEV)!r}, azim={view.get('azim', VIEW_AZIM)!r})")
+        end_on = layers.end_on_axis(view)
+        if end_on:
+            L.append('ax.set_proj_type("ortho")   # looking straight along one axis: drawn flat')
+            L.append(f"ax.set_{end_on}ticks([])")
+            L.append(f"ax.{end_on}axis.label.set_visible(False)")
     L.append(f"ax.grid({bool(p.get('grid'))})")
     L += _legend(p)
     L.append("")
