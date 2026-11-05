@@ -247,6 +247,11 @@
   <section class="stage" id="stage">
     <div class="canvas-area">
       <div class="canvas-wait" id="canvas-wait">Your graph will show up here</div>
+      <!-- What a drag does on a 3-D graph: draw a box to pick, or turn it. -->
+      <div class="hand-bar" id="hand-bar" role="group" aria-label="What dragging does" hidden>
+        <button type="button" data-hand="pick" title="Drag to draw a box that picks things"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3l14 8-6 1.5L10 19z"/></svg>Pick</button>
+        <button type="button" data-hand="turn" title="Drag to turn the 3-D plot"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.3-5.6M20 4v4h-4"/></svg>Turn</button>
+      </div>
       <div class="canvas-wrap" id="canvas-wrap">
         <div class="canvas" id="canvas"></div>
       </div>
@@ -533,7 +538,7 @@
                 <option value="linear">linear</option><option value="log">log</option>
               </select>
             </label>
-            <div class="subhead">Turn it (or drag an empty spot in the plot)</div>
+            <div class="subhead">Turn it (or drag the plot with Turn on)</div>
             <div class="row">
               <label class="field">
                 <span>Round (°)</span>
@@ -543,6 +548,12 @@
                 <span>Up (°)</span>
                 <input type="number" id="f-tilt" min="-90" max="90" step="5">
               </label>
+            </div>
+            <div class="subhead">Names on the x / y / z marker</div>
+            <div class="row">
+              <label class="field"><span>x</span><input type="text" id="f-mark-x" maxlength="6" placeholder="x"></label>
+              <label class="field"><span>y</span><input type="text" id="f-mark-y" maxlength="6" placeholder="y"></label>
+              <label class="field"><span>z</span><input type="text" id="f-mark-z" maxlength="6" placeholder="z"></label>
             </div>
           </div>
 

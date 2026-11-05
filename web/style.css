@@ -617,7 +617,9 @@ input[type=checkbox] { width: 17px; height: 17px; }
   border: 2px solid var(--line); border-radius: 12px; background: #fff;
   cursor: pointer; flex: none;
 }
-.colorwrap input[type=text] { font-family: var(--mono); font-weight: 500; }
+/* The colour's code (#1f77b4) means nothing to most people: just the box. */
+.colorwrap input[type=text] { display: none; }
+.colorwrap input[type=color] { width: 64px; }
 /* One-click colour dots under each colour box. */
 .color-dots { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
 .color-dots .dot {
@@ -1083,21 +1085,42 @@ sub, sup { font-size: 0.75em; line-height: 0; }
 #btn-more[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent-ink); }
 .canvas-wait { display: none; position: absolute; inset: 0; align-items: center; justify-content: center; font-size: 18px; font-weight: 800; color: #a7a1bd; }
 
-/* The little x / y / z marker in a 3-D plot's corner. */
-.triad { position: absolute; width: 80px; height: 80px; z-index: 4; line-height: normal; transform-origin: 0 0; }
+/* The little x / y / z marker in a 3-D plot's corner: coloured bars with
+   the axes' names at their ends, as in CAD programs. Drag it to turn. */
+.triad { position: absolute; width: 80px; height: 80px; z-index: 4; line-height: normal; transform-origin: 0 0;
+  cursor: grab; touch-action: none; }
+.triad:active { cursor: grabbing; }
 .triad-lines { position: absolute; inset: 0; width: 80px; height: 80px; pointer-events: none; }
 .triad-axis {
-  position: absolute; width: 20px; height: 20px; margin: -10px 0 0 -10px; padding: 0;
-  border: 2px solid #fff; border-radius: 50%; color: #fff; font: 800 11px/1 var(--font);
+  position: absolute; min-width: 18px; height: 18px; padding: 0 2px; transform: translate(-50%, -50%);
+  border: 0; border-radius: 6px; background: transparent; font: 900 13px/1 var(--font); white-space: nowrap;
   display: flex; align-items: center; justify-content: center; cursor: pointer;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+  text-shadow: 0 0 2px #fff, 0 0 3px #fff, 0 0 4px #fff;
 }
-.triad-axis:hover:not(:disabled) { transform: scale(1.18); border: 2px solid #fff; }
+.triad-axis:hover:not(:disabled) { transform: translate(-50%, -50%) scale(1.2); background: rgba(255, 255, 255, 0.85); border: 0; }
 .triad-home {
-  position: absolute; left: 34px; top: 34px; width: 12px; height: 12px; padding: 0; z-index: 10;
+  position: absolute; left: 35px; top: 35px; width: 10px; height: 10px; padding: 0; z-index: 10;
   border: 2px solid #fff; border-radius: 50%; background: #868e96; cursor: pointer;
 }
-.triad-home:hover:not(:disabled) { background: #495057; border: 2px solid #fff; transform: none; }
+.triad-home:hover:not(:disabled) { background: #495057; border: 2px solid #fff; transform: scale(1.25); }
+
+/* Pick or Turn, at the top of a 3-D graph. */
+.canvas-area.with-hand .canvas-wrap { padding-top: 50px; }
+.hand-bar {
+  position: absolute; top: 10px; left: 50%; transform: translateX(-50%); z-index: 6;
+  display: flex; gap: 2px; padding: 3px; border-radius: 999px; background: #fff; box-shadow: var(--shadow);
+}
+.hand-bar[hidden] { display: none; }
+.hand-bar button {
+  display: flex; align-items: center; gap: 5px; padding: 4px 12px; border: 0; border-radius: 999px;
+  background: transparent; color: var(--ink-soft); font: 700 13px/1.2 var(--font); cursor: pointer;
+}
+.hand-bar button svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2.2;
+  stroke-linecap: round; stroke-linejoin: round; }
+.hand-bar button:hover:not(:disabled) { background: var(--tint); border: 0; transform: none; }
+.hand-bar button.on, .hand-bar button.on:hover:not(:disabled) { background: var(--sel); color: #fff; }
+.canvas.hand-turn { cursor: grab; }
+.canvas.hand-turn:active { cursor: grabbing; }
 
 /* Claude is working on the graph: look, but don't touch yet. */
 body.ai-busy .canvas-wrap { pointer-events: none; }

@@ -443,6 +443,7 @@ function applySvg(svgText) {
   reconcilePreviews();
   drawOutlines();
   drawTriads();
+  showHandBar();
 }
 
 function applyZoom() {
@@ -538,17 +539,22 @@ function mkHalo(g, primary) {
   halo.setAttribute('class', 'ff-outline ff-halo');
   halo.setAttribute('pointer-events', 'none');
   const blue = '#1f6feb';
-  halo.querySelectorAll('path').forEach((el) => {
+  // Light enough that the curve's own colour still shows through, so a
+  // colour change can be seen while it's picked. A surface made of many
+  // little patches gets no patch edges: they'd cover it in a blue net.
+  const paths = halo.querySelectorAll('path');
+  const many = paths.length > 40;
+  paths.forEach((el) => {
     const filled = !/fill:\s*none/.test(el.getAttribute('style') || '');
     el.style.opacity = 1;
     el.style.stroke = blue;
     if (filled) {   // bars and other shapes
       el.style.fill = blue;
-      el.style.fillOpacity = primary ? 0.22 : 0.12;
-      el.style.strokeOpacity = 0.9;
-      el.style.strokeWidth = '1.2';
+      el.style.fillOpacity = primary ? 0.08 : 0.05;
+      el.style.strokeOpacity = many ? 0 : 0.6;
+      el.style.strokeWidth = '1';
     } else {        // a line: a soft band along it
-      el.style.strokeOpacity = primary ? 0.28 : 0.16;
+      el.style.strokeOpacity = primary ? 0.14 : 0.09;
       el.style.strokeLinejoin = 'round';
     }
   });
@@ -558,8 +564,9 @@ function mkHalo(g, primary) {
     c.setAttribute('cy', u.getAttribute('y') || 0);
     c.setAttribute('r', 5);
     c.setAttribute('fill', blue);
-    c.setAttribute('fill-opacity', primary ? 0.25 : 0.15);
+    c.setAttribute('fill-opacity', primary ? 0.1 : 0.06);
     c.setAttribute('stroke', blue);
+    c.setAttribute('stroke-opacity', 0.7);
     c.setAttribute('stroke-width', 1);
     u.replaceWith(c);
   });
@@ -1026,12 +1033,18 @@ function showBoxColor(fid, value) {
  *  (but whole numbers stay whole: 1234568, not 1234570). */
 function tidyNum(v, span) {
   if (typeof v !== 'number' || !Number.isFinite(v)) return v ?? '';
+  let n;
   if (span > 0 && Number.isFinite(span)) {
     const d = Math.min(10, Math.max(0, Math.ceil(-Math.log10(span / 10000))));
-    return String(parseFloat(v.toFixed(d)));
+    n = parseFloat(v.toFixed(d));
+  } else {
+    const whole = v === 0 ? 1 : Math.floor(Math.log10(Math.abs(v))) + 1;   // keep big whole numbers whole
+    n = Number(v.toPrecision(Math.min(21, Math.max(6, whole))));
   }
-  const whole = v === 0 ? 1 : Math.floor(Math.log10(Math.abs(v))) + 1;   // keep big whole numbers whole
-  return String(Number(v.toPrecision(Math.min(21, Math.max(6, whole)))));
+  // Very big or very small: 5e7 rather than 50000000, 2e-5 rather than 0.00002.
+  const a = Math.abs(n);
+  if (a >= 1e5 || (a > 0 && a < 1e-3)) return n.toExponential().replace('e+', 'e');
+  return String(n);
 }
 /** How wide a panel's axis is on screen, in its own numbers ('x' or 'y'). */
 function axisSpan(pid, axis) {
@@ -1115,6 +1128,11 @@ function refreshAxesInspector() {
     $('f-zscale').value = common((s) => s.obj.zscale ?? 'linear') ?? 'linear';
     setNum('f-turn', (s) => s.obj.view?.azim ?? VIEW.azim);
     setNum('f-tilt', (s) => s.obj.view?.elev ?? VIEW.elev);
+    for (const a of 'xyz') {
+      const box = $(`f-mark-${a}`);
+      box.value = common((s) => s.obj.marks?.[a] ?? '') ?? '';
+      box.placeholder = panels.length === 1 ? (shortAxisName(panels[0][`${a}label`]) || a) : a;
+    }
   }
   $('axes-note').hidden = true;
 }
@@ -1495,15 +1513,42 @@ function drawTurnPreview(pid, viewOverride) {
 const VIEW = { elev: 25, azim: -60 };
 
 /* ----------------------------------------------- the little x / y / z marker
- * Bottom left of every 3-D plot, as in CAD programs: it turns with the plot,
- * and a click on an axis swings the plot round to look straight along it --
- * z gives the flat x-y map. The dot in the middle goes back to the usual view. */
+ * Bottom right of every 3-D plot, as in CAD programs: it turns with the plot,
+ * dragging it turns the plot, and a click on an axis's name swings the plot
+ * round to look straight along it -- z gives the flat x-y map. The dot in the
+ * middle goes back to the usual view. Each axis is named by the short name
+ * the user typed (panel.marks), else the symbol in its label ("B" from
+ * "Magnetic field $B$ (T)"), else x / y / z. */
 const FACING = {
   x: { elev: 0, azim: 0, words: 'Look along x: the y-z side' },
   y: { elev: 0, azim: -90, words: 'Look along y: the x-z side' },
   z: { elev: 90, azim: -90, words: 'Look down z: the flat x-y map' },
 };
 const AXIS_COLOUR = { x: '#e03131', y: '#2f9e44', z: '#1c7ed6' };
+
+/** A short name for an axis from its label: the maths symbol in it, else a
+ *  short word before any (unit), else the first letter. */
+function shortAxisName(label) {
+  const raw = typeof label === 'string' ? label : label?.text;
+  if (!raw) return '';
+  const sym = raw.match(/\$([^$]+)\$/);
+  if (sym) {
+    const s = plainMath(`$${sym[1]}$`).replace(/\s+/g, '');
+    if (s && s.length <= 4) return s;
+  }
+  const words = plainMath(raw).replace(/[([].*$/, '').trim();
+  if (!words) return '';
+  return words.length <= 3 ? words : words[0].toUpperCase();
+}
+
+function triadNames(pid) {
+  const p = panelById(pid), g = geometry.panels[pid];
+  const out = {};
+  for (const a of 'xyz') {
+    out[a] = (p?.marks?.[a] || '').trim() || shortAxisName(p?.[`${a}label`]) || shortAxisName(g?.labels?.[a]) || a;
+  }
+  return out;
+}
 
 function drawTriads() {
   canvas.querySelectorAll('.triad').forEach((t) => t.remove());
@@ -1514,9 +1559,14 @@ function drawTriads() {
     const el = document.createElement('div');
     el.className = 'triad';
     el.dataset.pid = pid;
+    el.title = 'Drag to turn the plot';
+    const names = triadNames(pid);
     el.innerHTML = '<canvas class="triad-lines" width="160" height="160" aria-hidden="true"></canvas>' +
-      Object.entries(FACING).map(([a, f]) =>
-        `<button type="button" class="triad-axis" data-axis="${a}" title="${f.words}" aria-label="${f.words}">${a}</button>`).join('') +
+      Object.entries(FACING).map(([a, f]) => {
+        const words = `${f.words.replace(/\b[xyz]\b/g, (c) => names[c])}`;
+        return `<button type="button" class="triad-axis" data-axis="${a}" title="${escapeHtml(words)}" aria-label="${escapeHtml(words)}"` +
+          ` style="color:${AXIS_COLOUR[a]}">${escapeHtml(names[a])}</button>`;
+      }).join('') +
       '<button type="button" class="triad-home" title="Back to the usual 3-D view" aria-label="Back to the usual 3-D view"></button>';
     canvas.appendChild(el);
     placeTriad(el);
@@ -1531,8 +1581,13 @@ function placeTriad(el) {
   // Smaller in a small plot, so it never covers much of it.
   const size = Math.max(44, Math.min(80, 0.3 * Math.min(g.bbox[2], g.bbox[3]) * k));
   el.style.transform = `scale(${size / 80})`;
-  el.style.left = `${(g.bbox[0] + 4) * k}px`;
-  el.style.top = `${(g.bbox[1] + g.bbox[3]) * k - size - 4}px`;
+  // Bottom right, out of the way: the figure's own corner when the plot is
+  // the only one (a 3-D box seldom reaches there), else its plot's corner.
+  const alone = Object.keys(geometry.panels).length === 1;
+  const right = alone ? geometry.width : g.bbox[0] + g.bbox[2];
+  const bottom = alone ? geometry.height : g.bbox[1] + g.bbox[3];
+  el.style.left = `${right * k - size - 4}px`;
+  el.style.top = `${bottom * k - size - 4}px`;
 }
 
 function drawTriad(pid, view) {
@@ -1550,19 +1605,23 @@ function drawTriad(pid, view) {
   const ctx = el.querySelector('.triad-lines').getContext('2d');
   ctx.setTransform(2, 0, 0, 2, 80, 80);       // drawn at twice the size, for sharp lines
   ctx.clearRect(-40, -40, 80, 80);
-  ctx.lineWidth = 3;
   ctx.lineCap = 'round';
   for (const e of ends) {
-    ctx.strokeStyle = AXIS_COLOUR[e.a];
+    // A thick bar with a white edge, as in CAD programs, so it reads over the plot.
+    ctx.lineWidth = 6; ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+    ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(e.x, e.y); ctx.stroke();
+    ctx.lineWidth = 3.5; ctx.strokeStyle = AXIS_COLOUR[e.a];
     ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(e.x, e.y); ctx.stroke();
   }
   ends.forEach((e, n) => {
     const b = el.querySelector(`.triad-axis[data-axis="${e.a}"]`);
-    b.style.left = `${40 + e.x * 1.25}px`;
-    b.style.top = `${40 + e.y * 1.25}px`;
+    // The name sits just past the bar's end, further out for a longer name.
+    const len = Math.hypot(e.x, e.y) || 1;
+    const out = 7 + 2.5 * Math.max(0, b.textContent.length - 1);
+    b.style.left = `${40 + e.x + (e.x / len) * out}px`;
+    b.style.top = `${40 + e.y + (e.y / len) * out}px`;
     b.style.zIndex = String(n + 1);
-    b.style.background = AXIS_COLOUR[e.a];
-    b.style.opacity = Math.hypot(e.x, e.y) < 6 ? '0.55' : '1';   // pointing at you: shown, but small
+    b.style.opacity = len < 6 ? '0.55' : '1';   // pointing at you: shown, but faint
   });
 }
 
@@ -1593,17 +1652,20 @@ function swingTo(pid, target) {
   swing = { frame: requestAnimationFrame(step) };
 }
 
-canvas.addEventListener('pointerdown', (e) => {
-  if (e.target.closest('.triad')) e.stopPropagation();   // not the start of a turn
-}, true);
+// The marker is dragged to turn the plot (whatever the Pick / Turn switch
+// says); a click that never moved swings to a side. That's settled on letting
+// go, in the canvas's pointerup below. A key press on a name still works.
 canvas.addEventListener('click', (e) => {
   const tri = e.target.closest('.triad');
-  if (!tri) return;
-  const pid = tri.dataset.pid;
-  const axis = e.target.closest('.triad-axis')?.dataset.axis;
-  if (axis) swingTo(pid, FACING[axis]);
-  else if (e.target.closest('.triad-home')) swingTo(pid, VIEW);
+  if (!tri || e.detail !== 0) return;      // mouse clicks are handled on pointerup
+  triadPress(tri.dataset.pid, e.target);
 });
+
+function triadPress(pid, target) {
+  const axis = target.closest?.('.triad-axis')?.dataset.axis;
+  if (axis) swingTo(pid, FACING[axis]);
+  else if (target.closest?.('.triad-home')) swingTo(pid, VIEW);
+}
 
 const LEGEND_KINDS = new Set(['line', 'step', 'errorbar', 'band', 'bar', 'scatter', 'box', 'hist', 'quiver',
                               'surface', 'wireframe', 'trisurf', 'line3d', 'scatter3d']);
@@ -2472,6 +2534,64 @@ function panelAt(pt) {
   return null;
 }
 
+/** Like panelAt, but a 3-D plot has no frame to show where it ends, so the
+ *  white space round it counts as part of it too: a point outside every box
+ *  goes to the nearest plot when that one is 3-D. Flat and round plots keep
+ *  their drawn edge, and a click outside it still lets go of everything. */
+function plotZoneAt(pt) {
+  const inside = panelAt(pt);
+  if (inside) return inside;
+  let best = null, bestD = Infinity;
+  for (const [pid, p] of Object.entries(geometry.panels)) {
+    const [bx, by, bw, bh] = p.bbox;
+    const d = Math.hypot(Math.max(bx - pt.x, 0, pt.x - bx - bw), Math.max(by - pt.y, 0, pt.y - by - bh));
+    if (d < bestD) { bestD = d; best = pid; }
+  }
+  return best && geometry.panels[best].projection === '3d' ? best : null;
+}
+
+/* ------------------------------------------- Pick or Turn: what a drag does
+ * Shown at the top of the graph when it has a 3-D plot. Turn: dragging the
+ * plot turns it. Pick: dragging draws a box that picks what's inside, the
+ * same as on a flat plot. A plain click picks things either way, and the
+ * x / y / z marker always turns. Remembered between visits. */
+let handMode = localStorage.getItem('figforge.hand') === 'pick' ? 'pick' : 'turn';
+
+function setHandMode(mode) {
+  handMode = mode === 'pick' ? 'pick' : 'turn';
+  localStorage.setItem('figforge.hand', handMode);
+  showHandBar();
+}
+
+function showHandBar() {
+  const bar = $('hand-bar');
+  const three = !!geometry && Object.values(geometry.panels).some((g) => g.projection === '3d');
+  bar.hidden = !three || !svgEl;
+  for (const b of bar.querySelectorAll('button')) {
+    const on = b.dataset.hand === handMode;
+    b.classList.toggle('on', on);
+    b.setAttribute('aria-pressed', String(on));
+  }
+  canvas.classList.toggle('hand-turn', three && handMode === 'turn');
+  const area = $('canvas-wrap').parentElement;
+  if (area.classList.contains('with-hand') !== !bar.hidden) {
+    area.classList.toggle('with-hand', !bar.hidden);     // room above the graph for the bar
+    if (zoomFits) fit();
+  }
+}
+
+$('hand-bar').addEventListener('click', (e) => {
+  const b = e.target.closest('button[data-hand]');
+  if (b) setHandMode(b.dataset.hand);
+});
+
+function startTurn(evt, pid, extra = {}) {
+  const p = panelById(pid);
+  turn = { pid, start: { x: evt.clientX, y: evt.clientY }, base: { ...VIEW, ...p.view }, moved: false, ...extra };
+  ensureMesh(pid);
+  svgEl.setPointerCapture(evt.pointerId);
+}
+
 const rectsIntersect = (a, b) =>
   a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
 
@@ -2545,6 +2665,13 @@ function pickClickTarget(evt) {
 }
 
 canvas.addEventListener('pointerdown', (evt) => {
+  const tri = evt.target.closest('.triad');
+  if (tri) {
+    // The marker: a drag turns its plot, a click swings it (on letting go).
+    evt.preventDefault();
+    if (!aiRunning) startTurn(evt, tri.dataset.pid, { press: evt.target });
+    return;
+  }
   const g = pickClickTarget(evt);
   if (g) {
     // A click on one tick label selects every tick on that axis as a
@@ -2562,6 +2689,16 @@ canvas.addEventListener('pointerdown', (evt) => {
     // its body -- you see the handles before you can grab one.
     const arrowAlreadySelected = selection.length === 1 && selection[0] === id;
     const pointKey = resolved?.pointKey && arrowAlreadySelected ? resolved.pointKey : null;
+
+    // In a 3-D plot on Turn, dragging something that can't move anyway (the
+    // surface, a wall, the numbers) turns the plot; a click still picks it.
+    const pid3 = resolved?.panel;
+    if (handMode === 'turn' && !isMulti(evt) && pid3 && !resolved.draggable
+        && geometry.panels[pid3]?.projection === '3d') {
+      evt.preventDefault();
+      startTurn(evt, pid3, { pick: id });
+      return;
+    }
 
     if (isMulti(evt)) { toggleSelection(id); return; }
     // Clicking inside an existing multi-selection keeps it, so the whole group
@@ -2600,12 +2737,9 @@ canvas.addEventListener('pointerdown', (evt) => {
   }
 
   evt.preventDefault();
-  const hit = panelAt(clientToSvg(evt));
-  if (hit && geometry.panels[hit].projection === '3d' && !isMulti(evt)) {
-    const p = panelById(hit);
-    turn = { pid: hit, start: { x: evt.clientX, y: evt.clientY }, base: { ...VIEW, ...p.view }, moved: false };
-    ensureMesh(hit);
-    svgEl.setPointerCapture(evt.pointerId);
+  const hit = plotZoneAt(clientToSvg(evt));
+  if (handMode === 'turn' && hit && geometry.panels[hit].projection === '3d' && !isMulti(evt)) {
+    startTurn(evt, hit);
     return;
   }
   rubber = {
@@ -2613,7 +2747,7 @@ canvas.addEventListener('pointerdown', (evt) => {
     moved: false,
     ctrl: isMulti(evt),
     baseSelection: [...selection],
-    hitPanel: panelAt(clientToSvg(evt)),
+    hitPanel: hit,
     el: null,
   };
   svgEl.setPointerCapture(evt.pointerId);
@@ -2684,9 +2818,11 @@ canvas.addEventListener('pointermove', (evt) => {
 canvas.addEventListener('pointerup', (evt) => {
   if (turn) {
     try { svgEl.releasePointerCapture(evt.pointerId); } catch { /* already gone */ }
-    const { pid, moved } = turn;
+    const { pid, moved, pick, press } = turn;
     turn = null;
-    if (moved) scheduleSave(0); else { removeTurnPreview(); setSelection([`panel:${pid}`]); }
+    if (moved) scheduleSave(0);
+    else if (press) triadPress(pid, press);
+    else { removeTurnPreview(); setSelection([pick ?? `panel:${pid}`]); }
     return;
   }
   if (drag) {
@@ -2952,6 +3088,18 @@ for (const [fid, key, lo, hi] of [['f-turn', 'azim', -360, 360], ['f-tilt', 'ele
     if (Number.isFinite(v)) {
       edit((o) => { if (o.projection === '3d') o.view = { ...VIEW, ...o.view, [key]: Math.max(lo, Math.min(hi, v)) }; });
     }
+  });
+}
+
+for (const a of 'xyz') {
+  $(`f-mark-${a}`).addEventListener('change', (e) => {
+    const v = e.target.value.trim().slice(0, 6);
+    edit((o) => {
+      if (o.projection !== '3d') return;
+      const marks = { ...o.marks, [a]: v };
+      if (!v) delete marks[a];
+      if (Object.keys(marks).length) o.marks = marks; else delete o.marks;
+    });
   });
 }
 
@@ -3477,11 +3625,12 @@ function shortNumber(v, lim, scale) {
 $('canvas-wrap').addEventListener('pointermove', (e) => {
   if (!geometry || !svgEl) return;
   const pt = clientToSvg(e);
-  const pid = panelAt(pt);
+  const pid = plotZoneAt(pt);
   if (!pid) { $('sb-xy').textContent = ''; return; }
   const g = geometry.panels[pid];
   if (g.projection) {
-    $('sb-xy').textContent = g.projection === '3d' ? 'Drag an empty spot to turn it' : '';
+    $('sb-xy').textContent = g.projection !== '3d' ? ''
+      : handMode === 'turn' ? 'Drag to turn it' : 'Drag to draw a box (Turn is at the top)';
     return;
   }
   const [x, y] = svgToData(pid, pt.x, pt.y);

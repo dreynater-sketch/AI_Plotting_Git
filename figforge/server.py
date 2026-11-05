@@ -344,6 +344,10 @@ class Handler(BaseHTTPRequestHandler):
                         if ref is None:
                             continue
                         vals = arrays[ref] if isinstance(ref, str) else ref
+                        shape = getattr(vals, "shape", ())
+                        if len(shape) > 1:      # a surface given as whole grids: too many to list
+                            cols, note = [], f"a {shape[1]} × {shape[0]} grid of values"
+                            break
                         cols.append({"field": field, "title": title,
                                      "key": ref if isinstance(ref, str) else None, "values": clean(vals)})
                 return self._json({

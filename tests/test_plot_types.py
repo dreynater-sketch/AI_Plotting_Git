@@ -164,7 +164,9 @@ try:
               f"clicking the 3-D surface picks it ({ev('selection')})")
 
         # an empty spot of the 3-D plot: a click picks the plot, a drag turns it
-        # (the bottom left corner holds the x / y / z marker)
+        # (the bottom right corner holds the x / y / z marker)
+        check(pg.locator("#hand-bar").is_visible() and ev("handMode") == "turn",
+              "a 3-D graph shows the Pick / Turn bar at the top, on Turn")
         x, y = at(0.03, 0.5)
         pg.mouse.click(x, y)
         check(ev("selection[0]") == "panel:a" and pg.locator("#axes-3d-fields").is_visible()
@@ -191,15 +193,53 @@ try:
         pg.click("#btn-undo"); settle()
         check(disk()["panels"][0].get("view") in (None, {"elev": 25, "azim": -60}), "Undo turns it back")
 
+        # --- the white space round a 3-D plot is part of it (it has no frame)
+        g = ev("geometry.panels.a.bbox")
+        out = ev(f"(() => {{ const r = svgEl.getBoundingClientRect(); const k = r.width / geometry.width;"
+                 f" return [r.left + ({g[0]} + {g[2]} * 0.5) * k, r.top + Math.max(2, {g[1]} - 4) * k]; }})()")
+        inside_any = ev(f"!!panelAt(clientToSvg({{clientX: {out[0]}, clientY: {out[1]}}}))")
+        base = disk()["panels"][0].get("view")
+        pg.mouse.move(*out); pg.mouse.down(); pg.mouse.move(out[0] + 30, out[1], steps=4); pg.mouse.up(); settle()
+        check(not inside_any and disk()["panels"][0].get("view") != base,
+              "dragging the white space above the 3-D plot turns it too")
+        pg.click("#btn-undo"); settle()
+
+        # --- dragging the surface itself turns it (a click still picks it, above)
+        pts = ev("[...document.querySelectorAll('#t_a_l0 path')].map((p) => {"
+                 " const r = p.getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; })"
+                 ".filter(([x, y]) => document.elementFromPoint(x, y)?.closest('#t_a_l0')).slice(20, 21)")
+        if pts:
+            pg.mouse.move(*pts[0]); pg.mouse.down(); pg.mouse.move(pts[0][0] - 30, pts[0][1], steps=4); pg.mouse.up(); settle()
+            check(disk()["panels"][0].get("view") != base, "dragging the surface turns the plot")
+            pg.click("#btn-undo"); settle()
+
+        # --- Pick: a drag draws a box instead of turning
+        pg.click('#hand-bar [data-hand="pick"]')
+        x, y = at(0.1, 0.1)
+        pg.mouse.move(x, y); pg.mouse.down(); pg.mouse.move(x + 200, y + 200, steps=5)
+        check(ev("!!document.querySelector('.ff-rubber')") and not ev("!!turn"), "on Pick, a drag draws a picking box")
+        pg.mouse.up(); settle()
+        check(disk()["panels"][0].get("view") in (None, base) and ev("localStorage.getItem('figforge.hand')") == "pick",
+              "…the plot doesn't turn, and Pick is remembered")
+        pg.click('#hand-bar [data-hand="turn"]')
+
         # --- the x / y / z marker in the corner, as in CAD programs
         tri = pg.locator(".triad").bounding_box(); box = pg.locator("#canvas svg").bounding_box()
         g = ev("geometry.panels.a.bbox"); kz = box["width"] / ev("geometry.width")
         left, top, w, h = box["x"] + g[0] * kz, box["y"] + g[1] * kz, g[2] * kz, g[3] * kz
-        check(tri and tri["x"] >= left - 1 and tri["x"] + tri["width"] < left + w * 0.5
-              and tri["y"] + tri["height"] <= top + h + 1 and tri["y"] + tri["height"] > top + h * 0.9
+        names = [pg.inner_text(f'.triad-axis[data-axis="{a}"]') for a in "xyz"]
+        # alone in its figure? then the figure's own corner, else its plot's
+        alone = ev("Object.keys(geometry.panels).length === 1")
+        rx, by = (box["x"] + box["width"], box["y"] + box["height"]) if alone else (left + w, top + h)
+        check(tri and tri["x"] > left + w * 0.5 and rx - 30 < tri["x"] + tri["width"] <= rx + 1
+              and by - 30 < tri["y"] + tri["height"] <= by + 1
               and tri["width"] <= max(44, 0.3 * min(w, h)) + 1
-              and [pg.inner_text(f'.triad-axis[data-axis="{a}"]') for a in "xyz"] == ["x", "y", "z"],
-              f"a 3-D plot has an x / y / z marker, bottom left, small in a small plot, with the axes named ({tri})")
+              and names[:2] == ["T", "B"] and names[2].startswith("J"),
+              f"a 3-D plot has an x / y / z marker, bottom right, small in a small plot, named from the axes ({tri}, {names})")
+        cx, cy = tri["x"] + tri["width"] * 0.3, tri["y"] + tri["height"] * 0.8
+        pg.mouse.move(cx, cy); pg.mouse.down(); pg.mouse.move(cx - 40, cy - 10, steps=4); pg.mouse.up(); settle()
+        check(disk()["panels"][0].get("view") != base, "dragging the marker turns the plot")
+        pg.click("#btn-undo"); settle()
         ev("setZoom(200, true)"); pg.wait_for_timeout(200)
         posts.clear()
         pg.click('.triad-axis[data-axis="z"]')
@@ -222,6 +262,12 @@ try:
         pg.fill("#f-zmax", "20000"); pg.press("#f-zmax", "Enter"); settle()
         p0 = disk()["panels"][0]
         check(p0["view"]["azim"] == 30 and p0["zlim"][1] == 20000, "the turn box and height max change the plot")
+        pg.fill("#f-mark-y", "Field"); pg.press("#f-mark-y", "Enter"); settle()
+        check(disk()["panels"][0].get("marks") == {"y": "Field"} and pg.inner_text('.triad-axis[data-axis="y"]') == "Field",
+              "a name typed for the marker shows on it")
+        pg.fill("#f-mark-y", ""); pg.press("#f-mark-y", "Enter"); settle()
+        check("marks" not in disk()["panels"][0] and pg.inner_text('.triad-axis[data-axis="y"]') == "B",
+              "…and clearing it goes back to the axis's own name")
 
         pg.mouse.move(*at(0.5, 0.5))
         check("turn" in pg.inner_text("#sb-xy"), "the bottom bar says how to turn it instead of x/y")

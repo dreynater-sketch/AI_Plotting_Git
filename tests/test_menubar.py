@@ -152,8 +152,10 @@ try:
         check(shown("#tool-label .tl"), "…and shows them again")
 
         # --- numbers in the boxes are short: no float noise, no digits finer than the axis needs
-        check(ev("[tidyNum(3.9375999999999998), tidyNum(3.93761234, 10), tidyNum(1234567.891), tidyNum(0.25), tidyNum(null)]")
-              == ["3.9376", "3.938", "1234568", "0.25", ""], "numbers in the boxes are tidied")
+        check(ev("[tidyNum(3.9375999999999998), tidyNum(3.93761234, 10), tidyNum(1234567.891), tidyNum(0.25), tidyNum(null),"
+                 " tidyNum(50000000), tidyNum(0.00002), tidyNum(99999)]")
+              == ["3.9376", "3.938", "1.234568e6", "0.25", "", "5e7", "2e-5", "99999"],
+              "numbers in the boxes are tidied; very big or small ones are written like 5e7")
         ev("setSelection(['panel:a'])")
         check(len(pg.input_value("#f-xmin")) <= 8, f"axis limits show short ({pg.input_value('#f-xmin')})")
         ev("setSelection([])")
