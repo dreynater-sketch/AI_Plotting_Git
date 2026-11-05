@@ -421,3 +421,11 @@ figure → saved-code sync; a phone layout; photo-to-data-points.
   the usual view. Looking straight along an axis draws flat (proj_type ortho) and leaves that
   axis out, in the editor and in figure.py (layers.end_on_axis).
 
+## The chat looks like the Claude app (2026-11-05)
+- Your messages in a soft grey box on the right; Claude's as plain text (serif, normal weight) with
+  its **bold**, *slanted*, `code` and lists shown (chatHtml escapes first, so a reply can't add tags).
+- What Claude did is one folded line above its answer ("What Claude did (3 steps)"), "Claude is
+  working..." while it works. A copy button under every message; a down arrow when scrolled up.
+- The reply box: the words on top, + (add files) bottom left, a round send arrow bottom right, and
+  "Claude can make mistakes. Check the numbers." under it.
+

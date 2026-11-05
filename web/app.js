@@ -4315,7 +4315,7 @@ async function aiSteps(name, log, onStep) {
     li.textContent = text;
     li.className = cls;
     log.appendChild(li);
-    $('chat-scroll').scrollTop = $('chat-scroll').scrollHeight;
+    scrollChatDown();
   };
   let d = null, retries = 0;
   while (!d?.done) {
@@ -4337,40 +4337,99 @@ async function aiSteps(name, log, onStep) {
   return d;
 }
 
-/** One message in the talk. -> the bubble. */
+/** Claude's answers use a little Markdown: paragraphs, **bold**, *slanted*,
+ *  `code` and lists. Escaped first, so nothing in a reply can become a tag. */
+function chatHtml(text) {
+  const inline = (t) => escapeHtml(t)
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/(^|[\s(])\*([^*\s][^*]*)\*/g, '$1<em>$2</em>');
+  const out = [];
+  for (const block of String(text || '').trim().split(/\n\s*\n/)) {
+    const lines = block.split('\n');
+    if (lines.every((l) => /^\s*[-*•]\s+/.test(l))) {
+      out.push(`<ul>${lines.map((l) => `<li>${inline(l.replace(/^\s*[-*•]\s+/, ''))}</li>`).join('')}</ul>`);
+    } else if (lines.every((l) => /^\s*\d+[.)]\s+/.test(l))) {
+      out.push(`<ol>${lines.map((l) => `<li>${inline(l.replace(/^\s*\d+[.)]\s+/, ''))}</li>`).join('')}</ol>`);
+    } else {
+      out.push(`<p>${lines.map(inline).join('<br>')}</p>`);
+    }
+  }
+  return out.join('');
+}
+
+const COPY_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg>';
+const DONE_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 5 5 9-10"/></svg>';
+
+/** One message in the talk, with a copy button under it. -> the message. */
 function chatBubble(role, text = '', meta = '') {
+  const who = role === 'user' ? 'you' : 'ai';
+  const row = document.createElement('div');
+  row.className = `chat-row ${who}`;
   const el = document.createElement('div');
-  el.className = `chat-msg ${role === 'user' ? 'you' : 'ai'}`;
-  el.textContent = text;
+  el.className = `chat-msg ${who}`;
+  el.dataset.text = text;
+  if (who === 'you') el.textContent = text;
+  else el.innerHTML = chatHtml(text);
   if (meta) {
     const small = document.createElement('small');
     small.textContent = meta;
     el.appendChild(small);
   }
-  $('ai-chat').appendChild(el);
-  $('chat-scroll').scrollTop = $('chat-scroll').scrollHeight;
+  const acts = document.createElement('div');
+  acts.className = 'chat-actions';
+  acts.innerHTML = `<button type="button" class="chat-act" data-act="copy" title="Copy" aria-label="Copy">${COPY_ICON}</button>`;
+  row.append(el, acts);
+  $('ai-chat').appendChild(row);
+  scrollChatDown();
   return el;
 }
 
+/** Take a message (and its copy button) out of the talk. */
+const dropBubble = (el) => (el.closest('.chat-row') || el).remove();
+
 const tokensUsed = (n) => n ? `Used ${n} tokens` : '';
 
+/** Claude's answer while it works: "Claude is working..." folded over the
+ *  list of what it has done so far. */
 function workingBubble() {
   const answer = chatBubble('assistant');
+  const steps = document.createElement('details');
+  steps.className = 'ai-steps working';
+  steps.innerHTML = '<summary><span>Claude is working</span></summary>';
   const log = document.createElement('ol');
   log.className = 'ai-log';
-  answer.appendChild(log);
+  steps.appendChild(log);
+  answer.appendChild(steps);
   return { answer, log };
 }
 
 function showAnswer(answer, d) {
-  answer.textContent = d.reply;
+  const steps = answer.querySelector('.ai-steps');
+  answer.innerHTML = '';
+  if (steps && steps.querySelector('li')) {
+    steps.classList.remove('working');
+    steps.open = false;
+    const n = d.turn_steps ?? d.steps ?? steps.querySelectorAll('li').length;
+    steps.querySelector('summary').textContent = `What Claude did (${n} step${n === 1 ? '' : 's'})`;
+    answer.appendChild(steps);
+  }
+  answer.dataset.text = d.reply;
+  answer.insertAdjacentHTML('beforeend', chatHtml(d.reply));
   const meta = tokensUsed(d.tokens_spent);
   if (meta) {
     const small = document.createElement('small');
     small.textContent = meta;
     answer.appendChild(small);
   }
-  $('chat-scroll').scrollTop = $('chat-scroll').scrollHeight;
+  scrollChatDown();
+}
+
+/** Keep the newest message in view, unless the reader has scrolled up. */
+function scrollChatDown(force = true) {
+  const box = $('chat-scroll');
+  if (force) box.scrollTop = box.scrollHeight;
+  $('chat-down').hidden = box.scrollHeight - box.scrollTop - box.clientHeight < 80;
 }
 
 function chatMessage(msg, cls = '') {
@@ -4516,10 +4575,10 @@ async function runAiNew(idea, resuming = null) {
   } catch (e) {
     if (leaving) return;
     if (FIGURE) {          // the graph is there; only the end of the work failed
-      answer.remove();
+      dropBubble(answer);
       chatMessage(`Claude couldn't finish: ${e.message}`, 'err');
     } else {               // nothing made: back to the start, nothing lost
-      you.remove(); answer.remove();
+      dropBubble(you); dropBubble(answer);
       $('chat-input').value = idea;
       document.body.classList.add('at-home');
       setRail(true);
@@ -4597,7 +4656,7 @@ async function runAiEdit(request, resume = false) {
     aiChatGoesOn = !!d.can_continue;
     if (!aiChatGoesOn) chatMessage('This talk has got long. Your next message starts a new one.');
   } catch (e) {
-    answer.remove();
+    dropBubble(answer);
     chatMessage(`Claude couldn't finish: ${e.message}`, 'err');
     if (e.status === 409) aiChatGoesOn = false;    // that talk can't go on: the next try starts afresh
     try { await reloadFigure(); } catch { /* keep what's on screen */ }
@@ -4719,6 +4778,18 @@ $('home-mine').addEventListener('click', (e) => {
   if (b) openProject(b.dataset.name);
 });
 $('chat-send').onclick = sendChat;
+$('chat-scroll').addEventListener('scroll', () => scrollChatDown(false));
+$('chat-down').onclick = () => $('chat-scroll').scrollTo({ top: $('chat-scroll').scrollHeight, behavior: 'smooth' });
+$('ai-chat').addEventListener('click', async (e) => {
+  const b = e.target.closest('.chat-act[data-act="copy"]');
+  if (!b) return;
+  const msg = b.closest('.chat-row').querySelector('.chat-msg');
+  try {
+    await navigator.clipboard.writeText(msg.dataset.text || msg.innerText);
+    b.innerHTML = DONE_ICON; b.title = 'Copied';
+  } catch { b.title = 'Couldn’t copy'; }
+  setTimeout(() => { b.innerHTML = COPY_ICON; b.title = 'Copy'; }, 1500);
+});
 $('chat-input').addEventListener('input', () => {
   const t = $('chat-input');
   t.style.height = 'auto';

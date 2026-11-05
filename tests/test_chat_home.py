@@ -232,6 +232,9 @@ try:
         msgs = pg.locator("#ai-chat .chat-msg")
         check(msgs.count() == 2 and "All done." in msgs.nth(1).inner_text() and "20 tokens" in msgs.nth(1).inner_text(),
               "…the answer says what it really used")
+        check(pg.locator("#ai-chat .ai-steps").count() == 1 and not pg.evaluate("document.querySelector('#ai-chat .ai-steps').open")
+              and "2 steps" in pg.inner_text("#ai-chat .ai-steps summary"),
+              "…with what Claude did folded into one line above it")
         check("70 tokens" in pg.inner_text("#sb-tokens"), f"…and the count went down by that ({pg.inner_text('#sb-tokens')})")
         pg.screenshot(path=S + "/chat_figure.png")
 
@@ -249,6 +252,20 @@ try:
         pg.reload(); pg.wait_for_function(ready)
         pg.wait_for_function("document.querySelectorAll('#ai-chat .chat-msg').length === 6")
         check("20 tokens" in pg.locator("#ai-chat .chat-msg").nth(5).inner_text(), "the talk and its tokens come back on reload")
+        # Like the Claude app: your words in a box, Claude's as plain text,
+        # what it did folded away, and a copy button under each.
+        you_bg = pg.evaluate("getComputedStyle(document.querySelector('#ai-chat .chat-msg.you')).backgroundColor")
+        ai_bg = pg.evaluate("getComputedStyle(document.querySelector('#ai-chat .chat-msg.ai')).backgroundColor")
+        check(you_bg not in ("rgba(0, 0, 0, 0)", "transparent") and ai_bg in ("rgba(0, 0, 0, 0)", "transparent"),
+              f"your messages sit in a box, Claude's are plain ({you_bg} / {ai_bg})")
+        check(pg.locator("#ai-chat .chat-act[data-act=copy]").count() == 6, "every message has a copy button")
+        ctx.grant_permissions(["clipboard-read", "clipboard-write"])
+        pg.locator("#ai-chat .chat-row").nth(5).hover()
+        pg.locator("#ai-chat .chat-row").nth(5).locator(".chat-act").click()
+        check(pg.evaluate("navigator.clipboard.readText()") == "All done.", "Copy puts Claude's words on the clipboard")
+        check(pg.evaluate("chatHtml('**Left:** a\\n\\n- one\\n- two <b>')")
+              == "<p><strong>Left:</strong> a</p><ul><li>one</li><li>two &lt;b&gt;</li></ul>",
+              "Claude's bold and lists show as such, and nothing in a reply becomes a tag")
 
         # --------------------------------------------- a reload carries on with it
         pg.click("#btn-home"); pg.wait_for_function("document.body.classList.contains('at-home')")

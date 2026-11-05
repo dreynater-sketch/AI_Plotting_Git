@@ -190,6 +190,7 @@
       </div>
       <p class="chat-tip" id="chat-tip"><b>Drag</b> anything on the graph to move it. <b>Click</b> it to change it. These are always free.</p>
       <div class="chat" id="ai-chat" aria-live="polite"></div>
+      <button class="chat-down" id="chat-down" title="Go to the newest message" aria-label="Go to the newest message" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M6 13l6 6 6-6"/></svg></button>
       <div class="chat-msg ai chat-offer" id="chat-offer" hidden>
         <span id="chat-offer-text"></span>
         <button class="primary" id="offer-free">Yes, make it for free</button>
@@ -198,15 +199,19 @@
     </div>
     <ul class="chat-files" id="chat-files" hidden></ul>
     <div class="composer" id="composer">
-      <label class="composer-attach" id="chat-attach" title="Add your data files">
-        <input type="file" id="ai-files" multiple>
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11.5 12 19.5a5 5 0 0 1-7-7l8.5-8.5a3.3 3.3 0 0 1 4.7 4.7L9.7 17.2a1.6 1.6 0 0 1-2.3-2.3L15 7.3"/></svg>
-      </label>
       <textarea id="chat-input" rows="1" spellcheck="true" maxlength="4000"></textarea>
-      <button class="primary" id="chat-send" disabled>Send</button>
+      <div class="composer-row">
+        <label class="composer-attach" id="chat-attach" title="Add your data files">
+          <input type="file" id="ai-files" multiple>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+        </label>
+        <span class="spacer"></span>
+        <button class="primary" id="chat-send" disabled title="Send (Enter)" aria-label="Send"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M6 11l6-6 6 6"/></svg></button>
+      </div>
     </div>
     <div class="chat-under">
       <span class="chat-price" id="chat-price"></span>
+      <span class="chat-note">Claude can make mistakes. Check the numbers.</span>
       <button class="link" id="chat-howto" hidden>📖 How this was made</button>
       <button class="link" id="ai-new-talk" hidden title="Forget this talk and start again">Start a new talk</button>
     </div>
