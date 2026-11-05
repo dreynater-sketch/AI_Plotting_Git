@@ -33,7 +33,8 @@ Tests: `pip install -r requirements-dev.txt`, then `python tests/run_all.py`
 draws it; the graph appears beside the talk and you drag anything on it. Only
 the chat, the graph, Undo and Save picture show. **More tools** brings back
 every menu and tool, and is remembered. Clicking something opens its settings on
-the right; the chat stays where it is.
+the right; the chat stays where it is. The bar on the left has New graph, Search,
+your graphs and your account; it's folded to pictures beside a graph.
 
 **Tokens** show at the bottom. New accounts start with none for now, and buying
 them isn't built yet, so only people given some can ask Claude

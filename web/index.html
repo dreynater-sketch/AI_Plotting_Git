@@ -11,8 +11,57 @@
 </head>
 <body>
 
+<!-- The bar down the left: start something new, find a graph, your account.
+     Open on the start screen, folded to pictures beside a graph. -->
+<aside class="rail" id="rail">
+  <div class="rail-top">
+    <div class="brand" id="btn-home" role="button" tabindex="0" title="Start a new graph"><span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 18C8 6 11 6 13 12s5 6 7-6"/></svg></span>FigForge <span class="sub" id="storage-badge">local</span></div>
+    <button class="rail-icon" id="rail-toggle" title="Fold or open this bar" aria-label="Fold or open this bar" aria-expanded="false"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="M9 5v14"/></svg></button>
+  </div>
+  <button class="rail-item" id="rail-new" title="Make a new graph"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg><span>New graph</span></button>
+  <button class="rail-item" id="rail-search" title="Find one of your graphs"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/></svg><span>Search</span></button>
+  <input type="search" class="rail-find" id="rail-find" placeholder="Find a graph" aria-label="Find a graph" hidden>
+  <button class="rail-head" id="rail-mine-head" aria-expanded="true">Your graphs <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
+  <div class="home-mine" id="home-mine"></div>
+  <div class="rail-foot">
+    <div class="account" id="account" hidden>
+      <button id="btn-account" title="Your profile"><span class="avatar" id="account-avatar"></span><span id="account-name"></span></button>
+      <div class="profile-panel" id="profile-panel" hidden>
+        <div class="profile-email" id="profile-email"></div>
+        <label class="field">
+          <span>Display name</span>
+          <span class="inline">
+            <input type="text" id="profile-name" maxlength="60" autocomplete="nickname">
+            <button id="btn-profile-save">Save</button>
+          </span>
+        </label>
+        <form id="profile-password-form" class="field">
+          <span>Change password</span>
+          <input type="email" autocomplete="username" id="profile-username" hidden>
+          <input type="password" id="profile-pw" placeholder="New password (8+ characters)" autocomplete="new-password">
+          <input type="password" id="profile-pw2" placeholder="Repeat new password" autocomplete="new-password">
+          <button type="submit">Update password</button>
+        </form>
+        <div class="admin-box" id="admin-box" hidden>
+          <form id="invite-form" class="field">
+            <span>Invite a friend</span>
+            <input type="email" id="invite-email" placeholder="friend@example.com" autocomplete="off">
+            <span class="inline">
+              <button type="button" id="invite-link" title="Make the invite link and copy it -- send it to them yourself (text, DM). No email, so no spam folder.">Copy invite link</button>
+              <button type="submit" title="Supabase emails the invite (it may land in spam)">Email invite</button>
+            </span>
+            <input type="text" id="invite-link-out" readonly hidden>
+          </form>
+          <ul class="invite-list" id="invite-list"></ul>
+        </div>
+        <p class="profile-msg" id="profile-msg"></p>
+        <button id="btn-signout" class="danger">Sign out</button>
+      </div>
+    </div>
+  </div>
+</aside>
+
 <header class="topbar">
-  <div class="brand" id="btn-home" role="button" tabindex="0" title="Start a new graph"><span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 18C8 6 11 6 13 12s5 6 7-6"/></svg></span>FigForge <span class="sub" id="storage-badge">local</span></div>
   <!-- The menu bar. Everything you can do lives in a menu, so the screen
        stays clear for the figure. -->
   <nav class="menubar" id="menubar" role="menubar">
@@ -128,48 +177,9 @@
       </div>
     </div>
   </div>
-  <div class="account" id="account" hidden>
-    <button id="btn-account" title="Your profile"><span class="avatar" id="account-avatar"></span><span id="account-name"></span></button>
-    <div class="profile-panel" id="profile-panel" hidden>
-      <div class="profile-email" id="profile-email"></div>
-      <label class="field">
-        <span>Display name</span>
-        <span class="inline">
-          <input type="text" id="profile-name" maxlength="60" autocomplete="nickname">
-          <button id="btn-profile-save">Save</button>
-        </span>
-      </label>
-      <form id="profile-password-form" class="field">
-        <span>Change password</span>
-        <input type="email" autocomplete="username" id="profile-username" hidden>
-        <input type="password" id="profile-pw" placeholder="New password (8+ characters)" autocomplete="new-password">
-        <input type="password" id="profile-pw2" placeholder="Repeat new password" autocomplete="new-password">
-        <button type="submit">Update password</button>
-      </form>
-      <div class="admin-box" id="admin-box" hidden>
-        <form id="invite-form" class="field">
-          <span>Invite a friend</span>
-          <input type="email" id="invite-email" placeholder="friend@example.com" autocomplete="off">
-          <span class="inline">
-            <button type="button" id="invite-link" title="Make the invite link and copy it -- send it to them yourself (text, DM). No email, so no spam folder.">Copy invite link</button>
-            <button type="submit" title="Supabase emails the invite (it may land in spam)">Email invite</button>
-          </span>
-          <input type="text" id="invite-link-out" readonly hidden>
-        </form>
-        <ul class="invite-list" id="invite-list"></ul>
-      </div>
-      <p class="profile-msg" id="profile-msg"></p>
-      <button id="btn-signout" class="danger">Sign out</button>
-    </div>
-  </div>
 </header>
 
 <main>
-  <!-- Your graphs, like past chats. Only on the start screen. -->
-  <aside class="home-rail" id="home-rail">
-    <h2>Your graphs</h2>
-    <div class="home-mine" id="home-mine"></div>
-  </aside>
   <!-- The talk with Claude. It fills the start screen, then moves to the side
        once there is a graph. -->
   <section class="chatside" id="chatside">

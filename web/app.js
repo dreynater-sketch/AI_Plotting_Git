@@ -4069,15 +4069,31 @@ function setAiRunning(on) {
   refreshChat();
 }
 
-/* The start screen. Claude is only called when you send a message: a dropped
- * spreadsheet gets offered as a free graph first. */
-function showHome(names) {
-  FIGURE = null;
-  document.body.classList.add('at-home', 'no-figure');
-  document.title = 'FigForge';
+/* The bar down the left: open on the start screen, folded beside a graph (the
+ * chat and the settings need the room), and one click from either. */
+function setRail(open) {
+  document.body.classList.toggle('rail-open', open);
+  $('rail-toggle').setAttribute('aria-expanded', String(open));
+}
+
+function fillRail(names) {
   $('home-mine').innerHTML = names.length
     ? names.map((n) => `<button class="mine" data-name="${escapeHtml(n)}" title="${escapeHtml(n)}">${escapeHtml(n)}</button>`).join('')
     : '<p>The graphs you make will show up here.</p>';
+  markRail();
+}
+
+function markRail() {
+  for (const b of $('home-mine').querySelectorAll('.mine')) b.classList.toggle('on', b.dataset.name === FIGURE);
+}
+
+/* The start screen. Claude is only called when you send a message: a dropped
+ * spreadsheet gets offered as a free graph first. */
+function showHome() {
+  FIGURE = null;
+  document.body.classList.add('at-home', 'no-figure');
+  document.title = 'FigForge';
+  setRail(true);
   refreshChat();
   setStatus('');
   $('status').dataset.ready = '1';
@@ -4111,6 +4127,7 @@ async function runAiNew(idea, resuming = null) {
   chatMessage('');
   setAiRunning(true);
   document.body.classList.remove('at-home');
+  setRail(false);
   const you = chatBubble('user', idea);
   const { answer, log } = workingBubble();
   $('chat-input').value = '';
@@ -4163,6 +4180,7 @@ async function runAiNew(idea, resuming = null) {
       you.remove(); answer.remove();
       $('chat-input').value = idea;
       document.body.classList.add('at-home');
+      setRail(true);
       window.history.replaceState(null, '', location.pathname);
       offerFile = keptOffer;
       showAiFiles();
@@ -4330,6 +4348,24 @@ document.addEventListener('keydown', (e) => {
 /* The chat's buttons, and files dropped anywhere on the page. */
 $('btn-ai').onclick = $('menu-ai-new').onclick = goHome;
 $('btn-home').onclick = goHome;
+$('rail-new').onclick = goHome;
+$('rail-toggle').onclick = () => setRail(!document.body.classList.contains('rail-open'));
+$('rail-mine-head').onclick = () => {
+  const open = $('rail-mine-head').getAttribute('aria-expanded') !== 'true';
+  $('rail-mine-head').setAttribute('aria-expanded', String(open));
+};
+$('rail-search').onclick = () => {
+  setRail(true);
+  $('rail-mine-head').setAttribute('aria-expanded', 'true');
+  $('rail-find').hidden = !$('rail-find').hidden;
+  if ($('rail-find').hidden) { $('rail-find').value = ''; findInRail(); }
+  else $('rail-find').focus();
+};
+function findInRail() {
+  const words = $('rail-find').value.trim().toLowerCase();
+  for (const b of $('home-mine').querySelectorAll('.mine')) b.hidden = !b.dataset.name.toLowerCase().includes(words);
+}
+$('rail-find').addEventListener('input', findInRail);
 $('btn-home').addEventListener('keydown', (e) => { if (e.key === 'Enter') goHome(); });
 $('btn-ai-edit').onclick = () => $('chat-input').focus();
 $('chat-howto').onclick = () => $('btn-howto').click();
@@ -4748,9 +4784,10 @@ async function startEditor() {
   try {
     const picked = await pickProject();
     fillProjectSelect(picked.names);
+    fillRail(picked.names);
     if (picked.name) await openFigureHere(picked.name, true);
     else {
-      showHome(picked.names);
+      showHome();
       await resumeMaking(picked.wanted);
     }
   } catch (e) {
@@ -4787,7 +4824,12 @@ async function openFigureHere(name, loadTalk) {
     document.title = `FigForge — ${FIGURE}`;
     // `history` in this file is the undo stack; the browser's is window.history.
     window.history.replaceState(null, '', '?project=' + encodeURIComponent(FIGURE));
+    if (document.body.classList.contains('at-home') || document.body.classList.contains('no-figure')) setRail(false);
     document.body.classList.remove('at-home', 'no-figure');
+    if (!$('home-mine').querySelector(`.mine[data-name="${CSS.escape(name)}"]`)) {
+      fillRail([...$('project-select').options].map((o) => o.value));
+    }
+    markRail();
     refreshChat();
 
     if (early && early.name !== FIGURE) early.figure = early.history = null;

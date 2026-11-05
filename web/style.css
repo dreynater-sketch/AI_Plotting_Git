@@ -734,20 +734,22 @@ input[type=checkbox] { width: 17px; height: 17px; }
 /* ---------------------------------------------------- accounts (hosted) */
 .account { position: relative; }
 #btn-account {
-  display: flex; align-items: center; gap: 8px; height: 40px;
-  padding: 0 12px 0 4px; border-radius: 20px;
+  display: flex; align-items: center; gap: 10px; width: 100%; height: 44px;
+  padding: 0 8px; border: none; border-radius: 12px; background: none;
+  font-size: 15px; font-weight: 500; text-align: left;
 }
+#btn-account:hover:not(:disabled) { background: var(--tint); border: none; }
 .avatar {
   width: 32px; height: 32px; border-radius: 50%;
   background: #ffe3ec; color: var(--accent-ink);
   display: inline-flex; align-items: center; justify-content: center;
   font-weight: 900; font-size: 14px;
 }
-#account-name { max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#account-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .profile-panel {
-  position: absolute; right: 0; top: calc(100% + 8px); z-index: 60;
-  width: 310px; padding: 18px;
+  position: absolute; left: 0; bottom: calc(100% + 8px); z-index: 60;
+  width: 310px; max-height: calc(100vh - 90px); overflow-y: auto; padding: 18px;
   background: var(--surface);
   border: 2px solid var(--line-soft); border-radius: 20px;
   box-shadow: 0 16px 40px rgba(76, 52, 160, 0.16);
@@ -1024,7 +1026,7 @@ sub, sup { font-size: 0.75em; line-height: 0; }
 #chat-msg { margin: 0; min-height: 0; }
 #chat-msg:empty { display: none; }
 .figure-ideas .idea { height: 28px; font-size: 12.5px; padding: 0 10px; }
-.home-ideas, .home-rail { display: none; }
+.home-ideas { display: none; }
 .idea-chips[hidden] { display: none !important; }
 .sb-tokens { color: var(--accent-ink); font-weight: 900; }
 .sb-tokens.low { color: var(--danger); }
@@ -1055,19 +1057,6 @@ body.at-home .composer textarea { font-size: 16px; }
 body.at-home .chat-under { justify-content: center; text-align: center; }
 body.at-home .chat-price { flex: none; }
 body.at-home .home-ideas { display: flex; justify-content: center; }
-body.at-home .home-rail {
-  display: block; flex: none; width: 240px; padding: 18px 14px; overflow-y: auto;
-  background: var(--surface); border-right: 2px solid var(--line-soft);
-}
-.home-rail h2 { margin: 0 0 10px 6px; font-size: 14px; font-weight: 900; }
-.home-mine { display: flex; flex-direction: column; gap: 4px; }
-.home-mine .mine {
-  display: block; flex: none; width: 100%; height: auto; min-height: 36px; padding: 7px 10px; text-align: left; border: none; border-radius: 12px;
-  background: none; font-size: 13.5px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.home-mine .mine:hover:not(:disabled) { background: var(--tint); border: none; }
-.home-mine p { margin: 0 6px; font-size: 13px; color: var(--ink-soft); }
-
 /* Simple (until "More tools"): the chat, the graph, Undo and Save picture.
    The chat is never covered. Picking something opens its settings on the right,
    and they stay open until closed, so the graph resizes once, not on every click. */
@@ -1082,6 +1071,61 @@ body.simple #insp-empty > :not(.empty) { display: none !important; }
 #btn-side-close { font-size: 22px; line-height: 1; padding: 0 6px; }
 body:not(.simple) #btn-side-close { display: none; }
 body.no-figure .save-bar { display: none !important; }
+body.no-figure .topbar { display: none; }
+
+/* The bar down the left. The same words at the same size as the bars in Claude
+   and Grok: plain rows, not bold. It stays put, and the page sits beside it. */
+body { --rail: 60px; padding-left: var(--rail); }
+body.rail-open { --rail: 280px; }
+.rail {
+  position: fixed; left: 0; top: 0; bottom: 0; width: var(--rail); z-index: 30;
+  display: flex; flex-direction: column; gap: 2px; padding: 10px;
+  background: var(--surface); border-right: 2px solid var(--line-soft);
+  font-size: 15px; font-weight: 500;
+}
+.rail button { font: inherit; }
+.rail-top { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 6px; height: 44px; margin-bottom: 8px; }
+.rail-icon {
+  flex: none; width: 36px; height: 36px; padding: 0; display: flex; align-items: center; justify-content: center;
+  border: none; border-radius: 10px; background: none; color: var(--ink-soft);
+}
+.rail-icon svg, .rail-item svg, .rail-head svg { fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
+.rail-icon svg, .rail-item svg { flex: none; width: 20px; height: 20px; }
+.rail-item {
+  flex: none; display: flex; align-items: center; gap: 12px; width: 100%; height: 38px; padding: 0 9px;
+  border: none; border-radius: 10px; background: none; color: var(--ink); text-align: left; white-space: nowrap; overflow: hidden;
+}
+.rail-icon:hover:not(:disabled), .rail-item:hover:not(:disabled) { background: var(--tint); border: none; transform: none; }
+body.at-home #rail-new { background: var(--tint); }
+.rail-find {
+  flex: none; width: 100%; height: 36px; margin: 2px 0; padding: 0 10px; font: inherit;
+  border: 2px solid var(--line); border-radius: 10px; background: #faf9ff;
+}
+.rail-head {
+  flex: none; display: flex; align-items: center; gap: 4px; width: fit-content; height: 30px; margin: 16px 0 2px; padding: 0 9px;
+  border: none; border-radius: 8px; background: none; color: var(--ink-soft); font-size: 14px;
+}
+.rail-head:hover:not(:disabled) { background: none; border: none; color: var(--ink); transform: none; }
+.rail-head svg { width: 14px; height: 14px; transition: transform 0.12s; }
+.rail-head[aria-expanded="false"] svg { transform: rotate(-90deg); }
+.home-mine { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
+.home-mine .mine {
+  display: block; flex: none; width: 100%; height: 38px; padding: 0 9px; text-align: left; border: none; border-radius: 10px;
+  background: none; color: var(--ink); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.home-mine .mine:hover:not(:disabled) { background: var(--tint); border: none; transform: none; }
+.home-mine .mine.on { background: var(--tint); }
+.home-mine .mine[hidden] { display: none; }
+.home-mine p { margin: 0 9px; font-size: 14px; color: var(--ink-soft); }
+.rail-foot { flex: none; margin-top: auto; padding-top: 8px; border-top: 2px solid var(--line-soft); }
+.rail-head[aria-expanded="false"] + .home-mine { visibility: hidden; }
+/* Folded: just the pictures. */
+body:not(.rail-open) .rail-top { flex-direction: column; height: auto; }
+body:not(.rail-open) .brand { font-size: 0; }
+body:not(.rail-open) .brand .sub, body:not(.rail-open) .rail-item span, body:not(.rail-open) .rail-find,
+body:not(.rail-open) .rail-head, body:not(.rail-open) .home-mine, body:not(.rail-open) #account-name { display: none; }
+body:not(.rail-open) .rail-foot { width: 100%; }
+body:not(.rail-open) #btn-account { padding: 0 2px; justify-content: center; }
 
 /* Narrower windows: keep the top bar on one line. */
 @media (max-width: 1280px) {
@@ -1089,8 +1133,6 @@ body.no-figure .save-bar { display: none !important; }
   .sidebar { width: 280px; }
 }
 @media (max-width: 1440px) {
-  #account-name { display: none; }
-  #btn-account { padding: 0 4px; }
   #project-select { max-width: 160px; }
   .menu-title { padding: 0 10px; }
 }

@@ -117,6 +117,23 @@ try:
         check("30 tokens" in pg.inner_text("#chat-price") and "free" in pg.inner_text("#chat-price"), "it says what a graph costs")
         check(pg.locator('#home-mine .mine[data-name="qcircle"]').count() == 1, "your graphs are listed")
         check(pg.is_disabled("#chat-send"), "nothing to send yet")
+        rail = pg.locator("#rail").bounding_box()
+        check(rail["x"] == 0 and rail["height"] == 850 and rail["width"] == 280 and all(shown(pg, s) for s in ("#rail-new", "#rail-search", "#rail-toggle")),
+              "the bar on the left runs the full height, with New graph and Search")
+        size = lambda sel: pg.evaluate(f"getComputedStyle(document.querySelector({json.dumps(sel)})).fontSize")
+        weight = lambda sel: pg.evaluate(f"getComputedStyle(document.querySelector({json.dumps(sel)})).fontWeight")
+        check(size("#rail-new span") == size("#home-mine .mine") == "15px" and weight("#home-mine .mine") == "500",
+              "its rows are all one size, plain not bold")
+        pg.click("#rail-search"); pg.fill("#rail-find", "qcir")
+        vis = pg.evaluate("[...document.querySelectorAll('#home-mine .mine')].filter((b) => !b.hidden).map((b) => b.dataset.name)")
+        check(vis == ["qcircle"], f"Search finds a graph by name ({vis})")
+        pg.click("#rail-search")
+        check(pg.is_hidden("#rail-find") and pg.locator("#home-mine .mine:not([hidden])").count() > 1, "…and closing it brings them all back")
+        pg.click("#rail-toggle")
+        pg.wait_for_timeout(100)
+        check(pg.locator("#rail").bounding_box()["width"] == 60 and not shown(pg, "#home-mine") and shown(pg, "#rail-new"),
+              "it folds to just pictures")
+        pg.click("#rail-toggle")
         pg.screenshot(path=S + "/chat_home.png")
 
         # ---------------------------------------------- a dropped spreadsheet: free
@@ -139,6 +156,11 @@ try:
         check("100 tokens" in pg.inner_text("#sb-tokens"), "…and no tokens were used")
 
         # ------------------------------------------------- the simple figure screen
+        check(pg.locator("#rail").bounding_box()["width"] == 60, "beside a graph the bar is folded, to leave it room")
+        pg.click("#rail-toggle"); pg.wait_for_timeout(300)
+        check(pg.locator('#home-mine .mine.on[data-name="zz_chat_free"]').count() == 1, "…open, it shows which graph this is")
+        pg.screenshot(path=S + "/chat_rail_open.png")
+        pg.click("#rail-toggle"); pg.wait_for_timeout(300)
         check(shown(pg, "#btn-undo") and shown(pg, "#btn-save-pic") and shown(pg, "#chat-input"),
               "with a graph: Undo, Save picture and the chat stay")
         check(not any(shown(pg, s) for s in ("#menu-file", "#tool-label", "#zoom", "#sb-list", "#inspector")),
@@ -190,6 +212,7 @@ try:
         # ---------------------------------------------------- asking Claude for one
         pg.click("#btn-home"); pg.wait_for_function("document.body.classList.contains('at-home')")
         check("project" not in pg.url, "the logo goes back to the start")
+        check(pg.locator("#rail").bounding_box()["width"] == 280, "…where the bar is open again")
         pg.fill("#chat-input", "zz_chat nothing please")
         pg.click("#chat-send")
         pg.wait_for_function("document.getElementById('chat-msg').textContent.includes('couldn')")
