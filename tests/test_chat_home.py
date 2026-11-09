@@ -41,7 +41,8 @@ def check(c, m): print(("PASS " if c else "FAIL ") + m, flush=True); c or fails.
 def fake_start(fig, files, skipped, idea):
     return {"version": 2, "idea": idea, "messages": [{"role": "user", "content": []}], "tables": {},
             "anthropic_files": [], "steps": 0, "cost_usd": 0.0, "views": 0, "created": False,
-            "done": False, "reply": "", "log": [], "chat": [{"role": "user", "text": idea}],
+            "done": False, "reply": "", "log": [],
+            "chat": [{"role": "user", "text": idea, **({"files": [f["name"] for f in files]} if files else {})}],
             "files_seen": [f["name"] for f in files]}
 
 
@@ -263,6 +264,11 @@ try:
         pg.locator("#ai-chat .chat-row").nth(5).hover()
         pg.locator("#ai-chat .chat-row").nth(5).locator(".chat-act").click()
         check(pg.evaluate("navigator.clipboard.readText()") == "All done.", "Copy puts Claude's words on the clipboard")
+        pg.evaluate("chatBubble('user', 'zz look', '', ['data/zz_sweep.csv'])")
+        card = pg.locator("#ai-chat .chat-row.you .chat-file").last
+        check(card.is_visible() and "zz_sweep.csv" in card.inner_text() and "CSV" in card.inner_text(),
+              "a file sent with a message shows above it")
+        pg.evaluate("dropBubble(document.querySelectorAll('#ai-chat .chat-msg.you')[document.querySelectorAll('#ai-chat .chat-msg.you').length - 1])")
         check(pg.evaluate("chatHtml('**Left:** a\\n\\n- one\\n- two <b>')")
               == "<p><strong>Left:</strong> a</p><ul><li>one</li><li>two &lt;b&gt;</li></ul>",
               "Claude's bold and lists show as such, and nothing in a reply becomes a tag")
@@ -275,6 +281,10 @@ try:
         pg.wait_for_function("location.search.includes('project=')")
         check(pg.evaluate("FIGURE") is None and pg.evaluate("localStorage.getItem('figforge.making')") == "zz_chat slow one",
               "while it's being made, the page remembers it")
+        check(pg.locator("#ai-chat .chat-msg.ai .ai-bar span").is_visible() and pg.locator("#canvas-bar").is_visible()
+              and "making your graph" in pg.inner_text("#canvas-wait"),
+              "…and a bar shows it working, in the chat and where the graph will be")
+        pg.screenshot(path=S + "/chat_making.png")
         time.sleep(0.4)
         pg.reload()
         pg.wait_for_function("document.querySelectorAll('#ai-chat .chat-msg').length === 2", timeout=20000)

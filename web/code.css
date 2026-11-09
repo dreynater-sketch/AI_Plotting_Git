@@ -74,6 +74,13 @@ body { background: var(--edit); color: var(--text); font: 13px/1.4 var(--ui); ov
 .tree .nested2 { padding-left: 46px; }
 .tree-file.active { background: #34352d; color: #fff; }
 .tree-file.muted { color: var(--faint); }
+/* A data file: click to download it. */
+.tree-dl { display: flex; align-items: center; gap: 6px; padding: 3px 14px 3px 46px; color: var(--faint);
+  text-decoration: none; white-space: nowrap; }
+.tree-dl .dl-name { overflow: hidden; text-overflow: ellipsis; }
+.tree-dl .dl-icon { margin-left: auto; opacity: 0; }
+.tree-dl:hover { background: #34352d; color: #fff; }
+.tree-dl:hover .dl-icon { opacity: 1; }
 .side-note { margin: 14px 14px 0; color: var(--faint); font-size: 11.5px; line-height: 1.5; }
 .side-note a { color: var(--blue); }
 

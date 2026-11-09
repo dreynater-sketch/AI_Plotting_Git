@@ -164,6 +164,7 @@ async function load() {
   cm.clearHistory();
   if (reloading) { cm.setCursor(cursor); cm.scrollTo(scroll.left, scroll.top); }
   $('tree-project').textContent = PROJECT;
+  if (!reloading) listDataFiles();
   $('side-note').innerHTML = `Run executes this script <b>in your browser</b> (Python via Pyodide); ` +
     `nothing runs on the server. <b>Saving</b> keeps your code and applies what it can to ` +
     `the draggable figure (labels, titles, axes, curves, arrows, legend); anything else stays ` +
@@ -173,6 +174,20 @@ async function load() {
   showBanner(d.custom?.merged);
   drawMinimap();
   if (!reloading) cm.focus();
+}
+
+/* The project's data files, under "data" in the folder list. Not editable
+ * here, but each one downloads with a click (⤓). */
+async function listDataFiles() {
+  try {
+    const r = await fetch(`/api/files/${encodeURIComponent(PROJECT)}`);
+    if (!r.ok) return;
+    const { files } = await r.json();
+    $('tree-data-head').hidden = !files.length;
+    $('tree-data').innerHTML = files.map((f) =>
+      `<a class="tree-file nested2 tree-dl" href="/api/file/${encodeURIComponent(PROJECT)}/${f.split('/').map(encodeURIComponent).join('/')}"` +
+      ` download="${esc(f.split('/').pop())}" title="Download ${esc(f)}"><span class="dl-name">${esc(f)}</span><span class="dl-icon" aria-hidden="true">⤓</span></a>`).join('');
+  } catch { /* no list: nothing to show */ }
 }
 
 /* The figure editor changed the figure: show the new code. With unsaved
@@ -260,7 +275,7 @@ async function save() {
   }
 }
 
-const esc = (t) => String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+const esc = (t) => String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
 
 /** What Save did to the figure, in the Output panel. Lines that couldn't be
  *  applied are clickable and jump to that line. */

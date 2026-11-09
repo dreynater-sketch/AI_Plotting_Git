@@ -1083,7 +1083,27 @@ sub, sup { font-size: 0.75em; line-height: 0; }
 .fig-name { font-weight: 800; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #btn-home { cursor: pointer; }
 #btn-more[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent-ink); }
-.canvas-wait { display: none; position: absolute; inset: 0; align-items: center; justify-content: center; font-size: 18px; font-weight: 800; color: #a7a1bd; }
+.canvas-wait { display: none; position: absolute; inset: 0; flex-direction: column; gap: 14px; align-items: center; justify-content: center; font-size: 18px; font-weight: 800; color: #a7a1bd; }
+.canvas-wait .wait-busy { display: none; }
+body.ai-busy .canvas-wait .wait-busy { display: block; }
+body.ai-busy .canvas-wait .wait-idle { display: none; }
+.canvas-wait .ai-bar { width: min(320px, 60%); }
+/* How far along Claude is: a bar that fills as it works, with a soft shine
+   running along it so it's seen to be alive. */
+.ai-bar { position: relative; height: 6px; margin: 10px 0 2px; border-radius: 999px; background: var(--line-soft); overflow: hidden; }
+.ai-bar span { position: absolute; inset: 0 auto 0 0; width: 4%; border-radius: inherit;
+  background: linear-gradient(90deg, var(--sel), #7b8cf0); transition: width 0.4s ease; overflow: hidden; }
+.ai-bar span::after { content: ""; position: absolute; inset: 0; width: 40%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.6), transparent);
+  animation: ai-bar-shine 1.4s linear infinite; }
+@keyframes ai-bar-shine { from { transform: translateX(-100%); } to { transform: translateX(250%); } }
+/* Files sent with a message: little cards above it. */
+.chat-files-sent { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; margin-bottom: 6px; }
+.chat-file { display: inline-flex; align-items: center; gap: 6px; max-width: 220px; padding: 6px 10px; border: 1px solid var(--line);
+  border-radius: 10px; background: #fff; font-size: 13px; font-weight: 600; color: var(--ink);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chat-file b { flex: none; padding: 2px 5px; border-radius: 5px; background: var(--ok-soft); color: var(--ok); font-size: 10px; font-weight: 800; }
+.chat-file.more { color: var(--ink-soft); }
 
 /* The little x / y / z marker in a 3-D plot's corner: coloured bars with
    the axes' names at their ends, as in CAD programs. Drag it to turn. */

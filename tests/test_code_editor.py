@@ -3,7 +3,7 @@ import os as _os
 ROOT_DIR = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
 OUT_DIR = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "_out")
 _os.makedirs(OUT_DIR, exist_ok=True)
-import json, os, shutil, subprocess, sys, urllib.request
+import json, os, shutil, subprocess, sys, urllib.error, urllib.request
 from _cleanup import rmtree
 from playwright.sync_api import sync_playwright
 
@@ -48,6 +48,20 @@ with sync_playwright() as pw:
     check(f"code.html?project={P}" in pg.url, "View & edit opens code.html in a new tab")
     check(pg.evaluate("cm.getValue()") == code_dl, "editor shows the generated figure.py")
     check(pg.inner_text("#status-source") == "Generated from the figure", "status bar: generated")
+    pg.wait_for_selector("#tree-data .tree-dl")
+    names = pg.evaluate("[...document.querySelectorAll('#tree-data .tree-dl .dl-name')].map((a) => a.textContent)")
+    check(names == ["curves.npz", "vna_sweep.csv"], f"the data folder lists the project's real files ({names})")
+    with pg.expect_download() as dl:
+        pg.click('#tree-data .tree-dl:has-text("vna_sweep.csv")')
+    got = open(dl.value.path(), "rb").read()
+    check(dl.value.suggested_filename == "vna_sweep.csv" and got == open(f"figures/{P}/data/vna_sweep.csv", "rb").read(),
+          "clicking one downloads it")
+    check(urllib.request.urlopen(urllib.request.Request(B + f"/api/files/{P}")).status == 200, "the list comes from the server")
+    try:
+        urllib.request.urlopen(B + f"/api/file/{P}/..%2Fspec.json"); bad = False
+    except urllib.error.HTTPError as e:
+        bad = e.code == 404
+    check(bad, "only the listed files can be downloaded")
     check(pg.evaluate("cm.getOption('keyMap')") == "sublime" and pg.evaluate("cm.getOption('theme')") == "monokai",
           "Sublime keymap + Monokai theme")
     painted = pg.evaluate("""(() => { const c = document.getElementById('minimap');

@@ -12,6 +12,7 @@
                                what it can back onto the figure (codesync.py)
     POST /api/script/<name>/reset   drop the hand-edited version
     GET  /api/npz/<name>       data/curves.npz, for running figure.py in the browser
+    GET  /api/files/<name>     the data files a person can download; /api/file/<name>/<file> one of them
     GET  /api/history/<name>   saved undo/redo stacks {undo: [spec...], redo: [...]}
     POST /api/history/<name>   {undo, redo} -> persist both stacks
     POST /api/project/duplicate  {from, name} -> copy a project ("Save as")
@@ -74,7 +75,7 @@ import re
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import parse_qs, unquote, urlparse
+from urllib.parse import parse_qs, quote, unquote, urlparse
 
 import numpy as np
 
@@ -185,6 +186,27 @@ class Handler(BaseHTTPRequestHandler):
             spec = fig.load_spec()
             return self._json({"generated": codegen.generate(spec),
                                "custom": self._script_now(fig, spec), "rev": spec.get("rev")})
+
+        if path.startswith("/api/files/"):
+            fig = self._figure(path[len("/api/files/"):])
+            if not fig:
+                return self._error(404, "unknown figure")
+            return self._json({"files": [shown for shown, _ in fig.data_files()]})
+
+        if path.startswith("/api/file/"):
+            # One of the project's data files, to download. Only names from
+            # data_files() are served, so nothing else can be asked for.
+            name, _, shown = path[len("/api/file/"):].partition("/")
+            fig = self._figure(name)
+            rel = dict(fig.data_files()).get(shown) if fig else None
+            data = fig.read_file(rel) if rel else None
+            if data is None:
+                return self._error(404, "no such file")
+            plain = os.path.basename(shown)
+            safe = re.sub(r'[^A-Za-z0-9._ -]', "_", plain) or "file"
+            ctype = "text/csv; charset=utf-8" if safe.lower().endswith(".csv") else "application/octet-stream"
+            return self._send(200, data, ctype, {
+                "Content-Disposition": f"attachment; filename=\"{safe}\"; filename*=UTF-8''{quote(plain)}"})
 
         if path.startswith("/api/npz/"):
             fig = self._figure(path[len("/api/npz/"):])

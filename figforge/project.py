@@ -434,6 +434,28 @@ class Figure:
         raw = self.store.read(self._rel("data/source.csv"))
         return raw.decode("utf-8") if raw is not None else None
 
+    def data_files(self):
+        """The project's data files a person can download, as
+        [(name shown, path inside the project)]: the numbers figure.py loads,
+        the spreadsheet it was made from, and tables Claude was given."""
+        out = []
+        if self.store.has(self._rel("data/curves.npz")):
+            out.append(("curves.npz", "data/curves.npz"))
+        spec = self.load_spec() if self.store.has(self._rel("spec.json")) else {}
+        source = spec.get("source") or {}
+        if self.store.has(self._rel("data/source.csv")):
+            shown = os.path.basename(source.get("filename") or "") or "source.csv"
+            out.append((shown if shown.lower().endswith((".csv", ".tsv", ".txt")) else shown + ".csv", "data/source.csv"))
+        if self.store.has(self._rel("data/vna_sweep.csv")):
+            out.append(("vna_sweep.csv", "data/vna_sweep.csv"))
+        for name in ((self.load_assistant() or {}).get("tables") or {}):
+            if self.store.has(self._rel(f"data/tables/{name}")):
+                out.append((f"tables/{name}", f"data/tables/{name}"))
+        return out
+
+    def read_file(self, rel):
+        return self.store.read(self._rel(rel))
+
     def npz_bytes(self):
         """The analysed arrays as the .npz file figure.py loads -- what the
         in-browser runner puts next to the script."""

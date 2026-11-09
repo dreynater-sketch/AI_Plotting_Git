@@ -246,7 +246,11 @@
   </nav>
   <section class="stage" id="stage">
     <div class="canvas-area">
-      <div class="canvas-wait" id="canvas-wait">Your graph will show up here</div>
+      <div class="canvas-wait" id="canvas-wait">
+        <span class="wait-idle">Your graph will show up here</span>
+        <span class="wait-busy">Claude is making your graph…</span>
+        <div class="ai-bar wait-busy"><span id="canvas-bar"></span></div>
+      </div>
       <!-- What a drag does on a 3-D graph: draw a box to pick, or turn it. -->
       <div class="hand-bar" id="hand-bar" role="group" aria-label="What dragging does" hidden>
         <button type="button" data-hand="pick" title="Drag to draw a box that picks things"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3l14 8-6 1.5L10 19z"/></svg>Pick</button>

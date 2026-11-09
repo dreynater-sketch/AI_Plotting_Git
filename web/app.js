@@ -529,8 +529,12 @@ function mkOutlineRect(x, y, w, h, primary) {
   return rect;
 }
 
-/** A see-through blue copy of a curve's click shape: a band along a line,
- *  a ring on each dot, a tint over each bar. */
+/** A blue copy of a curve's shape that shows it's picked. A line or dots
+ *  get a wide soft band / ring drawn *under* them, so the curve keeps its
+ *  own colour on top (a colour change shows while it's picked); bars and
+ *  other shapes get a blue edge on top and no fill. A surface made of many
+ *  little patches gets a light tint instead: edges would cover it in a net.
+ *  The halo's `under` flag says which side of the curve it goes. */
 function mkHalo(g, primary) {
   const NS = 'http://www.w3.org/2000/svg';
   const halo = g.cloneNode(true);
@@ -539,37 +543,38 @@ function mkHalo(g, primary) {
   halo.setAttribute('class', 'ff-outline ff-halo');
   halo.setAttribute('pointer-events', 'none');
   const blue = '#1f6feb';
-  // Light enough that the curve's own colour still shows through, so a
-  // colour change can be seen while it's picked. A surface made of many
-  // little patches gets no patch edges: they'd cover it in a blue net.
   const paths = halo.querySelectorAll('path');
   const many = paths.length > 40;
+  let filledAny = false;
   paths.forEach((el) => {
     const filled = !/fill:\s*none/.test(el.getAttribute('style') || '');
     el.style.opacity = 1;
     el.style.stroke = blue;
     if (filled) {   // bars and other shapes
-      el.style.fill = blue;
-      el.style.fillOpacity = primary ? 0.08 : 0.05;
-      el.style.strokeOpacity = many ? 0 : 0.6;
-      el.style.strokeWidth = '1';
-    } else {        // a line: a soft band along it
-      el.style.strokeOpacity = primary ? 0.14 : 0.09;
+      filledAny = true;
+      el.style.fill = many ? blue : 'none';
+      el.style.fillOpacity = many ? (primary ? 0.12 : 0.07) : 0;
+      el.style.strokeOpacity = many ? 0 : 0.95;
+      el.style.strokeWidth = primary ? '2' : '1.2';
+    } else {        // a line: a wide soft band under it
+      const w = parseFloat(el.style.strokeWidth) || 1.5;
+      el.style.strokeWidth = String(w + (primary ? 8 : 5));
+      el.style.strokeOpacity = primary ? 0.35 : 0.2;
       el.style.strokeLinejoin = 'round';
+      el.style.strokeLinecap = 'round';
     }
   });
   halo.querySelectorAll('use').forEach((u) => {
     const c = document.createElementNS(NS, 'circle');
     c.setAttribute('cx', u.getAttribute('x') || 0);
     c.setAttribute('cy', u.getAttribute('y') || 0);
-    c.setAttribute('r', 5);
+    c.setAttribute('r', 6);
     c.setAttribute('fill', blue);
-    c.setAttribute('fill-opacity', primary ? 0.1 : 0.06);
-    c.setAttribute('stroke', blue);
-    c.setAttribute('stroke-opacity', 0.7);
-    c.setAttribute('stroke-width', 1);
+    c.setAttribute('fill-opacity', primary ? 0.35 : 0.2);
+    c.setAttribute('stroke', 'none');
     u.replaceWith(c);
   });
+  halo.under = !filledAny;
   return halo;
 }
 
@@ -617,7 +622,8 @@ function drawOutlines() {
     const r0 = resolve(id);
     if (r0?.kind === 'series') {
       // A curve gets a glow that follows it, not a box around it.
-      g.parentNode.insertBefore(mkHalo(g, i === 0), g.nextSibling);
+      const halo = mkHalo(g, i === 0);
+      g.parentNode.insertBefore(halo, halo.under ? g : g.nextSibling);
       return;
     }
     let bb;
@@ -4458,14 +4464,36 @@ async function aiPost(url, body) {
 /** Ask the server for one Claude round at a time until the session is done,
  *  listing what happened in `log`. onStep sees each answer. -> the last one. */
 async function aiSteps(name, log, onStep) {
-  const line = (text, cls = '') => {
+  const line = (text, cls = '') => {     // null: just take "working…" away
     log.querySelector('li.now')?.remove();
+    if (text === null) return;
     const li = document.createElement('li');
     li.textContent = text;
     li.className = cls;
     log.appendChild(li);
     scrollChatDown();
   };
+  // The bar: steps done against about how many a job like this takes, crept
+  // forward between steps so it's always seen to move, never quite full.
+  const bars = () => [log.closest('.chat-msg')?.querySelector('.ai-bar span'), $('canvas-bar')];
+  const about = FIGURE ? 4 : 8;
+  let done = 0, since = performance.now();
+  const paint = () => {
+    const partial = Math.min(0.8, (performance.now() - since) / 25000);
+    const f = Math.min(0.95, 0.04 + 0.96 * (1 - Math.exp(-(done + partial) / about)));
+    for (const b of bars()) if (b) b.style.width = `${(f * 100).toFixed(1)}%`;
+  };
+  paint();
+  const ticker = setInterval(paint, 400);
+  try {
+    return await aiStepLoop(name, line, onStep, () => { done++; since = performance.now(); paint(); });
+  } finally {
+    clearInterval(ticker);
+    for (const b of bars()) if (b) b.style.width = '100%';
+  }
+}
+
+async function aiStepLoop(name, line, onStep, stepped) {
   let d = null, retries = 0;
   while (!d?.done) {
     line('Claude is working…', 'now');
@@ -4474,15 +4502,16 @@ async function aiSteps(name, log, onStep) {
     } catch (e) {
       // A slow or busy step saved nothing, so it can simply run again.
       if ([503, 504].includes(e.status) && retries++ < 2) continue;
-      log.querySelector('li.now')?.remove();
+      line(null);
       throw e;
     }
     for (const ev of d.events) line(ev);
     if (d.busy) { await new Promise((ok) => setTimeout(ok, 3000)); continue; }   // the step from before a reload
+    stepped();
     if (d.tokens) { tokens = d.tokens; showTokens(); refreshChat(); }
     if (onStep) await onStep(d);
   }
-  log.querySelector('li.now')?.remove();
+  line(null);
   return d;
 }
 
@@ -4511,10 +4540,21 @@ const COPY_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9"
 const DONE_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 5 5 9-10"/></svg>';
 
 /** One message in the talk, with a copy button under it. -> the message. */
-function chatBubble(role, text = '', meta = '') {
+function chatBubble(role, text = '', meta = '', files = []) {
   const who = role === 'user' ? 'you' : 'ai';
   const row = document.createElement('div');
   row.className = `chat-row ${who}`;
+  if (files.length) {
+    // The files sent with the message, as little cards above it.
+    const box = document.createElement('div');
+    box.className = 'chat-files-sent';
+    box.innerHTML = files.slice(0, 8).map((n) => {
+      const short = n.split('/').pop();
+      const ext = (short.match(/\.([a-z0-9]{1,5})$/i)?.[1] || 'file').toUpperCase();
+      return `<span class="chat-file" title="${escapeHtml(n)}"><b>${escapeHtml(ext)}</b>${escapeHtml(short)}</span>`;
+    }).join('') + (files.length > 8 ? `<span class="chat-file more">+${files.length - 8} more</span>` : '');
+    row.appendChild(box);
+  }
   const el = document.createElement('div');
   el.className = `chat-msg ${who}`;
   el.dataset.text = text;
@@ -4550,6 +4590,7 @@ function workingBubble() {
   log.className = 'ai-log';
   steps.appendChild(log);
   answer.appendChild(steps);
+  answer.insertAdjacentHTML('beforeend', '<div class="ai-bar" role="progressbar" aria-label="How far along Claude is"><span></span></div>');
   return { answer, log };
 }
 
@@ -4678,7 +4719,7 @@ async function runAiNew(idea, resuming = null) {
   setAiRunning(true);
   document.body.classList.remove('at-home');
   setRail(false);
-  const you = chatBubble('user', idea);
+  const you = chatBubble('user', idea, '', resuming ? [] : aiFiles.map((f) => f.name));
   const { answer, log } = workingBubble();
   $('chat-input').value = '';
   const keptOffer = offerFile;
@@ -4757,7 +4798,7 @@ async function loadChat() {
     const r = await fetch(`/api/assistant/chat/${FIGURE}`);
     const d = r.ok ? await r.json() : { turns: [] };
     for (const t of d.turns) {
-      chatBubble(t.role, t.text, t.role === 'assistant' ? tokensUsed(t.tokens) : '');
+      chatBubble(t.role, t.text, t.role === 'assistant' ? tokensUsed(t.tokens) : '', t.files || []);
     }
     aiChatGoesOn = !!d.can_continue;
     if (d.running) runAiEdit('', true);    // the page was closed while Claude worked: carry on

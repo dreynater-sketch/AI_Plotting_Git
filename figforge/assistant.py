@@ -390,7 +390,9 @@ def start(fig, files, skipped, idea):
             "container": None, "anthropic_files": [uploaded.id] if uploaded else [], "tables": tables,
             "steps": 0, "views": 0, "cost_usd": 0.0,
             "created": False, "done": False, "reply": "", "log": [],
-            "chat": [{"role": "user", "text": idea.strip()}]}
+            # the files go with the first message, so the talk can show them
+            "chat": [{"role": "user", "text": idea.strip(),
+                      **({"files": [f["name"] for f in files]} if files else {})}]}
 
 
 def start_edit(fig, request):
