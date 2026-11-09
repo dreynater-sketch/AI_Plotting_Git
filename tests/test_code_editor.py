@@ -62,6 +62,20 @@ with sync_playwright() as pw:
     except urllib.error.HTTPError as e:
         bad = e.code == 404
     check(bad, "only the listed files can be downloaded")
+    with pg.expect_download() as dl:
+        pg.click("#btn-download")
+    import zipfile as _zip
+    zf = _zip.ZipFile(dl.value.path())
+    names = sorted(zf.namelist())
+    check(dl.value.suggested_filename == f"{P}.zip"
+          and names == sorted([f"{P}/figure.py", f"{P}/data/curves.npz", f"{P}/data/vna_sweep.csv", f"{P}/README.txt"])
+          and zf.read(f"{P}/figure.py").decode() == pg.evaluate("cm.getValue()"),
+          f"Download all: one zip with the code and its data files ({names})")
+    run_dir = _os.path.join(OUT_DIR, "zz_bundle"); shutil.rmtree(run_dir, ignore_errors=True); zf.extractall(run_dir)
+    ran = subprocess.run([sys.executable, "figure.py"], cwd=_os.path.join(run_dir, P), capture_output=True, text=True,
+                         env={**_os.environ, "MPLBACKEND": "Agg"}, timeout=120)
+    check(ran.returncode == 0, f"…unzipped, figure.py runs as it is ({ran.stderr[-300:]})")
+    shutil.rmtree(run_dir, ignore_errors=True)
     check(pg.evaluate("cm.getOption('keyMap')") == "sublime" and pg.evaluate("cm.getOption('theme')") == "monokai",
           "Sublime keymap + Monokai theme")
     painted = pg.evaluate("""(() => { const c = document.getElementById('minimap');
@@ -182,8 +196,8 @@ with sync_playwright() as pw:
     check(custom() is None and "hello" not in pg.evaluate("cm.getValue()"), "reset: edited copy removed, generated code back")
 
     with pg.expect_download() as d:
-        pg.click("#btn-download")
-    check(d.value.suggested_filename == f"{P}_figure.py", "Download button saves the editor's content")
+        pg.evaluate("download()")
+    check(d.value.suggested_filename == f"{P}_figure.py", "figure.py on its own can still be downloaded (Commands)")
     check(not errs, f"no page errors {errs}")
     br.close()
 

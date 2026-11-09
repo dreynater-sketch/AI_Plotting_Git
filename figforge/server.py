@@ -12,6 +12,7 @@
                                what it can back onto the figure (codesync.py)
     POST /api/script/<name>/reset   drop the hand-edited version
     GET  /api/npz/<name>       data/curves.npz, for running figure.py in the browser
+    POST /api/bundle/<name>     {code} -> a zip: the code + its data files, ready to run
     GET  /api/files/<name>     the data files a person can download; /api/file/<name>/<file> one of them
     GET  /api/history/<name>   saved undo/redo stacks {undo: [spec...], redo: [...]}
     POST /api/history/<name>   {undo, redo} -> persist both stacks
@@ -74,6 +75,7 @@ import posixpath
 import re
 import threading
 import time
+import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
@@ -397,6 +399,12 @@ class Handler(BaseHTTPRequestHandler):
                 return self._error(404, "unknown figure")
             return self._fit(fig)
 
+        if path.startswith("/api/bundle/"):
+            fig = self._figure(path[len("/api/bundle/"):])
+            if not fig:
+                return self._error(404, "unknown figure")
+            return self._bundle(fig)
+
         if path.startswith("/api/add-curves/"):
             fig = self._figure(path[len("/api/add-curves/"):])
             if not fig:
@@ -613,6 +621,38 @@ class Handler(BaseHTTPRequestHandler):
                            "nice": [f"{q['name']} = {fitting.nice(q['value'], q['error'])}" for q in res["params"]],
                            "x": [round(float(v), 10) for v in cx[ok]],
                            "y": [round(float(v), 10) for v in cy[ok]]})
+
+    def _bundle(self, fig):
+        """One zip with the code and every file it needs, laid out so that
+        unzipping it and running `python figure.py` just works: data/ holds
+        curves.npz (what figure.py loads) and the spreadsheet it came from;
+        inputs/ holds the files Claude was given, under their own names (what
+        a "How this was made" script reads)."""
+        body = self._body()
+        if not isinstance(body, dict) or not isinstance(body.get("code"), str):
+            return self._error(400, "expected {code}")
+        script = os.path.basename(body.get("file") or "figure.py")
+        if not re.fullmatch(r"[A-Za-z0-9_ .-]+\.py", script):
+            script = "figure.py"
+        tables = (fig.load_assistant() or {}).get("tables") or {}
+        top = re.sub(r"[^A-Za-z0-9_ .-]", "_", fig.name)
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+            z.writestr(f"{top}/{script}", body["code"])
+            for shown, rel in fig.data_files():
+                data = fig.read_file(rel)
+                if data is None:
+                    continue
+                if shown.startswith("tables/"):
+                    own = os.path.basename((tables.get(shown[len("tables/"):]) or {}).get("from") or shown)
+                    z.writestr(f"{top}/inputs/{own}", data)
+                else:
+                    z.writestr(f"{top}/data/{shown}", data)
+            z.writestr(f"{top}/README.txt",
+                       f"Made with FigForge.\n\nTo draw the figure:\n\n    pip install numpy matplotlib\n"
+                       f"    python {script}\n\nKeep the data folder next to {script}: the numbers are in it.\n")
+        return self._send(200, buf.getvalue(), "application/zip", {
+            "Content-Disposition": f"attachment; filename=\"{top}.zip\"; filename*=UTF-8''{quote(top)}.zip"})
 
     def _rebuild(self, fig):
         """Throw away layout edits and regenerate the spec from raw data:
@@ -1041,9 +1081,13 @@ class Handler(BaseHTTPRequestHandler):
                 return self._error(400, f"couldn't read {fname}")
             files.append({"name": fname, "data": data})
         skipped = [s for s in body.get("skipped") or [] if isinstance(s, dict)]
+        # The talk so far, when it was questions answered without a graph.
+        earlier = [{"role": t["role"], "text": t["text"][:6000]} for t in (body.get("earlier") or [])[-20:]
+                   if isinstance(t, dict) and t.get("role") in ("user", "assistant") and isinstance(t.get("text"), str)]
         fig = Figure(name, self.store)
         try:
-            state = assistant.start(fig, files, skipped, idea)
+            state = (assistant.start(fig, files, skipped, idea, earlier=earlier) if earlier
+                     else assistant.start(fig, files, skipped, idea))
         except anthropic.APIError as e:
             return self._error(502, f"couldn't hand the files to Claude: {e}")
         # Until the first figure is drawn the project has no spec.json, so
@@ -1141,7 +1185,12 @@ class Handler(BaseHTTPRequestHandler):
             assistant.cleanup(state)
             if state.get("chat"):
                 state["chat"][-1]["tokens"] = spent
-        fig.save_assistant(state)
+        if state["done"] and not state["created"] and not fig.store.has(fig._rel("spec.json")):
+            # Answered without a graph (a question, say): nothing to keep.
+            # The page holds the talk and sends it along with the next message.
+            fig.store.delete_project(fig.name)
+        else:
+            fig.save_assistant(state)
         used, cap = self._ai_budget()
         turn_steps, turn_cost = assistant._turn(state)
         return self._json({"done": state["done"], "events": events, "reply": state["reply"],

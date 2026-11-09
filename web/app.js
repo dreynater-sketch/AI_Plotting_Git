@@ -4318,6 +4318,7 @@ const AI_BINARY_OK = /\.(xlsx|xls|png|jpe?g|gif|webp|npz|npy|h5|hdf5|mat|pdf)$/i
 let aiFiles = [];        // [{name, bytes: Uint8Array}] to upload
 let aiSkipped = [];      // [{name, size, reason}]
 let aiRunning = false;
+let homeTalk = [];        // questions answered on the start screen, no graph yet: [{role, text}]
 let offerFile = null;    // the one table that could be drawn for free
 
 /** Minimal .zip reader: stored and deflated entries, via the browser's own
@@ -4635,7 +4636,7 @@ function refreshChat() {
   $('chat-input').disabled = !ai || aiRunning || !!short;
   $('chat-input').placeholder = !ai || short ? (FIGURE ? 'Claude needs tokens' : 'Drop in a spreadsheet to make a graph')
     : FIGURE ? ($('ai-chat').children.length ? 'Anything else?' : 'What should change?')
-    : aiFiles.length ? 'What do you want from your data?' : 'A graph of…';
+    : aiFiles.length ? 'What do you want from your data?' : homeTalk.length ? 'Ask more, or say what to graph' : 'A graph of…';
   $('chat-send').hidden = !ai;
   $('chat-send').disabled = !ai || aiRunning || !text || short;
   $('chat-attach').hidden = aiRunning;
@@ -4741,7 +4742,7 @@ async function runAiNew(idea, resuming = null) {
       // A name can be taken by a try that never drew anything: pick another.
       for (let n = 2; ; n++) {
         try {
-          await aiPost('/api/assistant/start', { name, idea, files, skipped: aiSkipped });
+          await aiPost('/api/assistant/start', { name, idea, files, skipped: aiSkipped, earlier: homeTalk });
           break;
         } catch (e) {
           if (e.status !== 409 || n > 9) throw e;
@@ -4754,7 +4755,23 @@ async function runAiNew(idea, resuming = null) {
     const d = await aiSteps(name, log, async (step) => {
       if (step.created && !FIGURE) await openFigureHere(name, false);
     });
-    if (!d.created) throw new Error(d.reply || 'no graph was made');
+    if (!d.created && d.reply) {
+      // Not something to graph ("who are the best philosophers?"): Claude
+      // answered, so it's shown like any chat answer and the talk goes on
+      // from the start screen. Nothing is saved; the next message brings
+      // this talk along, so "ok, chart that" makes sense.
+      showAnswer(answer, d);
+      homeTalk.push({ role: 'user', text: idea }, { role: 'assistant', text: d.reply });
+      document.body.classList.add('at-home', 'home-talk');
+      setRail(true);
+      window.history.replaceState(null, '', location.pathname);
+      offerFile = keptOffer;
+      showAiFiles();
+      return;
+    }
+    if (!d.created) throw new Error('no graph was made');
+    homeTalk = [];
+    document.body.classList.remove('home-talk');
     await reloadFigure();
     showAnswer(answer, d);
     aiChatGoesOn = !!d.can_continue;
@@ -4771,6 +4788,7 @@ async function runAiNew(idea, resuming = null) {
       dropBubble(you); dropBubble(answer);
       $('chat-input').value = idea;
       document.body.classList.add('at-home');
+      document.body.classList.toggle('home-talk', homeTalk.length > 0);
       setRail(true);
       window.history.replaceState(null, '', location.pathname);
       offerFile = keptOffer;

@@ -324,11 +324,13 @@ def _kb(n):
 
 # ------------------------------------------------------------------ session
 
-def start(fig, files, skipped, idea):
+def start(fig, files, skipped, idea, earlier=()):
     """A new session. files: [{"name", "data": bytes}] -- they go to Claude's
     sandbox (as one zip when there are several); a file that is already a
     tidy table is also kept as a FigForge table. skipped: [{"name", "size",
-    "reason"}] the browser left out. Returns the state to save."""
+    "reason"}] the browser left out. earlier: [{"role", "text"}], the talk so
+    far on the start screen when no graph came of it (a question answered),
+    so a follow-up like "ok, chart that" makes sense. Returns the state to save."""
     tables, notes = {}, []
     for f in files:
         name = f["name"]
@@ -372,6 +374,9 @@ def start(fig, files, skipped, idea):
         text += f"\nLeft out before upload (not available):\n{left_out}\n"
     if notes:
         text += "\nAlready available to FigForge as tables:\n" + "\n".join(notes) + "\n"
+    if earlier:
+        said = "\n\n".join(f"{'The user' if t['role'] == 'user' else 'You'}: {t['text']}" for t in earlier)
+        text = f"Earlier in this conversation (no figure was made yet):\n\n{said}\n\n" + text
     content = [{"type": "text", "text": text}]
 
     images = [f for f in files if os.path.splitext(f["name"].lower())[1] in IMAGE_TYPES
@@ -391,8 +396,8 @@ def start(fig, files, skipped, idea):
             "steps": 0, "views": 0, "cost_usd": 0.0,
             "created": False, "done": False, "reply": "", "log": [],
             # the files go with the first message, so the talk can show them
-            "chat": [{"role": "user", "text": idea.strip(),
-                      **({"files": [f["name"] for f in files]} if files else {})}]}
+            "chat": [*earlier, {"role": "user", "text": idea.strip(),
+                                **({"files": [f["name"] for f in files]} if files else {})}]}
 
 
 def start_edit(fig, request):

@@ -38,11 +38,15 @@ def check(c, m): print(("PASS " if c else "FAIL ") + m, flush=True); c or fails.
 
 
 # ------------------------------------------------------------- a pretend Claude
-def fake_start(fig, files, skipped, idea):
+earlier_seen = []
+
+
+def fake_start(fig, files, skipped, idea, earlier=()):
+    earlier_seen.append(list(earlier))
     return {"version": 2, "idea": idea, "messages": [{"role": "user", "content": []}], "tables": {},
             "anthropic_files": [], "steps": 0, "cost_usd": 0.0, "views": 0, "created": False,
             "done": False, "reply": "", "log": [],
-            "chat": [{"role": "user", "text": idea, **({"files": [f["name"] for f in files]} if files else {})}],
+            "chat": [*earlier, {"role": "user", "text": idea, **({"files": [f["name"] for f in files]} if files else {})}],
             "files_seen": [f["name"] for f in files]}
 
 
@@ -216,11 +220,29 @@ try:
         check(pg.locator("#rail").bounding_box()["width"] == 280, "…where the bar is open again")
         pg.fill("#chat-input", "zz_chat nothing please")
         pg.click("#chat-send")
-        pg.wait_for_function("document.getElementById('chat-msg').textContent.includes('couldn')")
-        check(pg.evaluate("document.body.classList.contains('at-home')") and pg.input_value("#chat-input") == "zz_chat nothing please"
-              and pg.locator("#ai-chat .chat-msg").count() == 0, "no graph made: back at the start with your words kept")
+        pg.wait_for_function("!aiRunning && document.querySelectorAll('#ai-chat .chat-msg').length === 2")
+        msgs = pg.locator("#ai-chat .chat-msg")
+        check(pg.evaluate("document.body.classList.contains('at-home')") and pg.input_value("#chat-input") == ""
+              and "I couldn't draw that." in msgs.nth(1).inner_text() and not pg.inner_text("#chat-msg")
+              and "project" not in pg.url and pg.is_visible("#ai-chat"),
+              "a question that isn't for a graph: answered like any chat, no error, still on the start screen")
         check("90 tokens" in pg.inner_text("#sb-tokens"), f"…and it took only what Claude cost ({pg.inner_text('#sb-tokens')})")
-        rmtree("figures/zz_chat nothing")
+        check(pg.locator('#home-mine .mine[data-name^="zz_chat nothing"]').count() == 0, "…and nothing is added to your graphs")
+        pg.screenshot(path=S + "/chat_question.png")
+        pg.fill("#chat-input", "zz_chat nothing again")
+        pg.click("#chat-send")
+        pg.wait_for_function("!aiRunning && document.querySelectorAll('#ai-chat .chat-msg').length === 4")
+        check(earlier_seen[-1] == [{"role": "user", "text": "zz_chat nothing please"}, {"role": "assistant", "text": "I couldn't draw that."}],
+              "the next message brings the talk so far along")
+        left = [d for d in os.listdir("figures") if d.startswith("zz_chat nothing")]
+        check(not left, f"…and nothing is left behind on the server ({left})")
+        for d in os.listdir("figures"):
+            if d.startswith("zz_chat nothing"): rmtree(f"figures/{d}")
+        u = json.load(open(USAGE)); u["spent"] -= 10          # give that one back: the counts below go on from 90
+        json.dump(u, open(USAGE, "w"))
+        pg.click("#btn-home"); pg.wait_for_function("document.body.classList.contains('at-home')")
+        pg.wait_for_function(ready)
+        check(pg.locator("#ai-chat .chat-msg").count() == 0, "New graph starts a fresh talk")
 
         pg.fill("#chat-input", "zz_chat line of something")
         pg.press("#chat-input", "Enter")

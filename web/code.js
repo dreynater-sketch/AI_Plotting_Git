@@ -222,11 +222,12 @@ async function loadHowto() {
   document.querySelectorAll('.tab-name, .tree-file.active').forEach((el) => { el.textContent = FILE; });
   $('btn-save').hidden = true;
   $('tree-project').textContent = PROJECT;
+  listDataFiles();
   const b = $('banner');
   b.textContent = 'This is the Python Claude used to make this figure’s numbers. Press ▶ Run to try it ' +
     'in your browser, change a number and run it again. Your changes here aren’t saved.' +
-    (d.howto.needs_files ? ' It reads your own data files, which aren’t in the browser, so to run it, ' +
-      'download it and put your files in a folder called “inputs” next to it.' : '');
+    (d.howto.needs_files ? ' It reads your own data files, which aren’t in the browser. To run it on your ' +
+      'computer, press ⤓ Download all: your files come in the zip, already in place.' : '');
   b.hidden = false;
   $('side-note').innerHTML = `Run executes this script <b>in your browser</b> (Python via Pyodide); ` +
     `nothing runs on the server. <br><br><a href="/?project=${encodeURIComponent(PROJECT)}">` +
@@ -339,6 +340,30 @@ function download() {
   a.download = `${PROJECT}_${FILE}`;
   a.click();
   URL.revokeObjectURL(a.href);
+}
+
+/** Everything in one zip: the code as it is in the editor now, and the data
+ *  files next to it, so it runs as soon as it's unzipped. */
+async function downloadAll() {
+  const btn = $('btn-download');
+  btn.disabled = true;
+  try {
+    const r = await fetch(`/api/bundle/${encodeURIComponent(PROJECT)}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code: cm.getValue(), file: FILE }),
+    });
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.statusText);
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(await r.blob());
+    a.download = `${PROJECT}.zip`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  } catch (e) {
+    togglePanel(true);
+    panelState(`Download failed: ${e.message}`, 'err');
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 /* --------------------------------------------------------------- run */
@@ -535,7 +560,8 @@ const COMMANDS = [
   { name: 'Build: Run figure.py', key: 'Ctrl+B', run: () => run() },
   { name: 'Build: Cancel', key: '', run: () => cancelRun() },
   { name: 'File: Save', key: 'Ctrl+S', run: () => save() },
-  { name: 'File: Download figure.py', key: '', run: () => download() },
+  { name: 'File: Download everything (code + data, zip)', key: '', run: () => downloadAll() },
+  { name: 'File: Download figure.py only', key: '', run: () => download() },
   { name: 'File: Reset to Generated Code', key: '', run: () => resetToGenerated() },
   { name: 'File: Open Generated Code (keep editing)', key: '', run: () => loadGenerated() },
   { name: 'Find', key: 'Ctrl+F', run: () => cm.execCommand('find') },
@@ -611,7 +637,7 @@ document.addEventListener('keydown', (e) => {
 
 $('btn-run').onclick = () => (running ? cancelRun() : run());
 $('btn-save').onclick = () => save();
-$('btn-download').onclick = () => download();
+$('btn-download').onclick = () => downloadAll();
 $('btn-palette').onclick = () => openPalette();
 
 load();

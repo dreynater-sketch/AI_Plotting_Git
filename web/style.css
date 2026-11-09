@@ -1163,6 +1163,10 @@ body.at-home .composer textarea { font-size: 16px; min-height: 48px; }
 body.at-home .chat-under { justify-content: center; text-align: center; }
 body.at-home .chat-price { flex: none; }
 body.at-home .home-ideas { display: flex; justify-content: center; }
+/* A question answered on the start screen: the talk fills the middle. */
+body.at-home.home-talk .chatside { justify-content: flex-start; }
+body.at-home.home-talk .chat-scroll { flex: 1; overflow: auto; }
+body.at-home.home-talk .chat-hello, body.at-home.home-talk .home-ideas { display: none; }
 /* Simple (until "More tools"): the chat, the graph, Undo and Save picture.
    The chat is never covered. Picking something opens its settings on the right,
    and they stay open until closed, so the graph resizes once, not on every click. */
