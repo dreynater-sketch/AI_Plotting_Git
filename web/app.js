@@ -4319,6 +4319,7 @@ let aiFiles = [];        // [{name, bytes: Uint8Array}] to upload
 let aiSkipped = [];      // [{name, size, reason}]
 let aiRunning = false;
 let homeTalk = [];        // questions answered on the start screen, no graph yet: [{role, text}]
+let talkId = null;        // ...kept on the server as this talk (/api/talks)
 let offerFile = null;    // the one table that could be drawn for free
 
 /** Minimal .zip reader: stored and deflated entries, via the browser's own
@@ -4677,6 +4678,7 @@ function fillRail(names) {
 
 function markRail() {
   for (const b of $('home-mine').querySelectorAll('.mine')) b.classList.toggle('on', b.dataset.name === FIGURE);
+  for (const b of $('home-talks').querySelectorAll('.mine')) b.classList.toggle('on', !FIGURE && b.dataset.talk === talkId);
 }
 
 /* The start screen. Claude is only called when you send a message: a dropped
@@ -4689,6 +4691,45 @@ function showHome() {
   refreshChat();
   setStatus('');
   $('status').dataset.ready = '1';
+  $('chat-input').focus();
+}
+
+/* Talks that made no graph (questions answered) are kept like any chat
+ * app's: listed under Talks in the left bar, opened again with ?talk=<id>. */
+async function saveTalk() {
+  try {
+    const d = await aiPost('/api/talks', { id: talkId, turns: homeTalk });
+    talkId = d.id;
+    window.history.replaceState(null, '', `?talk=${talkId}`);
+    fillTalks();
+  } catch { /* not kept: the talk still shows until the page is left */ }
+}
+
+async function fillTalks() {
+  try {
+    const r = await fetch('/api/talks');
+    const { talks } = r.ok ? await r.json() : { talks: [] };
+    $('home-talks').innerHTML = talks.map((t) =>
+      `<button class="mine" data-talk="${escapeHtml(t.id)}" data-name="${escapeHtml(t.title)}" title="${escapeHtml(t.title)}">${escapeHtml(t.title)}</button>`).join('');
+    $('home-talks').hidden = $('rail-talks-head').hidden = !talks.length;
+    markRail();
+    findInRail();
+  } catch { /* no list */ }
+}
+
+/** Show a kept talk on the start screen, ready to carry on. */
+async function openTalk(id) {
+  const r = await fetch(`/api/talks/${encodeURIComponent(id)}`);
+  if (!r.ok) { window.history.replaceState(null, '', location.pathname); return; }
+  const { turns } = await r.json();
+  talkId = id;
+  homeTalk = turns;
+  $('ai-chat').innerHTML = '';
+  for (const t of turns) chatBubble(t.role, t.text, t.role === 'assistant' ? tokensUsed(t.tokens) : '', t.files || []);
+  document.body.classList.add('home-talk');
+  window.history.replaceState(null, '', `?talk=${id}`);
+  markRail();
+  refreshChat();
   $('chat-input').focus();
 }
 
@@ -4742,7 +4783,8 @@ async function runAiNew(idea, resuming = null) {
       // A name can be taken by a try that never drew anything: pick another.
       for (let n = 2; ; n++) {
         try {
-          await aiPost('/api/assistant/start', { name, idea, files, skipped: aiSkipped, earlier: homeTalk });
+          await aiPost('/api/assistant/start', { name, idea, files, skipped: aiSkipped,
+                                                 earlier: homeTalk.map(({ role, text }) => ({ role, text })) });
           break;
         } catch (e) {
           if (e.status !== 409 || n > 9) throw e;
@@ -4761,15 +4803,20 @@ async function runAiNew(idea, resuming = null) {
       // from the start screen. Nothing is saved; the next message brings
       // this talk along, so "ok, chart that" makes sense.
       showAnswer(answer, d);
-      homeTalk.push({ role: 'user', text: idea }, { role: 'assistant', text: d.reply });
+      const sent = aiFiles.map((f) => f.name);
+      homeTalk.push({ role: 'user', text: idea, ...(sent.length ? { files: sent } : {}) },
+                    { role: 'assistant', text: d.reply, tokens: d.tokens_spent || 0 });
       document.body.classList.add('at-home', 'home-talk');
       setRail(true);
       window.history.replaceState(null, '', location.pathname);
       offerFile = keptOffer;
       showAiFiles();
+      await saveTalk();
       return;
     }
     if (!d.created) throw new Error('no graph was made');
+    // The talk goes on in the graph's own chat now (it was sent along).
+    if (talkId) { aiPost(`/api/talks/${talkId}/delete`).then(fillTalks).catch(() => {}); talkId = null; }
     homeTalk = [];
     document.body.classList.remove('home-talk');
     await reloadFigure();
@@ -4972,7 +5019,9 @@ $('rail-search').onclick = () => {
 };
 function findInRail() {
   const words = $('rail-find').value.trim().toLowerCase();
-  for (const b of $('home-mine').querySelectorAll('.mine')) b.hidden = !b.dataset.name.toLowerCase().includes(words);
+  for (const b of document.querySelectorAll('#home-mine .mine, #home-talks .mine')) {
+    b.hidden = !b.dataset.name.toLowerCase().includes(words);
+  }
 }
 $('rail-find').addEventListener('input', findInRail);
 $('btn-home').addEventListener('keydown', (e) => { if (e.key === 'Enter') goHome(); });
@@ -4981,6 +5030,16 @@ $('chat-howto').onclick = () => $('btn-howto').click();
 function refreshAiMenu() {
   $('menu-ai-wrap').hidden = ['btn-ai-edit', 'btn-howto', 'menu-ai-new'].every((id) => $(id).hidden);
 }
+$('home-talks').addEventListener('click', async (e) => {
+  const b = e.target.closest('.mine');
+  if (!b || aiRunning) return;
+  if (FIGURE) { await flushPending(); location.href = `${location.pathname}?talk=${b.dataset.talk}`; return; }
+  openTalk(b.dataset.talk);
+});
+$('rail-talks-head').onclick = () => {
+  const open = $('rail-talks-head').getAttribute('aria-expanded') !== 'true';
+  $('rail-talks-head').setAttribute('aria-expanded', String(open));
+};
 $('home-mine').addEventListener('click', (e) => {
   const b = e.target.closest('.mine');
   if (b) openProject(b.dataset.name);
@@ -5406,9 +5465,12 @@ async function startEditor() {
     const picked = await pickProject();
     fillProjectSelect(picked.names);
     fillRail(picked.names);
+    fillTalks();
     if (picked.name) await openFigureHere(picked.name, true);
     else {
       showHome();
+      const talk = new URLSearchParams(location.search).get('talk');
+      if (talk) await openTalk(talk);
       await resumeMaking(picked.wanted);
     }
   } catch (e) {

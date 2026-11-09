@@ -22,6 +22,9 @@ S = OUT_DIR
 AI_NAME, FREE_NAME = "zz_chat line", "zz_chat_free"
 USAGE = "figures/.usage/tokens.json"
 kept_usage = open(USAGE, "rb").read() if os.path.exists(USAGE) else None
+TALKS = "figures/talks.json"     # your own talks stay as they were
+kept_talks = open(TALKS, "rb").read() if os.path.exists(TALKS) else None
+if os.path.exists(TALKS): os.remove(TALKS)
 
 
 def clean():
@@ -229,20 +232,43 @@ try:
         check("90 tokens" in pg.inner_text("#sb-tokens"), f"…and it took only what Claude cost ({pg.inner_text('#sb-tokens')})")
         check(pg.locator('#home-mine .mine[data-name^="zz_chat nothing"]').count() == 0, "…and nothing is added to your graphs")
         pg.screenshot(path=S + "/chat_question.png")
+        pg.wait_for_function("location.search.includes('talk=')")
+        talk = pg.evaluate("talkId")
+        check(pg.locator(f'#home-talks .mine[data-talk="{talk}"]').inner_text() == "zz_chat nothing please"
+              and pg.locator(f'#home-talks .mine.on').count() == 1, "the talk is kept, and listed under Talks in the left bar")
+        pg.reload(); pg.wait_for_function(ready)
+        pg.wait_for_function("document.querySelectorAll('#ai-chat .chat-msg').length === 2")
+        check("I couldn't draw that." in pg.locator("#ai-chat .chat-msg").nth(1).inner_text()
+              and "10 tokens" in pg.locator("#ai-chat .chat-msg").nth(1).inner_text()
+              and pg.evaluate("document.body.classList.contains('home-talk')"), "…and comes back after a reload")
         pg.fill("#chat-input", "zz_chat nothing again")
         pg.click("#chat-send")
         pg.wait_for_function("!aiRunning && document.querySelectorAll('#ai-chat .chat-msg').length === 4")
         check(earlier_seen[-1] == [{"role": "user", "text": "zz_chat nothing please"}, {"role": "assistant", "text": "I couldn't draw that."}],
               "the next message brings the talk so far along")
+        check(pg.evaluate("talkId") == talk and pg.locator("#home-talks .mine").count() == 1,
+              "…and adds to the same talk")
+        pg.click("#btn-home"); pg.wait_for_function(ready)
+        check(pg.locator("#ai-chat .chat-msg").count() == 0, "New graph starts a fresh talk")
+        pg.click(f'#home-talks .mine[data-talk="{talk}"]')
+        pg.wait_for_function("document.querySelectorAll('#ai-chat .chat-msg').length === 4")
+        check(f"talk={talk}" in pg.url, "clicking it in the left bar opens it again")
+        pg.fill("#chat-input", "zz_chat graph from talk")
+        pg.click("#chat-send")
+        pg.wait_for_function("FIGURE !== null && !aiRunning", timeout=30000)
+        made = pg.evaluate("FIGURE")
+        pg.wait_for_function("document.querySelectorAll('#home-talks .mine').length === 0")
+        check(len(earlier_seen[-1]) == 4 and pg.locator("#ai-chat .chat-msg").count() == 6,
+              "a graph made from a talk keeps the whole talk beside it, and it leaves the Talks list")
+        rmtree(f"figures/{made}")
         left = [d for d in os.listdir("figures") if d.startswith("zz_chat nothing")]
         check(not left, f"…and nothing is left behind on the server ({left})")
         for d in os.listdir("figures"):
             if d.startswith("zz_chat nothing"): rmtree(f"figures/{d}")
-        u = json.load(open(USAGE)); u["spent"] -= 10          # give that one back: the counts below go on from 90
+        u = json.load(open(USAGE)); u["spent"] -= 30          # give those back: the counts below go on from 90
         json.dump(u, open(USAGE, "w"))
         pg.click("#btn-home"); pg.wait_for_function("document.body.classList.contains('at-home')")
         pg.wait_for_function(ready)
-        check(pg.locator("#ai-chat .chat-msg").count() == 0, "New graph starts a fresh talk")
 
         pg.fill("#chat-input", "zz_chat line of something")
         pg.press("#chat-input", "Enter")
@@ -371,6 +397,10 @@ finally:
     clean()
     if kept_usage is not None:
         open(USAGE, "wb").write(kept_usage)
+    if kept_talks is not None:
+        open(TALKS, "wb").write(kept_talks)
+    elif os.path.exists(TALKS):
+        os.remove(TALKS)
 
 print(len(fails), "failure(s)")
 sys.exit(1 if fails else 0)

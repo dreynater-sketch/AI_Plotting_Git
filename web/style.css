@@ -1226,9 +1226,15 @@ body.at-home #rail-new { background: var(--tint); }
 .home-mine .mine:hover:not(:disabled) { background: var(--tint); border: none; transform: none; }
 .home-mine .mine.on { background: var(--tint); }
 .home-mine .mine[hidden] { display: none; }
+/* Talks with no graph yet: a short list above the graphs. */
+.home-mine.home-talks { flex: none; max-height: 30vh; }
+.home-mine.home-talks[hidden] { display: none; }
+.home-talks .mine::before { content: "💬"; margin-right: 7px; font-size: 13px; }
 .home-mine p { margin: 0 9px; font-size: 14px; color: var(--ink-soft); }
 .rail-foot { flex: none; margin-top: auto; padding-top: 8px; border-top: 2px solid var(--line-soft); }
 .rail-head[aria-expanded="false"] + .home-mine { visibility: hidden; }
+#rail-talks-head[aria-expanded="false"] + .home-talks { display: none; }
+.rail-head[hidden] { display: none; }
 /* Folded: just the pictures. */
 body:not(.rail-open) .rail-top { flex-direction: column; height: auto; }
 body:not(.rail-open) .brand { font-size: 0; }

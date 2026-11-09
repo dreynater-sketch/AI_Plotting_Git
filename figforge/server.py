@@ -13,6 +13,8 @@
     POST /api/script/<name>/reset   drop the hand-edited version
     GET  /api/npz/<name>       data/curves.npz, for running figure.py in the browser
     POST /api/bundle/<name>     {code} -> a zip: the code + its data files, ready to run
+    GET  /api/talks              start-screen talks with no graph; /api/talks/<id> one of them
+    POST /api/talks              {id?, turns} save one -> {id}; /api/talks/<id>/delete
     GET  /api/files/<name>     the data files a person can download; /api/file/<name>/<file> one of them
     GET  /api/history/<name>   saved undo/redo stacks {undo: [spec...], redo: [...]}
     POST /api/history/<name>   {undo, redo} -> persist both stacks
@@ -158,6 +160,16 @@ class Handler(BaseHTTPRequestHandler):
             return self._admin_ai_ping()
         if path.startswith("/api/") and not self._authorize():
             return
+
+        if path == "/api/talks":
+            talks = sorted(self._talks().items(), key=lambda kv: -kv[1].get("updated", 0))
+            return self._json({"talks": [{"id": k, "title": v.get("title", "")} for k, v in talks]})
+
+        if path.startswith("/api/talks/"):
+            talk = self._talks().get(path[len("/api/talks/"):])
+            if not talk:
+                return self._error(404, "that talk is gone")
+            return self._json({"turns": talk.get("turns", [])})
 
         if path == "/api/figures":
             return self._json({"figures": list_figures(self.store),
@@ -399,6 +411,14 @@ class Handler(BaseHTTPRequestHandler):
                 return self._error(404, "unknown figure")
             return self._fit(fig)
 
+        if path == "/api/talks":
+            return self._save_talk()
+        if path.startswith("/api/talks/") and path.endswith("/delete"):
+            talks = self._talks()
+            talks.pop(path[len("/api/talks/"):-len("/delete")], None)
+            self._write_talks(talks)
+            return self._json({"ok": True})
+
         if path.startswith("/api/bundle/"):
             fig = self._figure(path[len("/api/bundle/"):])
             if not fig:
@@ -621,6 +641,51 @@ class Handler(BaseHTTPRequestHandler):
                            "nice": [f"{q['name']} = {fitting.nice(q['value'], q['error'])}" for q in res["params"]],
                            "x": [round(float(v), 10) for v in cx[ok]],
                            "y": [round(float(v), 10) for v in cy[ok]]})
+
+    # Talks on the start screen that haven't made a graph (questions
+    # answered), kept like any chat app's: one small file per person, the
+    # newest TALKS_KEPT of them. Making a graph from one moves the talk into
+    # that graph's own chat, and the page then deletes it here.
+    TALKS_KEPT = 50
+
+    def _talks(self):
+        raw = self.store.read("talks.json")
+        try:
+            talks = json.loads(raw) if raw else {}
+        except ValueError:
+            talks = {}
+        return talks if isinstance(talks, dict) else {}
+
+    def _write_talks(self, talks):
+        self.store.write("talks.json", json.dumps(talks, ensure_ascii=False).encode("utf-8"))
+
+    def _save_talk(self):
+        """{id?, turns: [{role, text, files?, tokens?}]} -> {id}."""
+        body = self._body()
+        turns = body.get("turns") if isinstance(body, dict) else None
+        if not isinstance(turns, list) or not turns:
+            return self._error(400, "expected {turns: [...]}")
+        clean = []
+        for t in turns[-60:]:
+            if not (isinstance(t, dict) and t.get("role") in ("user", "assistant") and isinstance(t.get("text"), str)):
+                return self._error(400, "each turn needs a role and text")
+            turn = {"role": t["role"], "text": t["text"][:20000]}
+            if isinstance(t.get("files"), list):
+                turn["files"] = [str(f)[:200] for f in t["files"][:50]]
+            if isinstance(t.get("tokens"), (int, float)):
+                turn["tokens"] = t["tokens"]
+            clean.append(turn)
+        talks = self._talks()
+        tid = str(body.get("id") or "")
+        if not re.fullmatch(r"[0-9a-f]{12}", tid) or tid not in talks:
+            tid = os.urandom(6).hex()
+        first = next((t["text"] for t in clean if t["role"] == "user"), "")
+        title = " ".join(first.split())[:60] or "A talk"
+        talks[tid] = {"title": title, "updated": time.time(), "turns": clean}
+        for old in sorted(talks, key=lambda k: talks[k].get("updated", 0))[:-self.TALKS_KEPT]:
+            talks.pop(old)
+        self._write_talks(talks)
+        return self._json({"id": tid, "title": title})
 
     def _bundle(self, fig):
         """One zip with the code and every file it needs, laid out so that
