@@ -41,7 +41,7 @@ MODEL = os.environ.get("FIGFORGE_AI_MODEL", "").strip() or "claude-opus-5-5"
 PRICES = {"claude-opus-5-5": (4.00, 20.00), "claude-opus-5": (5.00, 25.00), "claude-sonnet-5": (2.00, 10.00),
           "claude-sonnet-5-5": (2.00, 10.00), "claude-haiku-5-5": (0.10, 0.50)}
 CACHE_WRITE, CACHE_READ = 1.25, 0.10     # x the input price
-CACHE_READ_USD = {"claude-opus-5-5": 0.20}   # models whose cache reads cost less than that, $ per million
+CACHE_READ_USD = {"claude-opus-5-5": 0.20, "claude-sonnet-5-5": 0.10}   # models whose cache reads cost less than that, $ per million
 
 MAX_STEPS = 20          # Claude calls per request (a figure, or one chat message)
 MAX_COST_USD = 2.00     # per request; the turn stops (and says so) past this
@@ -59,12 +59,12 @@ BETAS = ["server-side-fallback-2026-07-01"]
 # Models that take an effort change part-way through a conversation (a
 # system message) without losing the cached history.
 EFFORT_BETA = "mid-conversation-output-config-2026-07-01"
-PER_MESSAGE_EFFORT = {"claude-opus-5-5", "claude-opus-5"}
+PER_MESSAGE_EFFORT = {"claude-opus-5-5", "claude-opus-5", "claude-sonnet-5-5", "claude-haiku-5-5"}
 # These models refuse a thinking block whose earlier messages have changed, and
 # continue_chat has to change them: files from finished turns are deleted from
 # Anthropic's storage, so their upload blocks can't be replayed. Dropping those
 # old blocks costs only the old reasoning; Claude gets the figure again anyway.
-KEEPS_HISTORY_EXACT = {"claude-opus-5-5", "claude-sonnet-5-5"}
+KEEPS_HISTORY_EXACT = {"claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"}
 THINKING_BETA = "thinking-binding-controls-2026-08-01"
 FIRST_EFFORT, TIDY_EFFORT = "medium", "low"   # making the data + figure; tidying it up
 CODE_EXECUTION = {"type": "code_execution_20260521", "name": "code_execution"}
@@ -285,6 +285,65 @@ PROGRESS = {
 }
 
 
+# ------------------------------------------------------------------ routing
+# Measured 2026-11-10 (PROGRESS.md "Cheap model for easy jobs"): Haiku 5.5 makes
+# simple graphs and small style changes as well as Opus at 1/20-1/30 of the
+# cost, but gets harder figures wrong (3-D, several materials, many files).
+# One tiny Haiku call sorts each request; anything unsure goes to MODEL.
+SMALL_MODEL = "claude-haiku-5-5"
+ROUTE = os.environ.get("FIGFORGE_AI_ROUTE", "1").strip() != "0"
+ROUTE_SYSTEM = """You sort requests for FigForge, a scientific figure maker, into "easy" or "hard". Easy jobs go to a small, cheap model; hard ones to a big one. Only say easy when a small model will clearly get it right.
+
+easy:
+- A new graph of one simple formula or a few simple formulas (sin(x), a parabola, an exponential decay), or of numbers typed in the message.
+- A new graph of one tidy table file (a .csv/.tsv with named columns) drawn as it is: lines, dots or bars of its columns.
+- Small changes to an existing figure: colours, line widths, markers, labels, titles, fonts, axis limits or log scale, grid, legend, number format, adding a text label or arrow, hiding something.
+
+hard (everything else), for example:
+- 3-D plots, maps, contours, several panels, polar plots.
+- Physics, chemistry or engineering models, material data, real-world values from memory, fitting curves, statistics, simulations.
+- Several files, zips, raw instrument files, pictures to copy, messy data.
+- Changing the layout: adding or removing panels, a second axis, new data.
+- Anything vague, long or with several steps.
+"""
+ROUTE_SCHEMA = {"type": "object", "additionalProperties": False, "required": ["job"],
+                "properties": {"job": {"type": "string", "enum": ["easy", "hard"]}}}
+
+
+def pick_model(request, files=(), figure=None):
+    """-> (model, cost_usd). One Haiku call (about $0.0002) sorts the request;
+    FIGFORGE_AI_MODEL pins one model and turns sorting off. Errors go big."""
+    if not ROUTE or os.environ.get("FIGFORGE_AI_MODEL", "").strip() or MODEL == SMALL_MODEL:
+        return MODEL, 0.0
+    names = [str(f.get("name", f)) if isinstance(f, dict) else str(f) for f in files]
+    text = (("Changing an existing figure. It holds now: " + json.dumps(figure)[:3000] + "\n\n")
+            if figure is not None else "A new figure.\n\n")
+    text += (f"Files ({len(names)}): " + ", ".join(names[:40]) + "\n\n") if names else "No files.\n\n"
+    text += "The request:\n" + str(request)[:4000]
+    try:
+        response = _client().messages.create(
+            model=SMALL_MODEL, max_tokens=2000, system=ROUTE_SYSTEM,
+            messages=[{"role": "user", "content": text}],
+            output_config={"effort": "low", "format": {"type": "json_schema", "schema": ROUTE_SCHEMA}})
+        cost = _cost(response.usage, SMALL_MODEL)
+        if response.stop_reason != "end_turn":
+            return MODEL, cost
+        job = json.loads(next(b.text for b in response.content if b.type == "text"))["job"]
+    except Exception:   # noqa: BLE001 -- sorting is only a saving; never block the job
+        return MODEL, 0.0
+    return (SMALL_MODEL if job == "easy" else MODEL), cost
+
+
+def route(state, request, files=(), figure=None):
+    """Sort a new request (a new figure, or the next message in a talk) onto a
+    model; the cost of sorting is counted with the request."""
+    model, cost = pick_model(request, files, figure)
+    state["model"] = model
+    state["route"] = {"model": model, "cost_usd": round(cost, 6)}
+    state["cost_usd"] = round(state.get("cost_usd", 0.0) + cost, 6)
+    return state
+
+
 def configured():
     return bool(os.environ.get("ANTHROPIC_API_KEY"))
 
@@ -297,8 +356,12 @@ def _client():
 
 def _cost(usage, model=MODEL):
     price_in, price_out = PRICES.get(model, PRICES["claude-opus-5-5"])
-    written = (getattr(usage, "cache_creation_input_tokens", 0) or 0) * CACHE_WRITE
-    read = (getattr(usage, "cache_read_input_tokens", 0) or 0) * CACHE_READ_USD.get(model, price_in * CACHE_READ)
+    cw = getattr(usage, "cache_creation_input_tokens", 0) or 0
+    cr = getattr(usage, "cache_read_input_tokens", 0) or 0
+    if model == "claude-haiku-5-5" and usage.input_tokens + cw + cr > 100_000:
+        price_in, price_out = 0.50, 2.50     # Haiku's long-prompt rate card
+    written = cw * CACHE_WRITE
+    read = cr * CACHE_READ_USD.get(model, price_in * CACHE_READ)
     return ((usage.input_tokens + written) * price_in + read + usage.output_tokens * price_out) / 1e6
 
 
@@ -517,6 +580,11 @@ def step(state, fig):
     # tidy-up rounds lower it with a system message instead (see below).
     effort = state.get("effort") or FIRST_EFFORT
     betas = BETAS + ([EFFORT_BETA] if model in PER_MESSAGE_EFFORT else [])
+    # Haiku has no server-side fallback (sending one is an error).
+    if "haiku" not in model:
+        kw["fallbacks"] = "default"
+    else:
+        betas = [b for b in betas if b not in BETAS]
     if model in KEEPS_HISTORY_EXACT:
         betas = betas + [THINKING_BETA]
         kw["thinking"] = {"type": "adaptive", "block_binding": {"prefix_mismatch_behavior": "drop_block"}}
@@ -532,7 +600,6 @@ def step(state, fig):
         output_config={"effort": FIRST_EFFORT},
         cache_control={"type": "ephemeral"},   # tools + system + history: a cached prefix
         betas=betas,
-        fallbacks="default",
         **kw,
     )
     state["steps"] += 1
@@ -553,6 +620,12 @@ def step(state, fig):
         events.append("Worked with your data in the sandbox")
     events += _collect_tables(state, fig, blocks)
 
+    if response.stop_reason == "refusal" and model == SMALL_MODEL and MODEL != SMALL_MODEL:
+        # Haiku has no server-side fallback: the big model takes the job over.
+        state["messages"].pop()
+        state["model"] = MODEL
+        state.setdefault("route", {})["handed_up"] = True
+        return state, None, events
     if response.stop_reason == "refusal":
         return _finish(state, "Claude declined to make this figure. Try describing it differently."), None, events
     if response.stop_reason == "pause_turn":

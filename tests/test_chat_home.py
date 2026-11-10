@@ -91,6 +91,7 @@ assistant.configured = lambda: True
 assistant.start, assistant.start_edit, assistant.step = fake_start, fake_edit, fake_step
 assistant.cleanup = lambda state: None
 assistant.continue_chat = fake_continue
+assistant.pick_model = lambda *a, **k: (assistant.MODEL, 0.0)   # no real sorting call
 real_default = server.TOKENS_TRIAL
 limited = {"on": True}       # a member, not the admin
 server.TOKENS_TRIAL = 100

@@ -1155,6 +1155,7 @@ class Handler(BaseHTTPRequestHandler):
                      else assistant.start(fig, files, skipped, idea))
         except anthropic.APIError as e:
             return self._error(502, f"couldn't hand the files to Claude: {e}")
+        assistant.route(state, idea, files)
         # Until the first figure is drawn the project has no spec.json, so
         # it stays out of the project list.
         fig.save_assistant(state)
@@ -1186,6 +1187,11 @@ class Handler(BaseHTTPRequestHandler):
                      else assistant.start_edit(fig, request))
         except anthropic.APIError as e:
             return self._error(502, f"couldn't reach Claude: {e}")
+        try:
+            described = assistant.ops.describe(fig.load_spec(), fig.load_arrays())
+        except Exception:   # noqa: BLE001 -- only a hint for sorting
+            described = None
+        assistant.route(state, request, figure=described)
         state["turn_tokens"] = 0.0
         fig.save_assistant(state)
         return self._json({"name": fig.name})

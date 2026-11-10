@@ -266,5 +266,53 @@ st, _, _ = assistant.step(st, fig)
 check(last.seen[-1].get("tool_choice") == {"type": "none"}, "the last allowed turn is a no-tools wrap-up")
 check(st["done"] and "maximum number of steps" in st["reply"], "stops at the step limit")
 
+# Sorting: easy jobs go to Haiku, hard or unsure ones to the big model.
+class RouteClient:
+    def __init__(self, answer):
+        self.answer, self.seen = answer, []
+        self.messages = types.SimpleNamespace(create=self.create)
+
+    def create(self, **kw):
+        self.seen.append(kw)
+        if isinstance(self.answer, Exception):
+            raise self.answer
+        return types.SimpleNamespace(content=[Block(type="text", text=self.answer)], stop_reason="end_turn",
+                                     usage=reply().usage)
+
+saved_env = os.environ.pop("FIGFORGE_AI_MODEL", None)
+rc = RouteClient('{"job": "easy"}')
+assistant._client = lambda: rc
+m, c = assistant.pick_model("Make the line red.", figure={"panels": []})
+check(m == "claude-haiku-5-5" and 0 < c < 0.001 and rc.seen[0]["model"] == "claude-haiku-5-5"
+      and "Changing an existing figure" in rc.seen[0]["messages"][0]["content"],
+      "an easy change goes to Haiku, sorted by one cheap Haiku call")
+rc.answer = '{"job": "hard"}'
+check(assistant.pick_model("3-D critical surface of Nb3Sn", files=[{"name": "a.zip"}])[0] == assistant.MODEL
+      and "a.zip" in rc.seen[-1]["messages"][0]["content"], "a hard job goes to the big model")
+rc.answer = RuntimeError("down")
+check(assistant.pick_model("Plot sin(x).") == (assistant.MODEL, 0.0), "sorting failing goes big, never blocks")
+os.environ["FIGFORGE_AI_MODEL"] = "claude-opus-5-5"
+n = len(rc.seen)
+check(assistant.pick_model("Plot sin(x).")[0] == assistant.MODEL and len(rc.seen) == n,
+      "FIGFORGE_AI_MODEL pins one model and skips sorting")
+os.environ.pop("FIGFORGE_AI_MODEL")
+if saved_env is not None:
+    os.environ["FIGFORGE_AI_MODEL"] = saved_env
+rc.answer = '{"job": "easy"}'
+rs = assistant.route({"cost_usd": 0.5}, "Plot sin(x).")
+check(rs["model"] == "claude-haiku-5-5" and rs["cost_usd"] > 0.5 and rs["route"]["model"] == "claude-haiku-5-5",
+      "route() puts the model and the sorting cost on the session")
+
+# Haiku: no server-side fallback is sent, and a refusal hands the job to the big model.
+hs = dict(state, done=False, steps=0, model="claude-haiku-5-5", messages=list(state["messages"]))
+n_msgs = len(hs["messages"])
+hk = FakeClient([reply(Block(type="text", text=""), stop="refusal")])
+assistant._client = lambda: hk
+hs, _, _ = assistant.step(hs, fig)
+check("fallbacks" not in hk.seen[-1] and "server-side-fallback-2026-07-01" not in hk.seen[-1]["betas"],
+      "Haiku requests carry no refusal fallback (it would be an error)")
+check(not hs["done"] and hs["model"] == assistant.MODEL and len(hs["messages"]) == n_msgs,
+      "a Haiku refusal hands the job to the big model, which runs the same step again")
+
 rmtree(f"figures/{P}")
 print(len(fails), "failure(s)")
