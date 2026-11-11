@@ -96,6 +96,27 @@ try:
               f"'How this was made' written ({r.status})")
         check((h.get("cost_usd") or 1) < 0.02, f"and it's cheap (${h.get('cost_usd')})")
         check(ctx.get(H + "/api/howto/ai_live").json().get("howto") == h, "saved with the project")
+        # Sorting: the instrument-file figure was a hard job (Opus); a small
+        # style change in the same talk is an easy one (Haiku).
+        from figforge.project import Figure
+        st = Figure("ai_live", store.scoped(uid)).load_assistant() or {}
+        check((st.get("route") or {}).get("model") == "claude-opus-5-5",
+              f"the hard figure was sorted onto Opus ({st.get('route')})")
+        r = post("/api/assistant/edit/ai_live", {"request": "Make the line red and add a grid.", "continue": True})
+        check(r.ok, f"easy follow-up accepted ({r.status})")
+        before = d.get("cost_usd", 0)
+        for _ in range(10):
+            s = post("/api/assistant/step/ai_live")
+            if s.status in (503, 504):
+                continue
+            d = s.json()
+            if d.get("done"):
+                break
+        st = Figure("ai_live", store.scoped(uid)).load_assistant() or {}
+        spent = (d.get("cost_usd") or 0) - before
+        print(f"   easy follow-up: {st.get('route')}, ${spent:.4f}: {d.get('reply', '')[:120]}")
+        check(d.get("done") and st.get("model") == "claude-haiku-5-5" and spent < 0.01,
+              f"the easy change was done by Haiku, cheaply (${spent:.4f})")
         ctx.dispose()
 finally:
     keys = store._walk(f"users/{uid}")

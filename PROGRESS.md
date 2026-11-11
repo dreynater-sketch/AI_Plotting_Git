@@ -429,3 +429,31 @@ figure → saved-code sync; a phone layout; photo-to-data-points.
 - The reply box: the words on top, + (add files) bottom left, a round send arrow bottom right, and
   "Claude can make mistakes. Check the numbers." under it.
 
+
+## Cheap model for easy jobs (2026-11-10)
+
+Same jobs on Opus 5.5, Sonnet 5.5 and Haiku 5.5 (`tools/ai_bench.py`, pictures in
+`tests/_out/bench_png`):
+
+| job | Opus 5.5 | Sonnet 5.5 | Haiku 5.5 |
+|---|---|---|---|
+| sin(x), new | $0.100 good | $0.054 good | $0.003 good |
+| red, thick, grid, y label | $0.024 good | $0.012 good (extra grid) | $0.001 good |
+| new panel with cos(x) + zero dots | $0.120 workaround | $0.039 half | $0.002 half |
+| 3-D critical surface (Nb3Sn, Nb, REBCO) | $0.169 good | $0.080 drew NbTi | $0.006 3 separate plots |
+| circle from polygons | $0.158 richest | $0.023 good | $0.003 plain, right |
+
+No model could add a panel to an existing figure: there's no tool for that (not built).
+Sonnet wins nowhere, so it isn't used. The RBS folder is gone from %TEMP%, so `surface`
+(the user's 3-D prompt) is the hard bench prompt now.
+
+So `assistant.pick_model` sorts every new figure and every chat message: one Haiku call
+(structured output, ~$0.00007; 16/16 right on a test set) says easy or hard. Easy (simple
+formula, typed numbers, one tidy table as is, style changes) -> Haiku; hard or unsure -> Opus.
+The server calls `assistant.route(state, ...)` after start/start_edit/continue_chat (so the
+model can change mid-talk; Opus reads Haiku's thinking, Haiku drops Opus's, unbilled).
+Haiku gets no `fallbacks` (it has none; a list is a 400); a Haiku refusal hands the step to
+Opus. Sorting failing -> Opus. `FIGFORGE_AI_MODEL` pins one model and turns sorting off;
+`FIGFORGE_AI_ROUTE=0` turns it off. Haiku's long-prompt rate (>100K: $0.50/$2.50) is counted.
+Live: an easy follow-up after an Opus figure cost $0.0025 on Haiku (the first Haiku call in a
+talk writes its cache).
